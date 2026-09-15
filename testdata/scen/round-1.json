@@ -1,0 +1,9 @@
+{"data":{"repository":{"pullRequest":{
+ "number":6622,"url":"https://github.com/acme/widget/pull/6622",
+ "title":"bug: tasks stop mid-execution","state":"OPEN","isDraft":false,"merged":false,
+ "reviewDecision":"REVIEW_REQUIRED","updatedAt":"2026-08-25T20:00:00Z","baseRefName":"main",
+ "author":{"login":"alice","__typename":"User"},
+ "headRefOid":"aaaaaaaaaaaaaaaa",
+ "reviews":{"nodes":[]},
+ "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}
+}}}}

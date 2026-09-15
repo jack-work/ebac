@@ -1,0 +1,43 @@
+#!/run/current-system/sw/bin/bash
+# A stand-in for `gh` that replays fixtures, so the whole harness can be
+# rehearsed end to end without credentials. FAKE_GH_DIR holds:
+#   user            -> the login to report
+#   pr-list.json    -> response for `gh pr list`
+#   round-N.json    -> graphql response for the Nth graphql call
+# The round counter lives in FAKE_GH_DIR/.counter so successive polls see
+# successive states.
+set -euo pipefail
+dir="${FAKE_GH_DIR:?FAKE_GH_DIR not set}"
+
+case "${1:-}" in
+  api)
+    if [[ "${2:-}" == "user" ]]; then
+      cat "$dir/user" 2>/dev/null || echo "testuser"
+      exit 0
+    fi
+    if [[ "${2:-}" == "graphql" ]]; then
+      n=$(cat "$dir/.counter" 2>/dev/null || echo 1)
+      f="$dir/round-$n.json"
+      if [[ ! -f "$f" ]]; then
+        # Hold at the last defined round rather than erroring, so extra
+        # polls are a no-op instead of a failure.
+        f=$(ls "$dir"/round-*.json | sort -V | tail -1)
+      fi
+      cat "$f"
+      exit 0
+    fi
+    echo "fake-gh: unhandled api call: $*" >&2; exit 1
+    ;;
+  pr)
+    if [[ "${2:-}" == "list" ]]; then
+      cat "$dir/pr-list.json" 2>/dev/null || echo "[]"
+      exit 0
+    fi
+    ;;
+  issue)
+    echo "https://github.com/acme/widget/issues/9999"
+    exit 0
+    ;;
+esac
+echo "fake-gh: unhandled: $*" >&2
+exit 1

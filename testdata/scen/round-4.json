@@ -1,0 +1,9 @@
+{"data":{"repository":{"pullRequest":{
+ "number":6622,"url":"https://github.com/acme/widget/pull/6622",
+ "title":"bug: tasks stop mid-execution","state":"OPEN","isDraft":false,"merged":false,
+ "reviewDecision":"REVIEW_REQUIRED","updatedAt":"2026-08-25T20:00:00Z","baseRefName":"main",
+ "author":{"login":"alice","__typename":"User"},
+ "headRefOid":"bbbbbbbbbbbbbbbb",
+ "reviews":{"nodes":[]},
+ "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"T1","isResolved":false,"isOutdated":false,"path":"src/agent/loop.ts","line":42,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"C1","url":"https://x/#c1","body":"This retry loop can spin forever when the task halts.","createdAt":"2026-08-25T20:01:00Z","updatedAt":"2026-08-25T20:01:00Z","author":{"login":"carol","__typename":"User"}}]}},{"id":"T2","isResolved":false,"isOutdated":false,"path":"README.md","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"C2","url":"https://x/#c2","body":"Consider adding a section here.","createdAt":"2026-08-25T20:05:00Z","updatedAt":"2026-08-25T20:05:00Z","author":{"login":"coderabbitai","__typename":"Bot"}}]}}]}
+}}}}
