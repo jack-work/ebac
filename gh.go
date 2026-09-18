@@ -32,10 +32,17 @@ func NewGH(bin, host string) *GH {
 	return &GH{Bin: bin, Host: host, Timeout: 90 * time.Second}
 }
 
+// execCommandContext is exec.CommandContext, indirected so tests can fake an
+// external `gh` without a shell shebang (which does not resolve inside the
+// Nix build sandbox's checkPhase -- there is no /usr/bin/env or /bin/bash to
+// find, so a script-based fake fails there with a confusing ENOENT on the
+// fake's own path). Production never overrides this.
+var execCommandContext = exec.CommandContext
+
 func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, g.Bin, args...)
+	cmd := execCommandContext(ctx, g.Bin, args...)
 	cmd.Env = append(os.Environ(), "GH_HOST="+g.Host, "GH_PAGER=", "NO_COLOR=1")
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -65,16 +72,28 @@ func (g *GH) Whoami(ctx context.Context) (string, error) {
 }
 
 // graphqlPRQuery fetches everything one round needs about one PR.
-// reviewThreads and their comments are both paginated; the caller must
-// honour hasNextPage or mark the snapshot incomplete.
+// reviews and reviewThreads are BOTH paginated with their own independent
+// cursor; the caller must honour each hasNextPage or mark the snapshot
+// incomplete. reviews used to be `reviews(last:30)` with no cursor at all --
+// on any PR whose review count exceeds 30 (every long-running automated
+// review loop gets there fast: bic/aether#24485 alone crossed a hundred
+// individual review submissions) the reviews beyond the newest 30 were
+// silently dropped, with nothing in the response distinguishing "no more
+// reviews" from "we didn't ask for the rest." A critic could report "no new
+// reviews" while reviews genuinely existed just outside the window -- a zero
+// that meant "the instrument didn't look" rendered identically to a zero
+// that meant "there was nothing there."
 const graphqlPRQuery = `
-query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+query($owner:String!,$name:String!,$number:Int!,$cursor:String,$reviewsCursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
       number url title state isDraft merged reviewDecision updatedAt baseRefName
       author{login __typename}
       headRefOid
-      reviews(last:30){ nodes{ id state submittedAt body author{login __typename} } }
+      reviews(first:50, after:$reviewsCursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ id state submittedAt body author{login __typename} }
+      }
       comments(first:100){
         pageInfo{ hasNextPage }
         nodes{ id url body createdAt updatedAt author{login __typename} }
@@ -114,6 +133,10 @@ type gqlResp struct {
 				Author         gqlAuthor `json:"author"`
 				HeadRefOid     string    `json:"headRefOid"`
 				Reviews        struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
 					Nodes []struct {
 						ID          string    `json:"id"`
 						State       string    `json:"state"`
@@ -180,6 +203,7 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 	}
 
 	cursor := ""
+	reviewsCursor := ""
 	for page := 0; ; page++ {
 		if page > 40 {
 			st.Complete = false
@@ -191,11 +215,8 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 			"-F", "owner=" + owner,
 			"-F", "name=" + repo,
 			"-F", "number=" + strconv.Itoa(number),
-		}
-		if cursor != "" {
-			args = append(args, "-F", "cursor="+cursor)
-		} else {
-			args = append(args, "-F", "cursor=")
+			"-F", "cursor=" + cursor,
+			"-F", "reviewsCursor=" + reviewsCursor,
 		}
 		out, err := g.run(ctx, args, nil)
 		if err != nil {
@@ -213,6 +234,17 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 			return nil, fmt.Errorf("%s/%s#%d not found", owner, repo, number)
 		}
 
+		// Reviews are paginated independently of reviewThreads, so this
+		// runs on every page: once the reviews cursor is exhausted, later
+		// pages (still walking through reviewThreads) simply repeat its
+		// last, empty page, which is harmless.
+		for _, rv := range pr.Reviews.Nodes {
+			st.Reviews[rv.ID] = &Review{
+				ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
+				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body,
+			}
+		}
+
 		if page == 0 {
 			st.URL, st.Title, st.IsDraft = pr.URL, pr.Title, pr.IsDraft
 			st.HeadSHA, st.BaseRef, st.UpdatedAt = pr.HeadRefOid, pr.BaseRefName, pr.UpdatedAt
@@ -221,12 +253,6 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 			st.State = pr.State
 			if pr.Merged {
 				st.State = "MERGED"
-			}
-			for _, rv := range pr.Reviews.Nodes {
-				st.Reviews[rv.ID] = &Review{
-					ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
-					State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body,
-				}
 			}
 			if pr.Comments.PageInfo.HasNextPage {
 				// More than 100 top-level comments. Same rule as an
@@ -266,10 +292,17 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 			st.Threads[t.ID] = t
 		}
 
-		if !pr.ReviewThreads.PageInfo.HasNextPage {
+		threadsMore := pr.ReviewThreads.PageInfo.HasNextPage
+		reviewsMore := pr.Reviews.PageInfo.HasNextPage
+		if !threadsMore && !reviewsMore {
 			break
 		}
-		cursor = pr.ReviewThreads.PageInfo.EndCursor
+		if threadsMore {
+			cursor = pr.ReviewThreads.PageInfo.EndCursor
+		}
+		if reviewsMore {
+			reviewsCursor = pr.Reviews.PageInfo.EndCursor
+		}
 	}
 	return st, nil
 }
