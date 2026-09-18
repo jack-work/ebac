@@ -2,6 +2,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/jack-work/figaro v0.29.0 h1:VuLxpp8YDJ/Mgsy0i0vgd/XZj4wYrmwJIW6HXJWbhm0=
 github.com/jack-work/figaro v0.29.0/go.mod h1:YAH9BK2UhXifCwcBDCt1egbCANBX1IdrJjTyGQZncDI=
+github.com/jack-work/figaro v0.37.7 h1:wQ6XMQ62gDl6coRJP3faeRHbace7tt8KpMXCkvpa6r8=
+github.com/jack-work/figaro v0.37.7/go.mod h1:MYrO/V+lej0DzqRZPEPujcjK1yCFTSX06EHowXGQ0o0=
 github.com/jack-work/jkrpc v0.1.0 h1:qx03oLiVLuCL/2j3MDy0KLPvGs0Soja/oaQ4YlM9cVg=
 github.com/jack-work/jkrpc v0.1.0/go.mod h1:eY1OORs32+NWXRfbMPaX2q7jg58/7kDPB/PyoKJXZcY=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

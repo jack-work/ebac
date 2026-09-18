@@ -12,11 +12,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
 	"github.com/jack-work/figaro/api/rpc"
 	"github.com/jack-work/figaro/api/transport"
 	"github.com/jack-work/figaro/sdk"
 )
+
+// onePatch builds a patch that sets a single top-level key to raw, the
+// current shape of a form delta (api/form/patch.go, figaro >=0.30): a Patch
+// is now structural (Scalar/Object/List), not the flat {Set,Remove} map
+// wire shape older figaro versions used. Object.Set is an unconditional
+// upsert regardless of whether the key already exists -- see
+// Patch.applyObject in figaro's api/form/patch.go -- so one construction
+// covers both "create" and "overwrite" exactly like the old flat Set did.
+func onePatch(key string, raw json.RawMessage) message.Patch {
+	return message.Patch{Object: &form.ObjectPatch{Set: map[string]form.Value{key: form.NewValue(raw)}}}
+}
 
 // Figaro talks to the angelus over its socket, not by forking the CLI.
 //
@@ -134,8 +146,8 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	nb, _ := json.Marshal(name)
-	patch := &rpc.FormPatch{Set: map[string]json.RawMessage{"name": nb}}
-	resp, err := ang.FormCreate(ctx, "", nil, patch)
+	patch := onePatch("name", nb)
+	resp, err := ang.FormCreate(ctx, "", nil, &patch)
 	if err != nil {
 		return "", fmt.Errorf("form create: %w", err)
 	}
@@ -233,7 +245,7 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 		if err != nil {
 			return fmt.Errorf("read %s before write: %w", id, err)
 		}
-		patch := message.Patch{Set: map[string]json.RawMessage{key: json.RawMessage(b)}}
+		patch := onePatch(key, json.RawMessage(b))
 		if _, err := c.Set(ctx, patch, cur.Version); err != nil {
 			if isVersionConflict(err) {
 				// Somebody wrote between our read and our write. Re-read
@@ -261,7 +273,17 @@ func (f *Figaro) Unset(ctx context.Context, id, key string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.Set(ctx, message.Patch{Remove: []string{key}}, cur.Version)
+	// Delete's value is what makes the patch invertible; apply itself
+	// ignores it (form.Patch.applyObject deletes by key alone), but a
+	// zero Value there would make an otherwise-honest patch lie about what
+	// it destroyed. Absent already -> Delete of a key that isn't present
+	// is a silent no-op on apply, so a zero Value there costs nothing.
+	before := form.Value{}
+	if raw, ok := cur.Snapshot.Get(key); ok {
+		before = form.NewValue(raw)
+	}
+	patch := message.Patch{Object: &form.ObjectPatch{Delete: map[string]form.Value{key: before}}}
+	_, err = c.Set(ctx, patch, cur.Version)
 	return err
 }
 
@@ -488,7 +510,7 @@ func splitComma(s string) []string {
 // must agree with.
 func patchOf(key string, v any) message.Patch {
 	b, _ := json.Marshal(v)
-	return message.Patch{Set: map[string]json.RawMessage{key: json.RawMessage(b)}}
+	return onePatch(key, json.RawMessage(b))
 }
 
 // SetJSONIfVersion writes one key conditionally on an EXTERNALLY supplied
@@ -512,7 +534,7 @@ func (f *Figaro) SetJSONIfVersion(ctx context.Context, id, key string, v any, ve
 	if err != nil {
 		return err
 	}
-	patch := message.Patch{Set: map[string]json.RawMessage{key: json.RawMessage(b)}}
+	patch := onePatch(key, json.RawMessage(b))
 	if _, err := c.Set(ctx, patch, version); err != nil {
 		return err
 	}
