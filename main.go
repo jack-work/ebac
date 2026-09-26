@@ -399,6 +399,16 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 			seat = t
 		}
 	}
+	// AwaitingUs("") is not "unknown me", it is "every non-empty author
+	// counts as not-me" (strings.EqualFold(x, "") is false for any
+	// non-empty x) -- so an unresolved thread and an awaiting-a-reply
+	// thread became the same column here even though poll.go resolves a
+	// real identity before ever computing the same Counts. Same mistake
+	// that mattered enough to fix in poll.go; this is the one display
+	// path that never got it. Best-effort: a Whoami failure degrades to
+	// the old (wrong-but-not-crashing) behavior rather than erroring the
+	// whole command.
+	me, _ := NewGH(g.gh, w.Host).Whoami(ctx)
 	fmt.Printf("critic     %s (%s)\n", w.Name, w.Mode)
 	fmt.Printf("role      %s -> %s\n", w.FormID, seat)
 	fmt.Printf("timer     %s, next %s\n", TimerState(w.Name).Display, NextElapse(w.Name))
@@ -414,18 +424,36 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "PR\tSTATE\tHEAD\tTHREADS\tUNRES\tAWAITING\tTITLE")
-	for _, r := range w.PRs {
-		state, head, th, un, aw, title := "?", "-", 0, 0, 0, r.Title
-		if snap != nil {
-			if p, ok := snap.PRs[r.Key()]; ok {
-				c := p.Counts("")
-				state, head, th, un, aw, title = p.State, short(p.HeadSHA), c.Threads, c.Unresolved, c.AwaitingUs, p.Title
-			}
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%s\n", r.Key(), state, head, th, un, aw, firstLine(title))
+	for _, row := range prTableRows(w.PRs, snap, me) {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%s\n",
+			row.Key, row.State, row.Head, row.Threads, row.Unresolved, row.Awaiting, firstLine(row.Title))
 	}
 	tw.Flush()
 	return nil
+}
+
+// prTableRow is one line of `ebac show`'s PR table. Split out from cmdShow
+// so the AWAITING-vs-UNRES computation is testable without a live GH call.
+type prTableRow struct {
+	Key                           string
+	State, Head, Title            string
+	Threads, Unresolved, Awaiting int
+}
+
+func prTableRows(refs []PRRef, snap *Snapshot, me string) []prTableRow {
+	rows := make([]prTableRow, 0, len(refs))
+	for _, r := range refs {
+		row := prTableRow{Key: string(r.Key()), State: "?", Head: "-", Title: r.Title}
+		if snap != nil {
+			if p, ok := snap.PRs[r.Key()]; ok {
+				c := p.Counts(me)
+				row.State, row.Head, row.Title = p.State, short(p.HeadSHA), p.Title
+				row.Threads, row.Unresolved, row.Awaiting = c.Threads, c.Unresolved, c.AwaitingUs
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func stamp(t time.Time) string {
@@ -815,7 +843,6 @@ func resolveBin(name string) (string, error) {
 func newFlagSet(name string) *flag.FlagSet {
 	return flag.NewFlagSet(name, flag.ExitOnError)
 }
-
 
 // cmdSetWrite toggles a critic's authority to act on its own pull requests.
 //
