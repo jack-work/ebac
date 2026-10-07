@@ -13,8 +13,9 @@ import (
 type Mode string
 
 const (
-	ModeReview  Mode = "review"  // critic, report, stay quiet
-	ModeDevelop Mode = "develop" // also audit the harness and improve it
+	ModeReview   Mode = "review"   // critic, report, stay quiet
+	ModeDevelop  Mode = "develop"  // also audit the harness and improve it
+	ModeReviewer Mode = "reviewer" // review someone else's PRs: comment, reply, maybe approve
 )
 
 type StopConditions struct {
@@ -103,10 +104,26 @@ type Critic struct {
 	// merge its own work has no reviewer.
 	Write bool `json:"write,omitempty"`
 
+	// Approve lets a reviewer seat approve PRs it did not author. Never
+	// request-changes, merge or close.
+	Approve bool `json:"approve,omitempty"`
+
+	// Worktree, when set, is where a reviewer checks out each PR head:
+	// <Root>/<critic>-pr<N>, fetched through Clone.
+	Worktree *Worktree `json:"worktree,omitempty"`
+
+	// Notes names repo-specific review guidance the seat reads first.
+	Notes string `json:"notes,omitempty"`
+
 	FigaroSock string `json:"figaro_socket,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`
+}
+
+type Worktree struct {
+	Clone string `json:"clone"`
+	Root  string `json:"root"`
 }
 
 func (w *Critic) prRefs() map[PRKey]PRRef {

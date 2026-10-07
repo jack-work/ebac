@@ -145,6 +145,9 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	}
 
 	delta := Diff(prev, next, p.Me)
+	if w.Mode == ModeReviewer {
+		asReviewer(delta, p.Me)
+	}
 
 	if p.DryRun {
 		fmt.Fprintf(p.Out, "%s: DRY RUN round %d — %s (%d events, %d wake-worthy)\n",

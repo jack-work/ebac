@@ -456,3 +456,16 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// asReviewer re-tiers a delta for a seat reviewing someone else's PR: every
+// push and every dismissal of our own review earns a turn, because on repos
+// that dismiss stale approvals both mean the approval is gone.
+func asReviewer(d *Delta, me string) {
+	for i, e := range d.Events {
+		ownDismissed := e.Kind == EvReviewSubmitted && strings.EqualFold(e.Author, me) &&
+			strings.HasSuffix(e.Detail, "DISMISSED")
+		if e.Kind == EvHeadMoved || ownDismissed {
+			d.Events[i].Tier = TierWake
+		}
+	}
+}

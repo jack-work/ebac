@@ -86,10 +86,25 @@ for a busy afternoon.
 |---|---|
 | `review` | Read the delta, tell the operator only what matters, ack, stay quiet. |
 | `develop` | Treat every delta as a claim to be falsified: hunt false positives, **false absences**, and mistiering; run `ebac selfcheck`; make one focused improvement with a test; file harness defects with `ebac issue`. |
+| `reviewer` | Review someone else's PR: check out the head, verify before suggesting, post one terse review per head, never block. Every push wakes it. |
 
 Both modes are **read-only on the pull requests by default**. The brief says so in
 its own section, because an agent with GitHub credentials and a vague charge will
 eventually decide that commenting would be helpful.
+
+## Reviewer
+
+```sh
+ebac add --name N --mode reviewer --pr URL --mint \
+    [--approve] [--clone ~/src/repo --worktree-root ~/wt] [--notes skill://repo-review]
+```
+
+`--approve` lets the seat approve PRs it did not author, unless it verified a
+correctness, security or data-loss defect. Request-changes, push, merge and
+close stay out of reach. Every review ends with the signature at
+`$EBAC_SIGNATURE`, else `$XDG_CONFIG_HOME/ebac/signature`; reviewer mode
+refuses to start without one. `--notes` points at repo-specific guidance, so
+ebac itself stays repo-agnostic.
 
 ## Write
 

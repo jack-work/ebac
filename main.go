@@ -16,6 +16,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
 
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
+              [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -173,7 +174,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	fs.Var(&prs, "pr", "pull request URL or owner/repo#number (repeatable)")
 	repo := fs.String("repo", "", "discover PRs from this repo, e.g. acme/widget")
 	author := fs.String("author", "", "with --repo: restrict to this author (@me works)")
-	mode := fs.String("mode", "review", "review | develop")
+	mode := fs.String("mode", "review", "review | develop | reviewer")
 	aria := fs.String("aria", "", "cast this existing aria into the role")
 	mint := fs.Bool("mint", false, "mint a fresh aria and cast it")
 	outfits := fs.String("outfit", "", "outfit names for a minted aria")
@@ -186,6 +187,10 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	maxFail := fs.Int("max-failures", 20, "stop after N consecutive failed rounds (0 = never)")
 	arm := fs.Bool("arm", false, "enable the systemd timer immediately")
 	write := fs.Bool("write", false, "grant this critic authority to reply/comment/push on its PRs (never approve/merge/close)")
+	approve := fs.Bool("approve", false, "reviewer mode: may approve PRs it did not author")
+	clone := fs.String("clone", "", "reviewer mode: local clone to fetch PR heads through")
+	wtRoot := fs.String("worktree-root", "", "reviewer mode: check out each PR head under this directory")
+	notes := fs.String("notes", "", "reviewer mode: repo-specific guidance the seat reads first (path or skill)")
 	_ = fs.Parse(args)
 
 	if err := ValidName(*name); err != nil {
@@ -202,8 +207,19 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("critic %q already exists (ebac show --critic %s)", *name, *name)
 	}
 	m := Mode(*mode)
-	if m != ModeReview && m != ModeDevelop {
-		return fmt.Errorf("--mode must be review or develop, got %q", *mode)
+	if m != ModeReview && m != ModeDevelop && m != ModeReviewer {
+		return fmt.Errorf("--mode must be review, develop or reviewer, got %q", *mode)
+	}
+	if m != ModeReviewer && (*approve || *clone != "" || *wtRoot != "" || *notes != "") {
+		return fmt.Errorf("--approve, --clone, --worktree-root and --notes need --mode reviewer")
+	}
+	if (*clone == "") != (*wtRoot == "") {
+		return fmt.Errorf("--clone and --worktree-root go together")
+	}
+	if m == ModeReviewer {
+		if _, err := readSignature(); err != nil {
+			return err
+		}
 	}
 
 	fig := NewFigaro(g.figaro)
@@ -213,8 +229,11 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	w := &Critic{
 		Name: *name, Mode: m, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		DiscoverRepo: *repo, DiscoverAuthor: *author, IssueRepo: *issueRepo,
-		Write: *write,
-		Stop:  DefaultStop(),
+		Write: *write, Approve: *approve, Notes: *notes,
+		Stop: DefaultStop(),
+	}
+	if *clone != "" {
+		w.Worktree = &Worktree{Clone: *clone, Root: *wtRoot}
 	}
 	w.Stop.UntilAllClosed = !*noArchive
 	w.Stop.ArchiveGraceSec = int(grace.Seconds())

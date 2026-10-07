@@ -229,13 +229,16 @@ func ReadRoster(ctx context.Context, st *Store, fig *Figaro) (rows []RosterRow, 
 	return rows, sum, age, nil
 }
 
-
 // modeLabel renders the mode with a "+w" suffix when the critic may act on its
 // own PRs, so `ebac ls` shows the grant at a glance rather than hiding it one
 // `ebac show` away. A capability nobody can see is a capability nobody audits.
 func modeLabel(w *Critic) string {
+	s := string(w.Mode)
 	if w.Write {
-		return string(w.Mode) + "+w"
+		s += "+w"
 	}
-	return string(w.Mode)
+	if w.Approve {
+		s += "+a"
+	}
+	return s
 }

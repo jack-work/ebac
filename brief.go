@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -59,7 +61,9 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 		"Read it in full with `figaro form %s -j` before acting on it.\n\n", formValueElisionLimit, w.FormID)
 
 	b.WriteString("BOUNDARY\n")
-	if w.Write {
+	if w.Mode == ModeReviewer {
+		b.WriteString(reviewerBoundary(w, snap, me))
+	} else if w.Write {
 		b.WriteString("  You have WRITE on these pull requests: reply to threads, comment, and push\n")
 		b.WriteString("  to the head branch. The operator granted this per-critic. You may NOT approve,\n")
 		b.WriteString("  merge or close — those are irreversible and are not yours. Act only on the PRs\n")
@@ -73,6 +77,8 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 	switch w.Mode {
 	case ModeDevelop:
 		b.WriteString(developCharge(w))
+	case ModeReviewer:
+		b.WriteString(reviewerCharge(w, snap))
 	default:
 		b.WriteString(reviewCharge(w))
 	}
@@ -169,5 +175,111 @@ func developCharge(w *Critic) string {
 	}
 	b.WriteString("\n  Report nothing you did not verify. An unreproduced suspicion is not a finding,\n")
 	b.WriteString("  and 'looks fine' after an actual check is a valuable result worth one line.\n")
+	return b.String()
+}
+
+// signaturePath is $EBAC_SIGNATURE, else $XDG_CONFIG_HOME/ebac/signature.
+func signaturePath() string {
+	if p := os.Getenv("EBAC_SIGNATURE"); p != "" {
+		return p
+	}
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "ebac", "signature")
+}
+
+func readSignature() (string, error) {
+	path := signaturePath()
+	raw, err := os.ReadFile(path)
+	sig := strings.TrimSpace(string(raw))
+	if err != nil || sig == "" {
+		return "", fmt.Errorf("reviewer mode posts under a signature; write one to %s", path)
+	}
+	return sig, nil
+}
+
+func reviewerBoundary(w *Critic, snap *Snapshot, me string) string {
+	var b strings.Builder
+	b.WriteString("  You may comment on and reply to threads on the pull requests above.\n")
+	if w.Approve {
+		var ok []string
+		if snap != nil {
+			for _, k := range snap.SortedPRKeys() {
+				if p := snap.PRs[k]; !strings.EqualFold(p.Author, me) {
+					ok = append(ok, string(k))
+				}
+			}
+		}
+		fmt.Fprintf(&b, "  You may APPROVE: %s.\n", strings.Join(ok, ", "))
+	}
+	b.WriteString("  Never request changes, push, label, merge or close.\n\n")
+	return b.String()
+}
+
+func reviewerCharge(w *Critic, snap *Snapshot) string {
+	var b strings.Builder
+	b.WriteString("YOUR JOB — REVIEWER\n")
+	b.WriteString("  Review someone else's change with a light touch. The author decides everything.\n")
+	b.WriteString("  1. ORIENT. State the PR's intent to yourself in one sentence. A finding that\n")
+	b.WriteString("     fights the intent is scope, not a defect: drop it.\n")
+	if w.Notes != "" {
+		fmt.Fprintf(&b, "     Read %s first: this repo's conventions and how to validate locally.\n", w.Notes)
+	}
+	if wt := w.Worktree; wt != nil && snap != nil {
+		b.WriteString("  2. CHECK OUT THE HEAD and work only there:\n")
+		for _, k := range snap.SortedPRKeys() {
+			p := snap.PRs[k]
+			dir := filepath.Join(wt.Root, fmt.Sprintf("%s-pr%d", w.Name, p.Number))
+			fmt.Fprintf(&b, "       git -C %s fetch origin pull/%d/head && git -C %s worktree add --detach %s FETCH_HEAD\n",
+				wt.Clone, p.Number, wt.Clone, dir)
+			fmt.Fprintf(&b, "     new head: git -C %s fetch origin pull/%d/head && git -C %s checkout --detach FETCH_HEAD\n",
+				dir, p.Number, dir)
+		}
+		fmt.Fprintf(&b, "     When the PR closes: git -C %s worktree remove --force <dir>\n", wt.Clone)
+	} else {
+		b.WriteString("  2. CHECK OUT THE HEAD in a scratch worktree of your own, never a shared tree.\n")
+	}
+	b.WriteString("  3. VERIFY OR DROP. Post only what you ran: a failing test, a command, a repro at\n")
+	b.WriteString("     the head. Apply every suggested fix in the worktree and run its tests first.\n")
+	b.WriteString("     Drop the unverified silently; never soften it into a nit.\n")
+	b.WriteString("  4. BEYOND CORRECTNESS, watch for two things:\n")
+	b.WriteString("     - Inline justification: comments that narrate the next line, carry history\n")
+	b.WriteString("       (dates, incidents, \"previously\", review back-and-forth) or repeat what a doc,\n")
+	b.WriteString("       README or the PR body already says. They go stale. Suggest deleting, or one\n")
+	b.WriteString("       sentence on the doc comment of the function, type or module.\n")
+	b.WriteString("     - Imperative tests: cases that share setup and differ only in data belong in a\n")
+	b.WriteString("       table or parametrised fixture with literal expected values. A test of its own\n")
+	b.WriteString("       mocks, of the framework, or duplicating another may need not exist. Never\n")
+	b.WriteString("       suggest removing the only test that fails when the change is reverted; show a\n")
+	b.WriteString("       rewrite green at the head and red with the change reverted before suggesting it.\n")
+	b.WriteString("  5. NEVER NITPICK. No style, naming, formatting, lint-catchable or pre-existing\n")
+	b.WriteString("     issues; no \"consider adding tests\" without the exact test; never re-raise a\n")
+	b.WriteString("     point the author answered. One root cause at several sites is one comment.\n")
+	b.WriteString("  6. POST ONE REVIEW PER HEAD so the body and inline comments land together:\n")
+	fmt.Fprintf(&b, "       GH_HOST=%s gh api repos/<owner>/<repo>/pulls/<n>/reviews -X POST --input review.json\n", w.Host)
+	b.WriteString("     review.json: {commit_id: <head sha>, event: \"APPROVE\" or \"COMMENT\", body,\n")
+	b.WriteString("     comments: [{path, line, side: \"RIGHT\", body}]}. Usually zero or one inline\n")
+	b.WriteString("     comment, never more than three: one or two sentences, then optionally a\n")
+	b.WriteString("     ```suggestion block of a few lines that you applied and tested. The body is one\n")
+	b.WriteString("     line, then the SIGNATURE below verbatim. Name no agent, session or local path.\n")
+	if w.Approve {
+		b.WriteString("  7. APPROVE unless a VERIFIED finding is a correctness, security or data-loss\n")
+		b.WriteString("     defect; then COMMENT and tell the operator in one line. A push may dismiss\n")
+		b.WriteString("     your approval: on a new head, review only the new commits and approve again.\n")
+	} else {
+		b.WriteString("  7. Nothing survived verification? Post nothing. That is a successful review.\n")
+	}
+	b.WriteString("  8. REPLIES. Concede fast when the author is right; one line when not. Never\n")
+	b.WriteString("     resolve someone else's thread.\n")
+	if sig, err := readSignature(); err == nil {
+		b.WriteString("\nSIGNATURE\n")
+		b.WriteString(sig)
+		b.WriteString("\n")
+	} else {
+		fmt.Fprintf(&b, "\nNO SIGNATURE: %v. Post nothing until the operator fixes it.\n", err)
+	}
 	return b.String()
 }
