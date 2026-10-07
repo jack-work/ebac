@@ -77,3 +77,40 @@ func TestHarnessAuthorityFollowsTheGrant(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkStamped(t *testing.T) {
+	bot := &Review{ID: "b", Author: "automaton[bot]", IsBot: true, State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-07T21:50:25Z"}
+	for _, tc := range []struct {
+		name string
+		r    Review
+		want bool
+	}{
+		{"body marker", Review{State: "COMMENTED", SubmittedAt: "2026-10-07T10:00:00Z", Body: "x. No person reviewed this change; y"}, true},
+		{"same state 5s after the bot", Review{State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-07T21:50:30Z"}, true},
+		{"same state 2m after the bot", Review{State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-07T21:52:30Z"}, false},
+		{"other state 5s after the bot", Review{State: "APPROVED", SubmittedAt: "2026-10-07T21:50:30Z"}, false},
+		{"same state before the bot", Review{State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-07T21:50:20Z"}, false},
+	} {
+		r := tc.r
+		r.ID, r.Author = "h", "lukas"
+		markStamped(map[string]*Review{"b": bot, "h": &r})
+		if r.Stamped != tc.want || bot.Stamped {
+			t.Errorf("%s: stamped %v (bot %v), want %v", tc.name, r.Stamped, bot.Stamped, tc.want)
+		}
+	}
+}
+
+func TestStampedReviewStillWakesAndSaysSo(t *testing.T) {
+	stamped := &Review{ID: "h", Author: "lukas", State: "CHANGES_REQUESTED", Stamped: true}
+	pr := func(rs ...*Review) *PRState {
+		p := &PRState{Key: MakePRKey("acme", "widget", 1), State: "OPEN", Reviews: map[string]*Review{}}
+		for _, r := range rs {
+			p.Reviews[r.ID] = r
+		}
+		return p
+	}
+	d := Diff(snapWith(pr()), snapWith(pr(stamped)), "jack")
+	if len(d.Events) != 1 || d.Events[0].Tier != TierWake || !strings.Contains(d.Events[0].Line(), "by lukas (bot-stamped") {
+		t.Fatalf("events %+v", d.Events)
+	}
+}

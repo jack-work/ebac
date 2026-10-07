@@ -137,6 +137,9 @@ type Review struct {
 	State       string `json:"state"` // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
 	SubmittedAt string `json:"submitted_at"`
 	Body        string `json:"body"`
+	// Stamped marks a bot's verdict re-submitted under a person's login so it
+	// counts toward merge rules. It still counts; it is not a person's review.
+	Stamped bool `json:"stamped,omitempty"`
 }
 
 // SortedPRKeys gives deterministic iteration. Every projection and every

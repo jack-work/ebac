@@ -64,6 +64,7 @@ type Event struct {
 	ReviewID string `json:"review_id,omitempty"`
 	Author   string `json:"author,omitempty"`
 	IsBot    bool   `json:"is_bot,omitempty"`
+	Stamped  bool   `json:"stamped,omitempty"`
 	Path     string `json:"path,omitempty"`
 	URL      string `json:"url,omitempty"`
 	Detail   string `json:"detail,omitempty"`
@@ -76,6 +77,9 @@ func (e Event) Line() string {
 		who := e.Author
 		if e.IsBot {
 			who += " (bot)"
+		}
+		if e.Stamped {
+			who += " (bot-stamped, not a person's review)"
 		}
 		fmt.Fprintf(&b, " by %s", who)
 	}
@@ -352,7 +356,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			}
 			d.Events = append(d.Events, Event{
 				Kind: EvReviewEdited, Tier: tier, PR: key, Author: nr.Author,
-				IsBot: nr.IsBot, Detail: nr.State + " (findings updated)", ReviewID: id,
+				IsBot: nr.IsBot, Stamped: nr.Stamped, Detail: nr.State + " (findings updated)", ReviewID: id,
 			})
 			continue
 		}
@@ -377,7 +381,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 		}
 		d.Events = append(d.Events, Event{
 			Kind: EvReviewSubmitted, Tier: tier, PR: key, Author: nr.Author,
-			IsBot: nr.IsBot, Detail: detail, ReviewID: id,
+			IsBot: nr.IsBot, Stamped: nr.Stamped, Detail: detail, ReviewID: id,
 		})
 	}
 

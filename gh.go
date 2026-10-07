@@ -305,7 +305,38 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 			reviewsCursor = pr.Reviews.PageInfo.EndCursor
 		}
 	}
+	markStamped(st.Reviews)
 	return st, nil
+}
+
+const (
+	stampMarker = "No person reviewed this change"
+	stampWindow = 60 * time.Second
+)
+
+// markStamped flags person-login reviews that a bot produced: either the body
+// says so, or a bot submitted the same state on the same PR just before.
+func markStamped(reviews map[string]*Review) {
+	for _, r := range reviews {
+		if r.IsBot {
+			continue
+		}
+		if strings.Contains(r.Body, stampMarker) {
+			r.Stamped = true
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, r.SubmittedAt)
+		if err != nil {
+			continue
+		}
+		for _, b := range reviews {
+			bat, err := time.Parse(time.RFC3339, b.SubmittedAt)
+			if b.IsBot && b.State == r.State && err == nil && !bat.After(at) && at.Sub(bat) <= stampWindow {
+				r.Stamped = true
+				break
+			}
+		}
+	}
 }
 
 // ListPRs finds pull requests matching a filter, for `ebac discover`.
