@@ -269,6 +269,7 @@ func reviewerCharge(w *Critic, snap *Snapshot) string {
 		b.WriteString("  7. APPROVE unless a VERIFIED finding is a correctness, security or data-loss\n")
 		b.WriteString("     defect; then COMMENT and tell the operator in one line. A push may dismiss\n")
 		b.WriteString("     your approval: on a new head, review only the new commits and approve again.\n")
+		b.WriteString("     A draft cannot be approved: comment now; leaving draft wakes you to approve.\n")
 	} else {
 		b.WriteString("  7. Nothing survived verification? Post nothing. That is a successful review.\n")
 	}
