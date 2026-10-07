@@ -301,7 +301,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 			if err != nil {
 				return err
 			}
-			it, err := Enqueue(ctx, st, fig, formID, g.host, ref, *prio, *mode, *note)
+			it, err := Enqueue(ctx, st, fig, formID, ref.HostOf(g.host), ref, *prio, *mode, *note)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 				continue
@@ -360,9 +360,8 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		fs := newFlagSet("queue promote")
 		dry := fs.Bool("dry-run", false, "decide, change nothing")
 		_ = fs.Parse(args)
-		ghBin, _ := resolveBin(g.gh)
 		p := &Promoter{Store: st, Fig: fig, GH: NewGH(g.gh, g.host), Out: os.Stdout,
-			Host: g.host, GHBin: ghBin, Dry: *dry}
+			Host: g.host, Dry: *dry}
 		_, err := p.Promote(ctx)
 		return err
 

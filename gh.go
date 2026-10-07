@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -360,7 +361,7 @@ func (g *GH) CreateIssue(ctx context.Context, repo, title, body string, labels [
 // GitHub Apps; the [bot] suffix and a name list catch the rest. A bot's
 // comment is still recorded — it is only demoted below the wake threshold.
 func isBot(a gqlAuthor) bool {
-	if a.Typename == "Bot" || a.Typename == "EnterpriseUserAccount" && false {
+	if a.Typename == "Bot" || a.Typename == "EnterpriseUserAccount" {
 		return true
 	}
 	l := strings.ToLower(a.Login)
@@ -386,6 +387,30 @@ type PRRef struct {
 }
 
 func (r PRRef) Key() PRKey { return MakePRKey(r.Owner, r.Repo, r.Number) }
+
+// HostOf is the forge named by the ref's URL, or fallback when it carries none.
+func (r PRRef) HostOf(fallback string) string {
+	if u, err := url.Parse(r.URL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return fallback
+}
+
+// forgeHost is the single forge a set of refs lives on. A critic polls one host.
+func forgeHost(refs []PRRef, fallback string) (string, error) {
+	host := ""
+	for _, r := range refs {
+		h := r.HostOf(fallback)
+		if host != "" && h != host {
+			return "", fmt.Errorf("PRs span two forges (%s, %s): use one critic per forge", host, h)
+		}
+		host = h
+	}
+	if host == "" {
+		return fallback, nil
+	}
+	return host, nil
+}
 
 func (r PRRef) Slug() string { return fmt.Sprintf("%s/%s", r.Owner, r.Repo) }
 

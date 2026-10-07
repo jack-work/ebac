@@ -207,15 +207,11 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	}
 
 	fig := NewFigaro(g.figaro)
-	gh := NewGH(g.gh, g.host)
-
-	ghAbs, err := resolveBin(g.gh)
-	if err != nil {
+	if _, err := resolveBin(g.gh); err != nil {
 		return fmt.Errorf("gh: %w", err)
 	}
 	w := &Critic{
-		GHBin: ghAbs, FigaroSock: g.figaro,
-		Name: *name, Mode: m, Host: g.host, CreatedAt: time.Now().UTC(),
+		Name: *name, Mode: m, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		DiscoverRepo: *repo, DiscoverAuthor: *author, IssueRepo: *issueRepo,
 		Write: *write,
 		Stop:  DefaultStop(),
@@ -236,6 +232,10 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		}
 		w.AddPR(ref)
 	}
+	if w.Host, err = forgeHost(w.PRs, g.host); err != nil {
+		return err
+	}
+	gh := NewGH(g.gh, w.Host)
 	if *repo != "" {
 		refs, err := gh.ListPRs(ctx, *repo, *author, "open", 100)
 		if err != nil {

@@ -155,9 +155,11 @@ reaped monitor that leaves no corpse cannot be audited afterwards.
 - **The debt is persisted before figaro is invoked.** A crash mid-alert is
   recoverable; the batch clears only on a confirmed send. Five retries, 30s
   doubling to a 30m cap.
-- **Binaries are pinned absolute at `add` time.** A systemd unit has no
-  interactive `PATH`. Measured here: the first armed round died with
-  `env: 'bash': No such file or directory`.
+- **`gh` is resolved from `PATH` at run time, never pinned.** The package
+  wraps the binary with `gh` and `git` on `PATH`; a pinned store path dies at
+  the next garbage collection.
+- **The forge host comes from the PR URL.** `--host` / `EBAC_HOST` only apply
+  to `owner/repo#N` refs and `--repo` discovery; one critic polls one forge.
 - **Edits are caught by body digest, not timestamp.** Some edits do not move
   `updatedAt`.
 - **Form keys are top-level and written whole.** `Figaro.SetJSON` refuses a

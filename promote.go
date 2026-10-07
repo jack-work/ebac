@@ -25,7 +25,6 @@ type Promoter struct {
 	GH    *GH
 	Out   io.Writer
 	Host  string
-	GHBin string
 	Dry   bool
 }
 
@@ -103,7 +102,8 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 		// A PR closed while it sat in the queue is not worth a seat.
 		// Check before claiming, so a closed PR does not consume the slot
 		// it would have held.
-		if st, err := p.GH.FetchPR(ctx, next.Owner, next.Repo, next.Number); err == nil && st.Closed() {
+		gh := NewGH(p.GH.Bin, next.Ref().HostOf(p.Host))
+		if st, err := gh.FetchPR(ctx, next.Owner, next.Repo, next.Number); err == nil && st.Closed() {
 			next.State = QDropped
 			next.Note = "closed before promotion (" + st.State + ")"
 			if !p.Dry {
@@ -184,8 +184,8 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 	}
 
 	c := &Critic{
-		Name: name, Mode: mode, Host: p.Host, CreatedAt: time.Now().UTC(),
-		GHBin: p.GHBin, IssueRepo: cfg.IssueRepo, Stop: DefaultStop(),
+		Name: name, Mode: mode, Host: it.Ref().HostOf(p.Host), CreatedAt: time.Now().UTC(),
+		IssueRepo: cfg.IssueRepo, Stop: DefaultStop(),
 	}
 	c.AddPR(it.Ref())
 

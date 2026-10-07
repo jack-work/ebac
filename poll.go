@@ -44,12 +44,6 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		return nil
 	}
 
-	// gh is still a subprocess, so it still needs its absolute path: a
-	// systemd user unit has no interactive PATH. figaro no longer does --
-	// it is a socket now.
-	if w.GHBin != "" {
-		p.GH.Bin = w.GHBin
-	}
 	if w.Host != "" {
 		p.GH.Host = w.Host
 	}

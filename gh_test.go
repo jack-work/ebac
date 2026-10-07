@@ -159,3 +159,25 @@ func TestFetchPRPassesReviewsCursorAsGHFlag(t *testing.T) {
 		t.Fatalf("FetchPR: %v (reviewsCursor argument likely missing from the query)", err)
 	}
 }
+
+func TestForgeHost(t *testing.T) {
+	ghe := PRRef{URL: "https://microsoft.ghe.com/bic/aether/pull/42612"}
+	pub := PRRef{URL: "https://github.com/acme/widget/pull/1"}
+	slug := PRRef{Owner: "acme", Repo: "widget", Number: 2}
+	for _, tc := range []struct {
+		name string
+		refs []PRRef
+		want string
+		bad  bool
+	}{
+		{name: "url names the host", refs: []PRRef{ghe}, want: "microsoft.ghe.com"},
+		{name: "slug takes the fallback", refs: []PRRef{slug}, want: "fallback.example"},
+		{name: "no refs takes the fallback", want: "fallback.example"},
+		{name: "two forges is an error", refs: []PRRef{ghe, pub}, bad: true},
+	} {
+		got, err := forgeHost(tc.refs, "fallback.example")
+		if tc.bad != (err != nil) || got != tc.want && !tc.bad {
+			t.Errorf("%s: got %q, %v", tc.name, got, err)
+		}
+	}
+}

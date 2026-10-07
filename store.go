@@ -103,13 +103,6 @@ type Critic struct {
 	// merge its own work has no reviewer.
 	Write bool `json:"write,omitempty"`
 
-	// GHBin is resolved to an ABSOLUTE path when the critic is
-	// created and pinned here. A systemd unit runs with a minimal PATH —
-	// measured 2026-08-25, the first armed round died with
-	// `env: 'bash': No such file or directory` — so a poller that resolves
-	// its tools from PATH works interactively and fails under the timer,
-	// which is the worst possible place for that difference to appear.
-	GHBin      string `json:"gh_bin,omitempty"`
 	FigaroSock string `json:"figaro_socket,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
