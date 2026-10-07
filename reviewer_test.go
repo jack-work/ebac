@@ -61,3 +61,19 @@ func TestReviewerBrief(t *testing.T) {
 		t.Error("a missing signature must stop the seat posting")
 	}
 }
+
+func TestHarnessAuthorityFollowsTheGrant(t *testing.T) {
+	for _, tc := range []struct {
+		critic Critic
+		prefix string
+	}{
+		{Critic{Mode: ModeReview}, "READ-ONLY"},
+		{Critic{Mode: ModeReview, Write: true}, "WRITE"},
+		{Critic{Mode: ModeReviewer}, "REVIEWER: comment and reply."},
+		{Critic{Mode: ModeReviewer, Approve: true}, "REVIEWER: comment, reply, and approve"},
+	} {
+		if got := harnessContract(&tc.critic).Authority; !strings.HasPrefix(got, tc.prefix) {
+			t.Errorf("%+v: authority %q, want prefix %q", tc.critic.Mode, got, tc.prefix)
+		}
+	}
+}

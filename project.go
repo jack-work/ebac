@@ -179,7 +179,7 @@ type HarnessContract struct {
 	Ack        string `json:"ack_when_done"`
 	Selfcheck  string `json:"selfcheck"`
 	Issue      string `json:"file_harness_bug"`
-	ReadOnly   string `json:"read_only"`
+	Authority  string `json:"authority"`
 }
 
 func harnessContract(w *Critic) HarnessContract {
@@ -188,10 +188,15 @@ func harnessContract(w *Critic) HarnessContract {
 		Rule:       "write ONLY flat scalar keys (ack_round, ack_note). A dotted key inside prs/delta/sync creates a flat decoy that shadows nothing.",
 		Ack:        fmt.Sprintf("ebac ack --critic %s --round <delta.round> [--note '<one line>']", w.Name),
 		Selfcheck:  fmt.Sprintf("ebac selfcheck --critic %s", w.Name),
-		ReadOnly:   "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
+		Authority:  "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
 	}
-	if w.Write {
-		c.ReadOnly = "WRITE granted on this critic's pull requests: reply, comment and push to the head branch are allowed. Approve, merge and close are NOT. Any PR not named on this critic stays read-only."
+	switch {
+	case w.Mode == ModeReviewer && w.Approve:
+		c.Authority = "REVIEWER: comment, reply, and approve PRs you did not author. Never request changes, push, label, merge or close."
+	case w.Mode == ModeReviewer:
+		c.Authority = "REVIEWER: comment and reply. Never approve, request changes, push, label, merge or close."
+	case w.Write:
+		c.Authority = "WRITE granted on this critic's pull requests: reply, comment and push to the head branch are allowed. Approve, merge and close are NOT. Any PR not named on this critic stays read-only."
 	}
 	if w.IssueRepo != "" {
 		c.Issue = fmt.Sprintf("ebac issue --critic %s --title '<title>' --body-file <path>   (files into %s)", w.Name, w.IssueRepo)
