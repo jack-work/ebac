@@ -114,3 +114,24 @@ func TestStampedReviewStillWakesAndSaysSo(t *testing.T) {
 		t.Fatalf("events %+v", d.Events)
 	}
 }
+
+func TestNewThreadTierByOpener(t *testing.T) {
+	for _, tc := range []struct {
+		opener string
+		isBot  bool
+		want   Tier
+	}{
+		{"John-Kelliher", false, TierRecord},
+		{"john-kelliher", false, TierRecord},
+		{"slahoti", false, TierWake},
+		{"automaton[bot]", true, TierRecord},
+	} {
+		th := &Thread{ID: "t", Comments: []*Comment{{Author: tc.opener, IsBot: tc.isBot, Body: "x"}}}
+		prev := snapWith(&PRState{Key: MakePRKey("acme", "widget", 1), State: "OPEN"})
+		next := snapWith(&PRState{Key: MakePRKey("acme", "widget", 1), State: "OPEN", Threads: map[string]*Thread{"t": th}})
+		d := Diff(prev, next, "John-Kelliher")
+		if len(d.Events) != 1 || d.Events[0].Tier != tc.want {
+			t.Errorf("opener %s: events %+v, want tier %d", tc.opener, d.Events, tc.want)
+		}
+	}
+}

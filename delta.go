@@ -262,7 +262,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			if first != nil {
 				ev.Author, ev.IsBot, ev.Comment, ev.URL = first.Author, first.IsBot, first.ID, first.URL
 				ev.Detail = firstLine(first.Body)
-				if first.IsBot {
+				if first.IsBot || strings.EqualFold(first.Author, me) {
 					ev.Tier = TierRecord
 				}
 			}
