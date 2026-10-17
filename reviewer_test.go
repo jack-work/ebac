@@ -135,3 +135,21 @@ func TestNewThreadTierByOpener(t *testing.T) {
 		}
 	}
 }
+
+func TestPostingSeatsAreToldToSignalNotNarrate(t *testing.T) {
+	t.Setenv("EBAC_SIGNATURE", filepath.Join(t.TempDir(), "absent"))
+	pr := &PRState{Key: MakePRKey("acme", "widget", 7), Number: 7, State: "OPEN", Author: "friend"}
+	for _, tc := range []struct {
+		critic Critic
+		want   bool
+	}{
+		{Critic{Name: "ro", Mode: ModeReview}, false},
+		{Critic{Name: "rw", Mode: ModeReview, Write: true}, true},
+		{Critic{Name: "rev", Mode: ModeReviewer, Host: "ghe.example"}, true},
+	} {
+		brief := buildBrief(&tc.critic, snapWith(pr), nil, "jack", 0)
+		if got := strings.Contains(brief, "SIGNAL, DO NOT NARRATE"); got != tc.want {
+			t.Errorf("%s: signal section present=%v, want %v", tc.critic.Name, got, tc.want)
+		}
+	}
+}

@@ -97,8 +97,28 @@ func reviewCharge(w *Critic) string {
 	b.WriteString("  A quiet round is a correct round.\n")
 	if w.Write {
 		b.WriteString(writeDiscipline())
+		b.WriteString(signalDiscipline())
 	}
 	return b.String()
+}
+
+// signalDiscipline is how a seat that may post talks on a PR. Agents read these
+// threads and the operator skims them, so every post is a signal, not prose.
+func signalDiscipline() string {
+	return "\n" +
+		"SIGNAL, DO NOT NARRATE\n" +
+		"  Agents read this PR; the operator skims it. Aim for extreme information density.\n" +
+		"  - SILENCE IS A REPLY. Post only what changes another agent's next action.\n" +
+		"  - A REACTION IS THE RECEIPT. A finding fixed at the head: +1 it and resolve the\n" +
+		"    thread. Add a line only when the fix sha or a reason is not obvious.\n" +
+		"  - ONE LINE PER ANSWER: verdict, then sha, file:line or test name, or the reason.\n" +
+		"    No thanks, no recap, no restating the finding, no em dashes, never repeat yourself.\n" +
+		"  - TOO MUCH PRESSURE ON ONE SECTION, or a loop: one line asking that reviewer to\n" +
+		"    await the operator's signal on it, then escalate to the operator.\n" +
+		"  - A COMMENT FOUND INACCURATE IS DELETED, NOT REWORDED. No comment beats most\n" +
+		"    comments; the code and the commit message keep the record.\n" +
+		"  - KNOW THE CHANGE. Accept a finding because you verified it, never because an\n" +
+		"    agent asked. A steady stream of valid findings is taken; churn is stopped.\n"
 }
 
 // writeDiscipline is appended only for a critic that may act. A seat with write
@@ -275,6 +295,7 @@ func reviewerCharge(w *Critic, snap *Snapshot) string {
 	}
 	b.WriteString("  8. REPLIES. Concede fast when the author is right; one line when not. Never\n")
 	b.WriteString("     resolve someone else's thread.\n")
+	b.WriteString(signalDiscipline())
 	if sig, err := readSignature(); err == nil {
 		b.WriteString("\nSIGNATURE\n")
 		b.WriteString(sig)
