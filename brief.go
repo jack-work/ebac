@@ -1,14 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// The brief is what actually costs money: it is a turn. Keep it short, state
-// the delta, state the boundary, and get out of the way.
+// The brief is what actually costs money: it is a turn. It carries the delta
+// only; the standing protocol lives on the role form, which the seat studies.
 func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int) string {
 	d := &Delta{Events: events}
 	var b strings.Builder
@@ -57,9 +58,18 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 		b.WriteString("\n")
 	}
 
-	fmt.Fprintf(&b, "If any value in your form ends in … or reads as unbalanced JSON, it was elided at %d chars.\n"+
-		"Read it in full with `figaro form %s -j` before acting on it.\n\n", formValueElisionLimit, w.FormID)
+	n := len(protocolChunks(protocolText(w, snap, me)))
+	fmt.Fprintf(&b, "Protocol: form %s keys harness, harness_protocol_1..%d; read whole with `figaro form %s -j`.\n",
+		w.FormID, n, w.FormID)
+	fmt.Fprintf(&b, "When finished: ebac ack --critic %s --round %d [--note '<one line>']\n",
+		w.Name, w.Runtime.Round)
+	return b.String()
+}
 
+// protocolText is everything a seat must know that does not change between
+// rounds. It is projected onto the role form, never repeated in a brief.
+func protocolText(w *Critic, snap *Snapshot, me string) string {
+	var b strings.Builder
 	b.WriteString("BOUNDARY\n")
 	if w.Mode == ModeReviewer {
 		b.WriteString(reviewerBoundary(w, snap, me))
@@ -67,13 +77,12 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 		b.WriteString("  You have WRITE on these pull requests: reply to threads, comment, and push\n")
 		b.WriteString("  to the head branch. The operator granted this per-critic. You may NOT approve,\n")
 		b.WriteString("  merge or close — those are irreversible and are not yours. Act only on the PRs\n")
-		b.WriteString("  named above; any other PR is still read-only.\n\n")
+		b.WriteString("  named on this critic; any other PR is still read-only.\n\n")
 	} else {
 		b.WriteString("  You are READ-ONLY on these pull requests. Do not comment, review, approve,\n")
 		b.WriteString("  request changes, push, label, close or merge. The operator did not ask you to\n")
 		b.WriteString("  touch their PRs and you have no gate. Report; do not act.\n\n")
 	}
-
 	switch w.Mode {
 	case ModeDevelop:
 		b.WriteString(developCharge(w))
@@ -82,11 +91,49 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 	default:
 		b.WriteString(reviewCharge(w))
 	}
-
-	fmt.Fprintf(&b, "\nWhen finished: ebac ack --critic %s --round %d [--note '<one line>']\n",
-		w.Name, w.Runtime.Round)
-	b.WriteString("Acking is what stops this delta being re-raised. Ack even when you decided to do nothing.\n")
+	b.WriteString("\nACK every delivery with the command it names, even when you decided to do nothing:\n")
+	b.WriteString("acking is what stops that delta being re-raised.\n")
 	return b.String()
+}
+
+// protocolChunkLimit keeps each chunk's JSON under the study elision cut.
+const protocolChunkLimit = formValueElisionLimit - 46
+
+// protocolChunks splits text on line boundaries so no chunk, JSON-encoded,
+// is cut when a seat studies the form. Concatenated, the chunks are the text.
+func protocolChunks(text string) []string {
+	var out []string
+	var cur strings.Builder
+	fits := func(s string) bool { return jsonLen(s) <= protocolChunkLimit }
+	for _, line := range strings.SplitAfter(text, "\n") {
+		if line == "" {
+			continue
+		}
+		if cur.Len() > 0 && !fits(cur.String()+line) {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+		if !fits(line) {
+			for _, r := range line {
+				if cur.Len() > 0 && !fits(cur.String()+string(r)) {
+					out = append(out, cur.String())
+					cur.Reset()
+				}
+				cur.WriteRune(r)
+			}
+			continue
+		}
+		cur.WriteString(line)
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+func jsonLen(s string) int {
+	b, _ := json.Marshal(s)
+	return len(b)
 }
 
 func reviewCharge(w *Critic) string {

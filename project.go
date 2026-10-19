@@ -180,6 +180,7 @@ type HarnessContract struct {
 	Selfcheck  string `json:"selfcheck"`
 	Issue      string `json:"file_harness_bug"`
 	Authority  string `json:"authority"`
+	Protocol   string `json:"protocol"`
 }
 
 func harnessContract(w *Critic) HarnessContract {
@@ -189,6 +190,7 @@ func harnessContract(w *Critic) HarnessContract {
 		Ack:        fmt.Sprintf("ebac ack --critic %s --round <delta.round> [--note '<one line>']", w.Name),
 		Selfcheck:  fmt.Sprintf("ebac selfcheck --critic %s", w.Name),
 		Authority:  "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
+		Protocol:   "Your standing protocol is keys " + protocolKeyPrefix + "1, 2, ... read in order. Deliveries carry only the delta and the ack command.",
 	}
 	switch {
 	case w.Mode == ModeReviewer && w.Approve:

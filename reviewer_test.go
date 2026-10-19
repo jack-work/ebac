@@ -39,7 +39,7 @@ func TestReviewerBrief(t *testing.T) {
 	mine := &PRState{Key: MakePRKey("acme", "widget", 8), Number: 8, State: "OPEN", Author: "jack"}
 	w := &Critic{Name: "rev", Mode: ModeReviewer, Host: "ghe.example", Approve: true,
 		Worktree: &Worktree{Clone: "/src/widget", Root: "/wt"}, Notes: "skill://widget-review"}
-	brief := buildBrief(w, snapWith(theirs, mine), nil, "jack", 0)
+	brief := protocolText(w, snapWith(theirs, mine), "jack")
 
 	for _, want := range []string{
 		"You may APPROVE: acme/widget#7.\n",
@@ -57,7 +57,7 @@ func TestReviewerBrief(t *testing.T) {
 	}
 
 	t.Setenv("EBAC_SIGNATURE", filepath.Join(t.TempDir(), "absent"))
-	if !strings.Contains(buildBrief(w, snapWith(theirs), nil, "jack", 0), "NO SIGNATURE") {
+	if !strings.Contains(protocolText(w, snapWith(theirs), "jack"), "NO SIGNATURE") {
 		t.Error("a missing signature must stop the seat posting")
 	}
 }
@@ -147,7 +147,7 @@ func TestPostingSeatsAreToldToSignalNotNarrate(t *testing.T) {
 		{Critic{Name: "rw", Mode: ModeReview, Write: true}, true},
 		{Critic{Name: "rev", Mode: ModeReviewer, Host: "ghe.example"}, true},
 	} {
-		brief := buildBrief(&tc.critic, snapWith(pr), nil, "jack", 0)
+		brief := protocolText(&tc.critic, snapWith(pr), "jack")
 		if got := strings.Contains(brief, "SIGNAL, DO NOT NARRATE"); got != tc.want {
 			t.Errorf("%s: signal section present=%v, want %v", tc.critic.Name, got, tc.want)
 		}

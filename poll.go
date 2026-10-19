@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -429,10 +431,39 @@ func (p *Poller) projectAll(ctx context.Context, w *Critic, snap *Snapshot, delt
 	set("kind", "ebac.critic")
 	set("critic", projectCritic(w))
 	set("harness", harnessContract(w))
+	if err := projectProtocol(ctx, f, w.FormID, protocolChunks(protocolText(w, snap, p.Me))); err != nil {
+		fmt.Fprintf(os.Stderr, "ebac: form write %s protocol: %v\n", w.FormID, err)
+	}
 	set("prs", projectPRs(snap, p.Me))
 	set("delta", projectDelta(w.Runtime.Round, w.Runtime.PendingEvents,
 		len(w.Runtime.PendingEvents) > 0, w.Runtime.PendingSince, w.Runtime.RetryCount))
 	set("sync", syncProjection(w, snap, delta))
+}
+
+const protocolKeyPrefix = "harness_protocol_"
+
+// projectProtocol writes chunk i to harness_protocol_<i+1> and removes chunks
+// left over from a longer protocol. Rewriting an unchanged chunk does not move
+// the form's version, so the seat is shown the protocol only when it changes.
+func projectProtocol(ctx context.Context, f *Figaro, formID string, chunks []string) error {
+	for i, c := range chunks {
+		if err := f.SetJSON(ctx, formID, fmt.Sprintf("%s%d", protocolKeyPrefix, i+1), c); err != nil {
+			return err
+		}
+	}
+	form, _, err := f.FormRaw(ctx, formID)
+	if err != nil {
+		return err
+	}
+	for k := range form {
+		n, err := strconv.Atoi(strings.TrimPrefix(k, protocolKeyPrefix))
+		if strings.HasPrefix(k, protocolKeyPrefix) && (err != nil || n < 1 || n > len(chunks)) {
+			if err := f.Unset(ctx, formID, k); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (p *Poller) projectSync(ctx context.Context, w *Critic, snap *Snapshot, delta *Delta) error {
