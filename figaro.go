@@ -92,8 +92,11 @@ func (f *Figaro) angelus() (*sdk.Angelus, error) {
 	return a, nil
 }
 
-func ept(e rpc.Endpoint) transport.Endpoint {
-	return transport.Endpoint{Scheme: e.Scheme, Address: e.Address}
+// addr is how figaro >= 0.48 reaches an aria or form: every call goes
+// through the daemon's one door with the id carried in the params. The daemon
+// no longer hands out a per-aria endpoint, so there is nothing to dial but this.
+func (f *Figaro) addr(id string) sdk.Addr {
+	return sdk.Addr{Door: transport.UnixEndpoint(f.sock), ID: id}
 }
 
 // node dials one aria or form, caching the connection for the process.
@@ -109,11 +112,12 @@ func (f *Figaro) node(ctx context.Context, id string) (*sdk.Aria, error) {
 	if err != nil {
 		return nil, err
 	}
-	at, err := ang.Attach(ctx, id)
-	if err != nil {
+	// Attach still matters: it restores a dormant aria or form so the door
+	// has someone to route to.
+	if _, err := ang.Attach(ctx, id); err != nil {
 		return nil, fmt.Errorf("attach %s: %w", id, err)
 	}
-	c, err := sdk.DialAria(ept(at.Endpoint), nil)
+	c, err := sdk.DialAria(f.addr(id), nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", id, err)
 	}
@@ -151,9 +155,9 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("form create: %w", err)
 	}
-	// FormCreate hands back the endpoint, so seed the cache and skip an
-	// Attach on the writes that always follow.
-	if c, derr := sdk.DialAria(ept(resp.Endpoint), nil); derr == nil {
+	// A fresh form is live, so seed the cache and skip an Attach on the
+	// writes that always follow.
+	if c, derr := sdk.DialAria(f.addr(resp.FormID), nil); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FormID] = c
 		f.mu.Unlock()
@@ -338,7 +342,7 @@ func (f *Figaro) NewAria(ctx context.Context, outfits string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create aria: %w", err)
 	}
-	if c, derr := sdk.DialAria(ept(resp.Endpoint), nil); derr == nil {
+	if c, derr := sdk.DialAria(f.addr(resp.FigaroID), nil); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FigaroID] = c
 		f.mu.Unlock()
