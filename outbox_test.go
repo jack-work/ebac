@@ -324,3 +324,33 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 		t.Fatalf("a refused post reached the forge: %d calls", calls())
 	}
 }
+
+// 2026-10-20: a deleted review and seven deleted comments reached the form as
+// null leaves, and reading them back panicked every unit that loaded the PR.
+func TestPrsFromTreeTreatsNullAsAbsent(t *testing.T) {
+	raw := json.RawMessage(`{
+	  "acme/widget#1": {"key":"acme/widget#1","owner":"acme","repo":"widget","number":1,
+	    "threads": {
+	      "T1": {"id":"T1","comments":{"C1":{"id":"C1","body":"kept","created_at":"1"},"C2":null,"C3":null}},
+	      "T2": null
+	    },
+	    "reviews": {"R1":{"id":"R1","state":"APPROVED"},"R2":null},
+	    "comments": {"I1":null}
+	  },
+	  "acme/gone#2": null
+	}`)
+	prs, err := prsFromTree(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("prs = %v", prs)
+	}
+	p := prs["acme/widget#1"]
+	if len(p.Threads) != 1 || len(p.Threads["T1"].Comments) != 1 || p.Threads["T1"].Comments[0].ID != "C1" {
+		t.Errorf("threads = %+v", p.Threads)
+	}
+	if len(p.Reviews) != 1 || p.Reviews["R1"] == nil || len(p.Comments) != 0 {
+		t.Errorf("reviews = %v, comments = %v", p.Reviews, p.Comments)
+	}
+}

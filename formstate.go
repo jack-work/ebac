@@ -100,7 +100,9 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 			th := tt.Thread
 			th.Comments = make([]*Comment, 0, len(tt.Comments))
 			for _, c := range tt.Comments {
-				th.Comments = append(th.Comments, c)
+				if c != nil {
+					th.Comments = append(th.Comments, c)
+				}
 			}
 			sort.Slice(th.Comments, func(i, j int) bool {
 				a, b := th.Comments[i], th.Comments[j]
@@ -116,6 +118,19 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 		}
 		if p.Comments == nil {
 			p.Comments = map[string]*Comment{}
+		}
+		// A member removed on the forge can come back as a null leaf rather
+		// than an absent key (a whole-object member deleted by Diff is
+		// written as After:null); null means absent.
+		for id, r := range p.Reviews {
+			if r == nil {
+				delete(p.Reviews, id)
+			}
+		}
+		for id, c := range p.Comments {
+			if c == nil {
+				delete(p.Comments, id)
+			}
 		}
 		out[p.Key] = p
 	}
