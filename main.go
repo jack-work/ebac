@@ -27,7 +27,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac resume --critic N
   ebac rm     --critic N [--purge]           archive and remove
   ebac ack    --critic N --round R           the seat says it has acted on a delta
-  ebac post   --critic N --pr P [--reply-to T | --path F --line L] [--event E] --body-file F
+  ebac post   --critic N --pr P [--reply-to T [--resolve] | --path F --line L] [--event E] --body-file F
                                             queue a comment or review on the form; the next round sends it
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
@@ -686,7 +686,8 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	path := fs.String("path", "", "file, for a new inline comment")
 	line := fs.Int("line", 0, "line, for a new inline comment")
 	event := fs.String("event", "", "COMMENT or APPROVE: submit as a review")
-	bodyFile := fs.String("body-file", "", "file holding the body (- for stdin)")
+	resolve := fs.Bool("resolve", false, "with --reply-to: resolve the thread (after the reply, if any)")
+	bodyFile := fs.String("body-file", "", "file holding the body (- for stdin); optional with --resolve")
 	id := fs.String("id", "", "post id (default: generated)")
 	_ = fs.Parse(args)
 
@@ -694,7 +695,9 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	var err error
 	switch *bodyFile {
 	case "":
-		return fmt.Errorf("--body-file is required")
+		if !*resolve {
+			return fmt.Errorf("--body-file is required (or --resolve, to resolve without a reply)")
+		}
 	case "-":
 		body, err = io.ReadAll(os.Stdin)
 	default:
@@ -721,7 +724,7 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	post := &Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event)}
+	post := &Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve}
 	if why := authorize(w, snap, "", post); why != "" {
 		return fmt.Errorf("refused: %s", why)
 	}

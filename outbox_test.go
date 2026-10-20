@@ -48,6 +48,11 @@ func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 		{"reviewer approves", &rev, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, ""},
 		{"reviewer without approve", &revNoApprove, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "not granted"},
 		{"approve own operator's pr", &rev, "friend", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "own operator"},
+		{"reply and resolve", w, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1", Resolve: true}, ""},
+		{"resolve alone", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, ""},
+		{"resolve without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", Resolve: true}, "needs reply_to"},
+		{"reviewer resolves", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "never resolves"},
+		{"read-only resolves", &ro, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "read-only"},
 	} {
 		got := authorize(tc.w, snap, tc.me, &tc.post)
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
@@ -352,5 +357,73 @@ func TestPrsFromTreeTreatsNullAsAbsent(t *testing.T) {
 	}
 	if len(p.Reviews) != 1 || p.Reviews["R1"] == nil || len(p.Comments) != 0 {
 		t.Errorf("reviews = %v, comments = %v", p.Reviews, p.Comments)
+	}
+}
+
+func TestLiveOutboxResolvesThreads(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, w, snap := liveCritic(t, f, true)
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("EBAC_FAKE_LOG", log)
+	calls := func(kind string) int {
+		b, _ := os.ReadFile(log)
+		n := 0
+		for _, c := range strings.Split(string(b), "CALL ")[1:] {
+			if strings.Contains(c, kind) {
+				n++
+			}
+		}
+		return n
+	}
+	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
+	round := func(scenario string) {
+		p.GH = fakeGH(t, scenario)
+		if err := st.Save(ctx, w, snap, p.flushOutbox(ctx, w, snap)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writePost(t, st, w, "r1", Post{PR: "acme/widget#1", Body: "Fixed at abc.", ReplyTo: "PRRT_1", Resolve: true})
+	round("post-ok")
+	if got := readPost(t, f, w, "r1"); got.Sent == nil || got.Resolved == "" || got.Error != "" {
+		t.Fatalf("reply+resolve: %+v", got)
+	}
+	if calls("addPullRequestReviewThreadReply") != 1 || calls("resolveReviewThread") != 1 {
+		t.Fatalf("reply+resolve made %d replies, %d resolves", calls("addPullRequestReviewThreadReply"), calls("resolveReviewThread"))
+	}
+
+	writePost(t, st, w, "r2", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
+	round("post-ok")
+	if got := readPost(t, f, w, "r2"); got.Sent != nil || got.Resolved == "" {
+		t.Fatalf("resolve alone: %+v", got)
+	}
+	if calls("addPullRequestReviewThreadReply") != 1 || calls("resolveReviewThread") != 2 {
+		t.Fatalf("resolve alone posted a reply or skipped the resolve")
+	}
+
+	// The reply lands, the resolve fails: next round resolves without replying again.
+	writePost(t, st, w, "r3", Post{PR: "acme/widget#1", Body: "Declined: out of scope.", ReplyTo: "PRRT_1", Resolve: true})
+	round("resolve-fail")
+	if got := readPost(t, f, w, "r3"); got.Sent == nil || got.Resolved != "" || got.Error == "" {
+		t.Fatalf("after a failed resolve: %+v", got)
+	}
+	round("post-ok")
+	if got := readPost(t, f, w, "r3"); got.Resolved == "" || got.Error != "" {
+		t.Fatalf("resolve not retried: %+v", got)
+	}
+	if calls("addPullRequestReviewThreadReply") != 2 || calls("resolveReviewThread") != 3 {
+		t.Fatalf("retry: %d replies (want 2), %d resolves (want 3)", calls("addPullRequestReviewThreadReply"), calls("resolveReviewThread"))
+	}
+
+	// Already resolved on the forge: acked without a call.
+	snap.PRs["acme/widget#1"].Threads["PRRT_1"].IsResolved = true
+	writePost(t, st, w, "r4", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
+	round("post-ok")
+	if got := readPost(t, f, w, "r4"); got.Resolved == "" {
+		t.Fatalf("already-resolved thread not acked: %+v", got)
+	}
+	if calls("resolveReviewThread") != 3 {
+		t.Fatalf("an already-resolved thread was resolved again")
 	}
 }

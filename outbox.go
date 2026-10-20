@@ -31,8 +31,12 @@ type Post struct {
 	Path    string `json:"path,omitempty"`     // with Line: a new inline comment
 	Line    int    `json:"line,omitempty"`
 	Event   string `json:"event,omitempty"` // COMMENT | APPROVE: submit as a review
+	// Resolve, with ReplyTo, resolves that thread after the reply (or
+	// alone, when Body is empty).
+	Resolve bool `json:"resolve,omitempty"`
 
 	Sent     *PostReceipt `json:"sent,omitempty"`
+	Resolved string       `json:"resolved,omitempty"` // when the thread was resolved
 	Refused  string       `json:"refused,omitempty"`
 	Error    string       `json:"error,omitempty"`
 	Attempts int          `json:"attempts,omitempty"`
@@ -45,8 +49,15 @@ type PostReceipt struct {
 	Recovered bool `json:"recovered,omitempty"`
 }
 
+func (p *Post) hasBody() bool { return strings.TrimSpace(p.Body) != "" }
+
 func (p *Post) terminal() bool {
-	return p.Sent != nil || p.Refused != "" || p.Attempts >= maxPostAttempts
+	if p.Refused != "" || p.Attempts >= maxPostAttempts {
+		return true
+	}
+	replied := !p.hasBody() || p.Sent != nil
+	resolved := !p.Resolve || p.Resolved != ""
+	return replied && resolved
 }
 
 func postMarker(critic, id string) string {
@@ -75,7 +86,14 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 	if !w.Write && w.Mode != ModeReviewer {
 		return "this critic is read-only: posting needs `ebac set-write --on`"
 	}
-	if strings.TrimSpace(p.Body) == "" {
+	if p.Resolve {
+		if p.ReplyTo == "" {
+			return "resolve needs reply_to: the thread to resolve"
+		}
+		if w.Mode == ModeReviewer {
+			return "a reviewer seat never resolves threads: the author does"
+		}
+	} else if !p.hasBody() {
 		return "empty body"
 	}
 	var pr *PRState
@@ -143,19 +161,39 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 		return
 	}
 	pr := snap.PRs[PRKey(post.PR)]
-	marker := postMarker(w.Name, id)
 	now := time.Now().UTC().Format(time.RFC3339)
-	if url, ok := findMarker(pr, p.Me, marker); ok {
-		post.Sent, post.Error = &PostReceipt{URL: url, At: now, Recovered: true}, ""
-		return
+	tried := false
+	defer func() {
+		if tried {
+			post.Attempts++
+		}
+	}()
+	if post.hasBody() && post.Sent == nil {
+		marker := postMarker(w.Name, id)
+		if url, ok := findMarker(pr, p.Me, marker); ok {
+			post.Sent, post.Error = &PostReceipt{URL: url, At: now, Recovered: true}, ""
+		} else {
+			tried = true
+			url, err := p.GH.Post(ctx, pr, post, post.Body+"\n\n"+marker)
+			if err != nil {
+				post.Error = err.Error()
+				return
+			}
+			post.Sent, post.Error = &PostReceipt{URL: url, At: now}, ""
+		}
 	}
-	url, err := p.GH.Post(ctx, pr, post, post.Body+"\n\n"+marker)
-	post.Attempts++
-	if err != nil {
-		post.Error = err.Error()
-		return
+	if post.Resolve && post.Resolved == "" {
+		if th := pr.Threads[post.ReplyTo]; th != nil && th.IsResolved {
+			post.Resolved, post.Error = now, ""
+			return
+		}
+		tried = true
+		if err := p.GH.ResolveThread(ctx, post.ReplyTo); err != nil {
+			post.Error = err.Error()
+			return
+		}
+		post.Resolved, post.Error = now, ""
 	}
-	post.Sent, post.Error = &PostReceipt{URL: url, At: now}, ""
 }
 
 // flushOutbox posts what the seat wrote since the watermark and returns the
@@ -222,6 +260,9 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		if post.Sent != nil {
 			r["sent"] = mustJSON(post.Sent)
 		}
+		if post.Resolved != "" {
+			r["resolved"] = mustJSON(post.Resolved)
+		}
 		if post.Refused != "" {
 			r["refused"] = mustJSON(post.Refused)
 		}
@@ -233,12 +274,20 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		}
 		acks[id] = r
 		switch {
-		case post.Sent != nil:
-			fmt.Fprintf(p.Out, "%s: posted %s -> %s\n", w.Name, id, post.Sent.URL)
 		case post.Refused != "":
 			fmt.Fprintf(p.Out, "%s: refused %s: %s\n", w.Name, id, post.Refused)
-		default:
+		case post.Error != "":
 			fmt.Fprintf(p.Out, "%s: post %s failed (attempt %d): %s\n", w.Name, id, post.Attempts, post.Error)
+		default:
+			url := "(no reply)"
+			if post.Sent != nil {
+				url = post.Sent.URL
+			}
+			res := ""
+			if post.Resolved != "" {
+				res = ", thread resolved"
+			}
+			fmt.Fprintf(p.Out, "%s: posted %s -> %s%s\n", w.Name, id, url, res)
 		}
 	}
 	w.Runtime.OutboxWatermark = since.Version
@@ -270,6 +319,21 @@ func (g *GH) Post(ctx context.Context, pr *PRState, p *Post, body string) (strin
 			"-X", "POST", "--input", "-", "-q", ".html_url"}, in)
 		return strings.TrimSpace(string(out)), err
 	}
+}
+
+// ResolveThread resolves a review thread. Resolving a resolved thread is a
+// no-op on the forge, so a retry is safe.
+func (g *GH) ResolveThread(ctx context.Context, thread string) error {
+	q := `mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}`
+	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + thread,
+		"-q", ".data.resolveReviewThread.thread.isResolved"}, nil)
+	if err != nil {
+		return err
+	}
+	if got := strings.TrimSpace(string(out)); got != "true" {
+		return fmt.Errorf("resolve %s: forge answered %q", thread, got)
+	}
+	return nil
 }
 
 func firstNonEmpty(a, b string) string {
