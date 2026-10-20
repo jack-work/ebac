@@ -84,6 +84,7 @@ func TestHelperProcess(t *testing.T) {
 	case "post-ok", "resolve-fail":
 		joined := strings.Join(rest, " ")
 		resolving := strings.Contains(joined, "resolveReviewThread")
+		reacting := strings.Contains(joined, "addReaction")
 		if scenario == "resolve-fail" && resolving {
 			os.Stderr.WriteString("HTTP 502\n")
 			os.Exit(1)
@@ -94,6 +95,12 @@ func TestHelperProcess(t *testing.T) {
 		f.Close()
 		if resolving {
 			os.Stdout.WriteString("true\n")
+		} else if reacting {
+			for _, a := range rest {
+				if v, ok := strings.CutPrefix(a, "c="); ok {
+					os.Stdout.WriteString(v + "\n")
+				}
+			}
 		} else {
 			os.Stdout.WriteString("https://x/pull/1#posted\n")
 		}

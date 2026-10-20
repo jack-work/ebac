@@ -53,6 +53,10 @@ func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 		{"resolve without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", Resolve: true}, "needs reply_to"},
 		{"reviewer resolves", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "never resolves"},
 		{"read-only resolves", &ro, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "read-only"},
+		{"react alone", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
+		{"reviewer reacts", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
+		{"react without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", React: "+1"}, "needs reply_to"},
+		{"unknown reaction", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "thumbsup"}, "use one of"},
 	} {
 		got := authorize(tc.w, snap, tc.me, &tc.post)
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
@@ -425,5 +429,57 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 	}
 	if calls("resolveReviewThread") != 3 {
 		t.Fatalf("an already-resolved thread was resolved again")
+	}
+}
+
+func TestLiveOutboxReactsToTheFinding(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, w, snap := liveCritic(t, f, true)
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("EBAC_FAKE_LOG", log)
+	callsOf := func(kind string) []string {
+		b, _ := os.ReadFile(log)
+		var out []string
+		for _, c := range strings.Split(string(b), "CALL ")[1:] {
+			if strings.Contains(c, kind) {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
+	round := func(scenario string) {
+		p.GH = fakeGH(t, scenario)
+		if err := st.Save(ctx, w, snap, p.flushOutbox(ctx, w, snap)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	th := snap.PRs["acme/widget#1"].Threads["PRRT_1"]
+	th.Comments = append(th.Comments, &Comment{ID: "C2", Author: "jack", Body: "reply", CreatedAt: "2026-10-20T03:00:00Z"})
+	writePost(t, st, w, "k1", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true})
+	round("post-ok")
+	got := readPost(t, f, w, "k1")
+	if got.Reacted == "" || got.Resolved == "" || got.Sent != nil || got.Error != "" {
+		t.Fatalf("react+resolve: %+v", got)
+	}
+	reacts := callsOf("addReaction")
+	if len(reacts) != 1 || !strings.Contains(reacts[0], "s=C1") || !strings.Contains(reacts[0], "c=THUMBS_UP") {
+		t.Fatalf("reaction calls %q; want one THUMBS_UP on C1, the comment that opened the thread", reacts)
+	}
+	if len(callsOf("addPullRequestReviewThreadReply")) != 0 {
+		t.Fatal("a bodiless post replied")
+	}
+
+	// A failed reaction is retried; the resolve that follows waits for it.
+	writePost(t, st, w, "k2", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "heart", Resolve: true})
+	round("post-fail")
+	if got := readPost(t, f, w, "k2"); got.Reacted != "" || got.Resolved != "" || got.Error == "" {
+		t.Fatalf("after a failed reaction: %+v", got)
+	}
+	round("post-ok")
+	if got := readPost(t, f, w, "k2"); got.Reacted == "" || got.Resolved == "" {
+		t.Fatalf("reaction not retried: %+v", got)
 	}
 }

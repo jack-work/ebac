@@ -129,9 +129,9 @@ func signalDiscipline() string {
 		"SIGNAL, DO NOT NARRATE\n" +
 		"  Agents read this PR; the operator skims it. Aim for extreme information density.\n" +
 		"  - SILENCE IS A REPLY. Post only what changes another agent's next action.\n" +
-		"  - A REACTION IS THE RECEIPT. A finding fixed at the head: resolve the thread,\n" +
-		"    `ebac post ... --reply-to <thread> --resolve`, with --body-file only when the fix\n" +
-		"    sha or a reason is not obvious. A reply without --resolve leaves the thread open.\n" +
+		"  - A REACTION IS THE RECEIPT. A finding fixed at the head: +1 it and resolve the\n" +
+		"    thread, `ebac post ... --reply-to <thread> --react +1 --resolve`, with --body-file\n" +
+		"    only when the fix sha or a reason is not obvious. Without --resolve it stays open.\n" +
 		"  - ONE LINE PER ANSWER: verdict, then sha, file:line or test name, or the reason.\n" +
 		"    No thanks, no recap, no restating the finding, no em dashes, never repeat yourself.\n" +
 		"  - TOO MUCH PRESSURE ON ONE SECTION, or a loop: one line asking that reviewer to\n" +

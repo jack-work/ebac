@@ -34,9 +34,12 @@ type Post struct {
 	// Resolve, with ReplyTo, resolves that thread after the reply (or
 	// alone, when Body is empty).
 	Resolve bool `json:"resolve,omitempty"`
+	// React, with ReplyTo, reacts to the comment that opened that thread.
+	React string `json:"react,omitempty"`
 
 	Sent     *PostReceipt `json:"sent,omitempty"`
 	Resolved string       `json:"resolved,omitempty"` // when the thread was resolved
+	Reacted  string       `json:"reacted,omitempty"`  // when the reaction landed
 	Refused  string       `json:"refused,omitempty"`
 	Error    string       `json:"error,omitempty"`
 	Attempts int          `json:"attempts,omitempty"`
@@ -57,7 +60,8 @@ func (p *Post) terminal() bool {
 	}
 	replied := !p.hasBody() || p.Sent != nil
 	resolved := !p.Resolve || p.Resolved != ""
-	return replied && resolved
+	reacted := p.React == "" || p.Reacted != ""
+	return replied && resolved && reacted
 }
 
 func postMarker(critic, id string) string {
@@ -86,6 +90,14 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 	if !w.Write && w.Mode != ModeReviewer {
 		return "this critic is read-only: posting needs `ebac set-write --on`"
 	}
+	if p.React != "" {
+		if p.ReplyTo == "" {
+			return "react needs reply_to: the thread whose opening comment gets the reaction"
+		}
+		if _, ok := reactions[p.React]; !ok {
+			return fmt.Sprintf("reaction %q: use one of +1 -1 laugh hooray confused heart rocket eyes", p.React)
+		}
+	}
 	if p.Resolve {
 		if p.ReplyTo == "" {
 			return "resolve needs reply_to: the thread to resolve"
@@ -93,7 +105,8 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 		if w.Mode == ModeReviewer {
 			return "a reviewer seat never resolves threads: the author does"
 		}
-	} else if !p.hasBody() {
+	}
+	if !p.Resolve && p.React == "" && !p.hasBody() {
 		return "empty body"
 	}
 	var pr *PRState
@@ -182,6 +195,20 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 			post.Sent, post.Error = &PostReceipt{URL: url, At: now}, ""
 		}
 	}
+	if post.React != "" && post.Reacted == "" {
+		th := pr.Threads[post.ReplyTo]
+		first := th.FirstComment()
+		if first == nil {
+			post.Error = "thread " + post.ReplyTo + " has no comment to react to"
+			return
+		}
+		tried = true
+		if err := p.GH.React(ctx, first.ID, reactions[post.React]); err != nil {
+			post.Error = err.Error()
+			return
+		}
+		post.Reacted, post.Error = now, ""
+	}
 	if post.Resolve && post.Resolved == "" {
 		if th := pr.Threads[post.ReplyTo]; th != nil && th.IsResolved {
 			post.Resolved, post.Error = now, ""
@@ -263,6 +290,9 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		if post.Resolved != "" {
 			r["resolved"] = mustJSON(post.Resolved)
 		}
+		if post.Reacted != "" {
+			r["reacted"] = mustJSON(post.Reacted)
+		}
 		if post.Refused != "" {
 			r["refused"] = mustJSON(post.Refused)
 		}
@@ -319,6 +349,27 @@ func (g *GH) Post(ctx context.Context, pr *PRState, p *Post, body string) (strin
 			"-X", "POST", "--input", "-", "-q", ".html_url"}, in)
 		return strings.TrimSpace(string(out)), err
 	}
+}
+
+// reactions maps the names a seat writes to GitHub's ReactionContent.
+var reactions = map[string]string{
+	"+1": "THUMBS_UP", "-1": "THUMBS_DOWN", "laugh": "LAUGH", "hooray": "HOORAY",
+	"confused": "CONFUSED", "heart": "HEART", "rocket": "ROCKET", "eyes": "EYES",
+}
+
+// React adds a reaction. A second identical reaction by the same user is a
+// no-op on the forge, so a retry is safe.
+func (g *GH) React(ctx context.Context, subject, content string) error {
+	q := `mutation($s:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$s,content:$c}){reaction{content}}}`
+	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "s=" + subject, "-f", "c=" + content,
+		"-q", ".data.addReaction.reaction.content"}, nil)
+	if err != nil {
+		return err
+	}
+	if got := strings.TrimSpace(string(out)); got != content {
+		return fmt.Errorf("react %s: forge answered %q", subject, got)
+	}
+	return nil
 }
 
 // ResolveThread resolves a review thread. Resolving a resolved thread is a
