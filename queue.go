@@ -45,6 +45,7 @@ const (
 	QClaimed  QueueState = "claimed"  // a promoter holds it; critic not yet created
 	QPromoted QueueState = "promoted" // became a critic
 	QDropped  QueueState = "dropped"  // closed before promotion, or removed
+	QDone     QueueState = "done"     // its critic finished: archived or gone
 )
 
 type QueueItem struct {
@@ -198,7 +199,7 @@ func SortQueue(items []QueueItem) {
 // critics of their own while the `aether` critic was already watching both.
 func Enqueue(ctx context.Context, st *Store, fig *Figaro, formID, host string, ref PRRef, priority int, mode, note string) (QueueItem, error) {
 	// 1. Already watched by a live critic?
-	if critics, err := st.ListCritics(); err == nil {
+	if critics, err := st.ListCritics(ctx); err == nil {
 		for _, c := range critics {
 			if c.Runtime.Archived {
 				continue
@@ -279,11 +280,11 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	defer fig.Close()
 	formID, err := QueueForm(ctx, fig)
 	if err != nil {
@@ -379,7 +380,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		if err != nil {
 			return err
 		}
-		critics, _ := st.ListCritics()
+		critics, _ := st.ListCritics(ctx)
 		active := 0
 		for _, c := range critics {
 			if !c.Runtime.Archived {

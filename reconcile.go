@@ -44,7 +44,7 @@ type ReconcileReport struct {
 func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRun bool) (*ReconcileReport, error) {
 	rep := &ReconcileReport{Ran: time.Now().UTC().Format(time.RFC3339), DryRun: dryRun}
 
-	critics, err := st.ListCritics()
+	critics, err := st.ListCritics(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +82,10 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 				}
 				old := c.FormID
 				c.FormID = newID
-				if sErr := st.SaveCritic(c); sErr != nil {
+				if sErr := st.SaveCritic(ctx, c); sErr != nil {
 					add("R1-form-missing", c.Name, "role form "+old+" unreadable", "re-minted "+newID+" but save FAILED: "+sErr.Error(), false)
 					continue
 				}
-				snap, _ := st.LoadSnapshot(c.Name)
-				p := &Poller{Store: st, Fig: fig, Out: io.Discard}
-				p.projectAll(ctx, c, snap, &Delta{})
 				add("R1-form-missing", c.Name, "role form "+old+" was gone", "re-minted as "+newID+" (SEAT IS EMPTY: ebac cast --critic "+c.Name+" --aria <id>)", true)
 			}
 			continue
@@ -165,22 +162,12 @@ func printReconcile(out io.Writer, rep *ReconcileReport) {
 	}
 }
 
-// rosterFormID reads the id without minting one, so reconcile can tell
-// "no roster yet" from "roster is unreadable".
-func (s *Store) rosterFormID() (string, error) {
-	var m rosterMeta
-	if err := readJSON(s.rosterPath(), &m); err != nil {
-		return "", err
-	}
-	return m.FormID, nil
-}
-
 func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("reconcile")
 	dry := fs.Bool("dry-run", false, "report what would change, change nothing")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -188,7 +175,7 @@ func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	if *asJSON {
 		sink = io.Discard
 	}
-	rep, err := Reconcile(ctx, st, NewFigaro(g.figaro), sink, *dry)
+	rep, err := Reconcile(ctx, st, st.Fig, sink, *dry)
 	if err != nil {
 		return err
 	}

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,13 +27,15 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac resume --critic N
   ebac rm     --critic N [--purge]           archive and remove
   ebac ack    --critic N --round R           the seat says it has acted on a delta
+  ebac post   --critic N --pr P [--reply-to T | --path F --line L] [--event E] --body-file F
+                                            queue a comment or review on the form; the next round sends it
+  ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
   ebac selfcheck [--critic N]                harness invariants, for develop mode
   ebac issue  --critic N --title T --body-file F   file a harness defect
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
   ebac reconcile [--dry-run]                rectify drift between critics/, forms and timers
-  ebac gc                                   reap forms whose critic is archived
 
 Global flags: --gh <path> --socket <angelus.sock> --host <ghe host>
 `
@@ -81,6 +85,10 @@ func main() {
 		err = cmdStopResume(ctx, g, args, false)
 	case "rm", "remove":
 		err = cmdRm(ctx, g, args)
+	case "post":
+		err = cmdPost(ctx, g, args)
+	case "migrate":
+		err = cmdMigrate(ctx, g, args)
 	case "ack":
 		err = cmdAck(ctx, g, args)
 	case "roster":
@@ -93,8 +101,6 @@ func main() {
 		err = cmdQueue(ctx, g, args)
 	case "reconcile":
 		err = cmdReconcile(ctx, g, args)
-	case "gc":
-		err = cmdGC(ctx, g, args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return
@@ -199,11 +205,11 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if len(prs) == 0 && *repo == "" {
 		return fmt.Errorf("give at least one --pr, or --repo to discover them")
 	}
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	if _, err := st.LoadCritic(*name); err == nil {
+	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists (ebac show --critic %s)", *name, *name)
 	}
 	m := Mode(*mode)
@@ -222,7 +228,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		}
 	}
 
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	if _, err := resolveBin(g.gh); err != nil {
 		return fmt.Errorf("gh: %w", err)
 	}
@@ -273,7 +279,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	}
 	w.FormID = formID
 
-	if err := st.SaveCritic(w); err != nil {
+	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
 	}
 
@@ -298,11 +304,6 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 			fmt.Printf("cast %s into %s\n", seat, formID)
 		}
 	}
-
-	// Project once so the form is never empty, and so the seat's very first
-	// context carries the contract.
-	p := &Poller{Store: st, GH: gh, Fig: fig, Out: os.Stdout}
-	p.projectAll(ctx, w, nil, &Delta{})
 
 	fmt.Printf("critic %q created: role %s, %d PR(s), mode %s\n", w.Name, formID, len(w.PRs), w.Mode)
 	for _, r := range w.PRs {
@@ -330,11 +331,11 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 	asJSON := fs.Bool("j", false, "JSON")
 	live := fs.Bool("live", false, "rebuild from source instead of reading the published index")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 
 	var (
 		rows   []RosterRow
@@ -398,20 +399,20 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
-	snap, _ := st.LoadSnapshot(*name)
+	snap, _ := st.LoadSnapshot(ctx, *name)
 	if *asJSON {
 		dumpJSON(map[string]any{"critic": w, "snapshot": snap})
 		return nil
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	seat := "(empty)"
 	if form, err := fig.Form(ctx, w.FormID); err == nil {
 		if t, ok := form["target-aria"].(string); ok && t != "" {
@@ -490,13 +491,13 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	dry := fs.Bool("dry-run", false, "reconcile and persist state, but never invoke figaro")
 	all := fs.Bool("all", false, "poll every live critic in sequence")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Fig: NewFigaro(g.figaro), Out: os.Stdout, DryRun: *dry}
+	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
-		ws, err := st.ListCritics()
+		ws, err := st.ListCritics(ctx)
 		if err != nil {
 			return err
 		}
@@ -529,15 +530,15 @@ func cmdCast(ctx context.Context, g globals, args []string) error {
 	mint := fs.Bool("mint", false, "mint a fresh aria instead")
 	outfits := fs.String("outfit", "", "outfit names for a minted aria")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	seat := *aria
 	if seat == "" {
 		if !*mint {
@@ -572,11 +573,11 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	name := fs.String("critic", "", "critic name")
 	reason := fs.String("reason", "stopped by operator", "why")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
@@ -588,12 +589,9 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 		w.Runtime.StopReason = ""
 		w.Runtime.ConsecutiveFailures = 0
 	}
-	if err := st.SaveCritic(w); err != nil {
+	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Fig: NewFigaro(g.figaro), Out: os.Stdout}
-	snap, _ := st.LoadSnapshot(w.Name)
-	_ = p.projectSync(ctx, w, snap, nil)
 	fmt.Printf("%s: %sped (%s)\n", w.Name, verb, w.Runtime.StopReason)
 	if !stop {
 		fmt.Printf("re-arm with: systemctl --user enable --now ebac@%s.timer\n", w.Name)
@@ -606,35 +604,40 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	purge := fs.Bool("purge", false, "also remove the role form")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
 	_ = disableTimer(w.Name)
-	snap, _ := st.LoadSnapshot(w.Name)
+	snap, _ := st.LoadSnapshot(ctx, w.Name)
 	w.Runtime.Stopped, w.Runtime.Archived = true, true
 	w.Runtime.ArchivedAt = time.Now().UTC()
 	if w.Runtime.StopReason == "" {
 		w.Runtime.StopReason = "removed by operator"
 	}
-	dir, err := st.Archive(w, snap)
+	dir, err := st.Archive(ctx, w, snap)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%s: archived to %s\n", w.Name, dir)
+	if !*purge {
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+	}
 	if *purge {
-		fig := NewFigaro(g.figaro)
+		fig := st.Fig
 		if err := fig.FormRemove(ctx, w.FormID); err != nil {
 			fmt.Fprintf(os.Stderr, "ebac: could not remove form %s: %v\n", w.FormID, err)
 		} else {
 			fmt.Printf("removed role form %s\n", w.FormID)
 		}
 	} else {
-		fmt.Printf("role form %s left standing (ebac gc, or figaro form rm %s)\n", w.FormID, w.FormID)
+		fmt.Printf("role form %s left standing; it expires with its lease (or: figaro kill %s)\n", w.FormID, w.FormID)
 	}
 	return nil
 }
@@ -647,15 +650,15 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	round := fs.Int("round", 0, "the delta.round being acknowledged")
 	note := fs.String("note", "", "one line: what you did or decided")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	// Flat scalar keys ONLY: an aria writing ack.round into a form whose
 	// subtrees were written as literals would create a decoy key.
 	if err := fig.SetJSON(ctx, w.FormID, "ack_round", *round); err != nil {
@@ -673,6 +676,75 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	return nil
 }
 
+// cmdPost writes a post onto the critic's form. It never talks to the forge:
+// the poll round sends it and writes the receipt back.
+func cmdPost(ctx context.Context, g globals, args []string) error {
+	fs := flag.NewFlagSet("post", flag.ExitOnError)
+	name := fs.String("critic", "", "critic name")
+	pr := fs.String("pr", "", "owner/repo#number")
+	replyTo := fs.String("reply-to", "", "review thread id to reply in")
+	path := fs.String("path", "", "file, for a new inline comment")
+	line := fs.Int("line", 0, "line, for a new inline comment")
+	event := fs.String("event", "", "COMMENT or APPROVE: submit as a review")
+	bodyFile := fs.String("body-file", "", "file holding the body (- for stdin)")
+	id := fs.String("id", "", "post id (default: generated)")
+	_ = fs.Parse(args)
+
+	var body []byte
+	var err error
+	switch *bodyFile {
+	case "":
+		return fmt.Errorf("--body-file is required")
+	case "-":
+		body, err = io.ReadAll(os.Stdin)
+	default:
+		body, err = os.ReadFile(*bodyFile)
+	}
+	if err != nil {
+		return err
+	}
+	if *id == "" {
+		*id = newPostID(time.Now())
+	}
+	if err := validPostID(*id); err != nil {
+		return err
+	}
+	st, err := NewStore(NewFigaro(g.figaro))
+	if err != nil {
+		return err
+	}
+	w, err := st.LoadCritic(ctx, *name)
+	if err != nil {
+		return err
+	}
+	snap, err := st.LoadSnapshot(ctx, *name)
+	if err != nil {
+		return err
+	}
+	post := &Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event)}
+	if why := authorize(w, snap, "", post); why != "" {
+		return fmt.Errorf("refused: %s", why)
+	}
+	key := "post." + *id
+	if f, err := st.readForm(ctx, w.FormID); err != nil {
+		return err
+	} else {
+		var posts map[string]json.RawMessage
+		_ = json.Unmarshal(f.Keys["post"], &posts)
+		if _, taken := posts[*id]; taken {
+			return fmt.Errorf("%s already exists on %s: a post is written once", key, w.FormID)
+		}
+	}
+	err = st.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
+		return map[string]json.RawMessage{key: mustJSON(post)}, nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s: queued %s on %s; the next round sends it (receipt: %s.sent)\n", w.Name, *id, w.FormID, key)
+	return nil
+}
+
 // ---------- roster ----------
 
 func cmdRoster(ctx context.Context, g globals, args []string) error {
@@ -682,11 +754,11 @@ func cmdRoster(ctx context.Context, g globals, args []string) error {
 	mint := fs.Bool("mint", false, "mint an overseer aria and cast it")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	fig := NewFigaro(g.figaro)
+	fig := st.Fig
 	if *sync || *cast != "" || *mint {
 		id, sum, err := SyncRoster(ctx, st, fig, "")
 		if err != nil {
@@ -729,11 +801,11 @@ func cmdSelfcheck(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "restrict to one critic")
 	strict := fs.Bool("strict", false, "exit nonzero if any check WARNs")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	warns, err := Selfcheck(ctx, st, NewFigaro(g.figaro), os.Stdout, *name)
+	warns, err := Selfcheck(ctx, st, st.Fig, os.Stdout, *name)
 	if err != nil {
 		return err
 	}
@@ -752,11 +824,11 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 	var labels stringList
 	fs.Var(&labels, "label", "label (repeatable)")
 	_ = fs.Parse(args)
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
@@ -784,54 +856,6 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	fmt.Println(url)
-	return nil
-}
-
-func cmdGC(ctx context.Context, g globals, args []string) error {
-	fs := flag.NewFlagSet("gc", flag.ExitOnError)
-	dry := fs.Bool("dry-run", false, "report only")
-	_ = fs.Parse(args)
-	st, err := NewStore()
-	if err != nil {
-		return err
-	}
-	fig := NewFigaro(g.figaro)
-	entries, err := os.ReadDir(filepath.Join(st.Root, "archive"))
-	if err != nil {
-		return err
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		var w Critic
-		if err := readJSON(filepath.Join(st.Root, "archive", e.Name(), "critic.json"), &w); err != nil {
-			continue
-		}
-		if w.FormID == "" {
-			continue
-		}
-		if _, err := fig.Form(ctx, w.FormID); err != nil {
-			continue // already gone
-		}
-		n++
-		if *dry {
-			fmt.Printf("would remove %s (archived critic %s)\n", w.FormID, w.Name)
-			continue
-		}
-		if err := fig.FormRemove(ctx, w.FormID); err != nil {
-			fmt.Fprintf(os.Stderr, "ebac: %s: %v\n", w.FormID, err)
-			continue
-		}
-		fmt.Printf("removed %s (archived critic %s)\n", w.FormID, w.Name)
-	}
-	if n == 0 {
-		fmt.Println("nothing to collect")
-	}
-	// Leave the archive directories alone. This Order keeps its dead: the
-	// evidence outlives the form.
-
 	return nil
 }
 
@@ -869,7 +893,7 @@ func newFlagSet(name string) *flag.FlagSet {
 // could act on every PR it watches, which is the failure the read-only brief
 // was written to prevent; this makes the grant an explicit, named decision the
 // operator takes one critic at a time.
-func cmdSetWrite(_ context.Context, _ globals, args []string) error {
+func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("set-write", flag.ExitOnError)
 	name := fs.String("critic", "", "critic name")
 	on := fs.Bool("on", false, "grant reply/comment/push on this critic's PRs")
@@ -879,16 +903,16 @@ func cmdSetWrite(_ context.Context, _ globals, args []string) error {
 	if *on == *off {
 		return fmt.Errorf("give exactly one of --on or --off")
 	}
-	st, err := NewStore()
+	st, err := NewStore(NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	w, err := st.LoadCritic(*name)
+	w, err := st.LoadCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
 	w.Write = *on
-	if err := st.SaveCritic(w); err != nil {
+	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
 	}
 	if *on {

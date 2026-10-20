@@ -45,7 +45,7 @@ func TestReviewerBrief(t *testing.T) {
 		"You may APPROVE: acme/widget#7.\n",
 		"worktree add --detach /wt/rev-pr7 FETCH_HEAD",
 		"Read skill://widget-review first",
-		"GH_HOST=ghe.example gh api",
+		"ebac post --critic rev --pr <owner/repo#n> --event COMMENT|APPROVE",
 		"SIGNATURE\n-- signed, the reviewer\n",
 	} {
 		if !strings.Contains(brief, want) {

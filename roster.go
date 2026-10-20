@@ -3,10 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -47,36 +44,31 @@ type RosterSummary struct {
 	GeneratedAt string `json:"generated_at"`
 }
 
-func (s *Store) rosterPath() string { return filepath.Join(s.Root, "roster.json") }
-
-type rosterMeta struct {
-	FormID string `json:"form_id"`
-}
-
-func (s *Store) RosterForm(ctx context.Context, fig *Figaro) (string, error) {
-	var m rosterMeta
-	if err := readJSON(s.rosterPath(), &m); err == nil && m.FormID != "" {
-		_, err := fig.Form(ctx, m.FormID)
-		if err == nil {
-			return m.FormID, nil
-		}
-		if !errors.Is(err, ErrFormGone) {
-			return "", err
-		}
-		fmt.Fprintf(os.Stderr, "ebac: roster form %s is gone; minting a new one\n", m.FormID)
-	}
-	id, err := fig.FormNew(ctx, "ebac-roster")
+// RosterForm finds the roster by kind, minting it on first use. Like the
+// queue, it is found by property, never through a pointer on disk.
+func RosterForm(ctx context.Context, fig *Figaro) (string, error) {
+	found, err := FindFormsByKind(ctx, fig, "ebac.roster")
 	if err != nil {
 		return "", err
 	}
-	if err := writeJSONAtomic(s.rosterPath(), rosterMeta{FormID: id}); err != nil {
-		return "", err
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		id, err := fig.FormNew(ctx, "ebac-roster")
+		if err != nil {
+			return "", err
+		}
+		if err := fig.SetJSON(ctx, id, "kind", "ebac.roster"); err != nil {
+			return "", err
+		}
+		return id, nil
 	}
-	return id, nil
+	return "", fmt.Errorf("%d forms claim kind ebac.roster (%s): remove the stale ones", len(found), strings.Join(found, ", "))
 }
 
 func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]RosterRow, RosterSummary, error) {
-	critics, err := st.ListCritics()
+	critics, err := st.ListCritics(ctx)
 	if err != nil {
 		return nil, RosterSummary{}, err
 	}
@@ -115,7 +107,7 @@ func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]Rost
 			row.Seat += " (unreachable)"
 			sum.SeatsEmpty++
 		}
-		if snap, _ := st.LoadSnapshot(w.Name); snap != nil {
+		if snap, _ := st.LoadSnapshot(ctx, w.Name); snap != nil {
 			for _, pr := range snap.PRs {
 				if !pr.Closed() {
 					row.Open++
@@ -162,7 +154,7 @@ func health(w *Critic, row RosterRow, timer TimerStatus) string {
 }
 
 func SyncRoster(ctx context.Context, st *Store, fig *Figaro, me string) (string, RosterSummary, error) {
-	id, err := st.RosterForm(ctx, fig)
+	id, err := RosterForm(ctx, fig)
 	if err != nil {
 		return "", RosterSummary{}, err
 	}
@@ -205,10 +197,14 @@ func dumpJSON(v any) {
 // is worse served than one told the index is cold — which is exactly how the
 // roster misreported 0 PRs on a 4-PR fleet for two days.
 func ReadRoster(ctx context.Context, st *Store, fig *Figaro) (rows []RosterRow, sum RosterSummary, age time.Duration, err error) {
-	id, err := st.rosterFormID()
-	if err != nil || id == "" {
-		return nil, sum, 0, fmt.Errorf("no roster yet: run `ebac reconcile`")
+	found, err := FindFormsByKind(ctx, fig, "ebac.roster")
+	if err != nil {
+		return nil, sum, 0, err
 	}
+	if len(found) != 1 {
+		return nil, sum, 0, fmt.Errorf("%d roster forms: run `ebac reconcile`", len(found))
+	}
+	id := found[0]
 	form, err := fig.Form(ctx, id)
 	if err != nil {
 		return nil, sum, 0, fmt.Errorf("roster form %s unreadable: %w", id, err)

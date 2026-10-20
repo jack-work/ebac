@@ -26,7 +26,7 @@ type CheckResult struct {
 }
 
 func Selfcheck(ctx context.Context, st *Store, fig *Figaro, out io.Writer, only string) (warns int, err error) {
-	critics, err := st.ListCritics()
+	critics, err := st.ListCritics(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -173,7 +173,7 @@ func Selfcheck(ctx context.Context, st *Store, fig *Figaro, out io.Writer, only 
 	//    that shadows nothing, and `unset` will then "succeed" on the decoy.
 	//    Any key of ours containing a dot is that signature.
 	decoys := []string{}
-	owned := map[string]bool{"prs": true, "delta": true, "sync": true, "critic": true, "harness": true}
+	owned := map[string]bool{"prs": true, "critic": true, "harness": true, "post": true}
 	formsRead := 0
 	for _, w := range critics {
 		if w.Runtime.Archived {

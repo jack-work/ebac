@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -33,7 +30,7 @@ type Poller struct {
 // call at any cadence, from any number of overlapping invocations (systemd
 // guarantees only one per instance), and to exit 0 on "nothing to do".
 func (p *Poller) Poll(ctx context.Context, name string) error {
-	w, err := p.Store.LoadCritic(name)
+	w, err := p.Store.LoadCritic(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -62,8 +59,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	// --- hard stops, checked before we spend an API call ---
 	if reason := hardStop(w); reason != "" {
 		w.Runtime.Stopped, w.Runtime.StopReason = true, reason
-		_ = p.Store.SaveCritic(w)
-		p.projectSync(ctx, w, nil, nil)
+		_ = p.Store.SaveCritic(ctx, w)
 		fmt.Fprintf(p.Out, "%s: stopping — %s\n", name, reason)
 		return p.maybeArchive(ctx, w, nil)
 	}
@@ -89,7 +85,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 
 	if len(w.PRs) == 0 {
 		w.Runtime.LastError = "critic has no pull requests"
-		_ = p.Store.SaveCritic(w)
+		_ = p.Store.SaveCritic(ctx, w)
 		fmt.Fprintf(p.Out, "%s: no PRs in scope\n", name)
 		return nil
 	}
@@ -110,7 +106,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			next.Complete = false
 			// Carry the previous state forward so the PR does not blink
 			// out of the projection.
-			if prev, _ := p.Store.LoadSnapshot(name); prev != nil {
+			if prev, _ := p.Store.LoadSnapshot(ctx, name); prev != nil {
 				if old, ok := prev.PRs[ref.Key()]; ok {
 					old.Complete = false
 					next.PRs[ref.Key()] = old
@@ -124,7 +120,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		next.PRs[st.Key] = st
 	}
 
-	prev, err := p.Store.LoadSnapshot(name)
+	prev, err := p.Store.LoadSnapshot(ctx, name)
 	if err != nil {
 		return fmt.Errorf("load previous snapshot: %w", err)
 	}
@@ -133,8 +129,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		// Total failure: change nothing, do not diff, count the failure.
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = fmt.Sprintf("all %d PR fetches failed: %s", len(w.PRs), fetchErrs[0])
-		_ = p.Store.SaveCritic(w)
-		p.projectSync(ctx, w, prev, nil)
+		_ = p.Store.SaveCritic(ctx, w)
 		return fmt.Errorf("%s: %s", name, w.Runtime.LastError)
 	}
 
@@ -162,11 +157,11 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		}
 		// A dry run still persists observed state — that is what makes the
 		// FIRST armed round quiet instead of an avalanche.
-		if err := p.Store.SaveSnapshot(name, next); err != nil {
-			return err
-		}
-		return p.Store.SaveCritic(w)
+		return p.Store.Save(ctx, w, next, nil)
 	}
+
+	// --- outbox: what the seat wrote onto the form goes to the forge ---
+	acks := p.flushOutbox(ctx, w, next)
 
 	// --- accumulate the debt BEFORE attempting delivery ---
 	if len(delta.Events) > 0 {
@@ -176,38 +171,26 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, delta.Events)
 	}
 
-	// The snapshot advances even if delivery fails. The pending-event list
-	// is the delivery debt; the snapshot is the observation. Conflating
-	// them re-reports every event on every failed round.
-	if err := p.Store.SaveSnapshot(name, next); err != nil {
+	// One patch: the observed PRs, the debt and the outbox receipts. It lands
+	// before delivery, so a crash mid-send leaves the debt on the form and
+	// the seat's wake finds the round's change already in its study diff.
+	if err := p.Store.Save(ctx, w, next, acks); err != nil {
 		return err
 	}
-
-	p.projectAll(ctx, w, next, delta)
 	renew(ctx, p.Fig, w.FormID)
 
-	// --- deliver ---
-	if err := p.deliver(ctx, w, next); err != nil {
-		_ = p.Store.SaveCritic(w)
-		// Re-project so the form shows the failed attempt and its backoff,
-		// not the optimistic state we wrote a moment ago.
-		p.projectDelta(ctx, w)
+	derr := p.deliver(ctx, w, next)
+	if derr == nil {
+		// Succession runs on the same heartbeat: the timer already fires
+		// every 5m and already knows the seat.
+		p.superviseSuccession(ctx, w)
+	}
+	// Runtime only, under system.ebac: invisible to the seat.
+	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
 	}
-
-	// Re-project after a successful send: the write above deliberately
-	// happened FIRST so a crash mid-send leaves the debt visible, which
-	// means the form is now stale by exactly one delivery. A form that says
-	// `pending: true` about news already delivered is a small lie that a
-	// develop-mode seat will (correctly) file a bug about.
-	p.projectDelta(ctx, w)
-
-	// Succession runs on the same heartbeat: the timer already fires every
-	// 5m and already knows the seat, so this needs no second daemon.
-	p.superviseSuccession(ctx, w)
-
-	if err := p.Store.SaveCritic(w); err != nil {
-		return err
+	if derr != nil {
+		return derr
 	}
 	return p.maybeArchive(ctx, w, next)
 }
@@ -346,14 +329,14 @@ func (p *Poller) maybeArchive(ctx context.Context, w *Critic, snap *Snapshot) er
 		if !allClosed {
 			if w.Runtime.AllClosedSince != nil {
 				w.Runtime.AllClosedSince = nil
-				_ = p.Store.SaveCritic(w)
+				_ = p.Store.SaveCritic(ctx, w)
 			}
 			return nil
 		}
 		if w.Runtime.AllClosedSince == nil {
 			now := time.Now().UTC()
 			w.Runtime.AllClosedSince = &now
-			_ = p.Store.SaveCritic(w)
+			_ = p.Store.SaveCritic(ctx, w)
 			fmt.Fprintf(p.Out, "%s: all PRs closed; grace period %s begins\n",
 				w.Name, time.Duration(w.Stop.ArchiveGraceSec)*time.Second)
 			return nil
@@ -382,17 +365,17 @@ func (p *Poller) maybeArchive(ctx context.Context, w *Critic, snap *Snapshot) er
 			fmt.Fprintf(p.Out, "%s: could not deliver closing notice: %v\n", w.Name, err)
 		}
 	}
-	_ = p.projectSync(ctx, w, snap, nil)
-
-	dir, err := p.Store.Archive(w, snap)
+	dir, err := p.Store.Archive(ctx, w, snap)
 	if err != nil {
+		return fmt.Errorf("archive %s: %w", w.Name, err)
+	}
+	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return fmt.Errorf("archive %s: %w", w.Name, err)
 	}
 	fmt.Fprintf(p.Out, "%s: ARCHIVED to %s (%s)\n", w.Name, dir, w.Runtime.StopReason)
 
-	// The systemd timer is disabled but the form is left standing: the
-	// operator (or the seat) may still want to read it. `ebac gc` reaps
-	// forms whose critic is archived.
+	// The timer is disabled and the form left standing for whoever still
+	// wants to read it; nothing renews its lease now, so it expires.
 	if err := disableTimer(w.Name); err != nil {
 		fmt.Fprintf(p.Out, "%s: could not disable timer: %v\n", w.Name, err)
 	}
@@ -417,83 +400,4 @@ func joinMax(parts []string, n int) string {
 		return fmt.Sprint(parts)
 	}
 	return fmt.Sprintf("%v (+%d more)", parts[:n], len(parts)-n)
-}
-
-// projectAll writes the whole projection. Every write is a top-level key
-// holding a complete value — see Figaro.SetJSON for why that is not a style
-// preference.
-func (p *Poller) projectAll(ctx context.Context, w *Critic, snap *Snapshot, delta *Delta) {
-	f := p.Fig
-	set := func(k string, v any) {
-		if err := f.SetJSON(ctx, w.FormID, k, v); err != nil {
-			fmt.Fprintf(os.Stderr, "ebac: form write %s.%s: %v\n", w.FormID, k, err)
-		}
-	}
-	set("kind", "ebac.critic")
-	set("critic", projectCritic(w))
-	set("harness", harnessContract(w))
-	if err := projectProtocol(ctx, f, w.FormID, protocolChunks(protocolText(w, snap, p.Me))); err != nil {
-		fmt.Fprintf(os.Stderr, "ebac: form write %s protocol: %v\n", w.FormID, err)
-	}
-	set("prs", projectPRs(snap, p.Me))
-	set("delta", projectDelta(w.Runtime.Round, w.Runtime.PendingEvents,
-		len(w.Runtime.PendingEvents) > 0, w.Runtime.PendingSince, w.Runtime.RetryCount))
-	set("sync", syncProjection(w, snap, delta))
-}
-
-const protocolKeyPrefix = "harness_protocol_"
-
-// projectProtocol writes chunk i to harness_protocol_<i+1> and removes chunks
-// left over from a longer protocol. Rewriting an unchanged chunk does not move
-// the form's version, so the seat is shown the protocol only when it changes.
-func projectProtocol(ctx context.Context, f *Figaro, formID string, chunks []string) error {
-	for i, c := range chunks {
-		if err := f.SetJSON(ctx, formID, fmt.Sprintf("%s%d", protocolKeyPrefix, i+1), c); err != nil {
-			return err
-		}
-	}
-	form, _, err := f.FormRaw(ctx, formID)
-	if err != nil {
-		return err
-	}
-	for k := range form {
-		n, err := strconv.Atoi(strings.TrimPrefix(k, protocolKeyPrefix))
-		if strings.HasPrefix(k, protocolKeyPrefix) && (err != nil || n < 1 || n > len(chunks)) {
-			if err := f.Unset(ctx, formID, k); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (p *Poller) projectSync(ctx context.Context, w *Critic, snap *Snapshot, delta *Delta) error {
-	return p.Fig.SetJSON(ctx, w.FormID, "sync", syncProjection(w, snap, delta))
-}
-
-// projectDelta rewrites just the delta key from current runtime state.
-func (p *Poller) projectDelta(ctx context.Context, w *Critic) {
-	err := p.Fig.SetJSON(ctx, w.FormID, "delta", projectDelta(w.Runtime.Round,
-		w.Runtime.PendingEvents, len(w.Runtime.PendingEvents) > 0,
-		w.Runtime.PendingSince, w.Runtime.RetryCount))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ebac: form write %s.delta: %v\n", w.FormID, err)
-	}
-}
-
-func syncProjection(w *Critic, snap *Snapshot, delta *Delta) SyncProjection {
-	s := SyncProjection{
-		Round: w.Runtime.Round, OK: w.Runtime.LastError == "",
-		LastPolled: w.Runtime.LastPolled.UTC().Format(time.RFC3339),
-		Error:      w.Runtime.LastError, ConsecutiveFailures: w.Runtime.ConsecutiveFailures,
-		ScanComplete: snap == nil || snap.Complete,
-		Stopped:      w.Runtime.Stopped, StopReason: w.Runtime.StopReason,
-	}
-	if !w.Runtime.LastSuccess.IsZero() {
-		s.LastSuccess = w.Runtime.LastSuccess.UTC().Format(time.RFC3339)
-	}
-	if delta != nil {
-		s.SuppressedDeletions = len(delta.SuppressedDeletions)
-	}
-	return s
 }

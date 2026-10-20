@@ -141,7 +141,7 @@ func (p *Poller) superviseSuccession(ctx context.Context, c *Critic) {
 		c.Runtime.Standby = ""
 		c.Runtime.StandbyMintedAt = ""
 		c.Runtime.LastRecast = time.Now().UTC().Format(time.RFC3339)
-		_ = p.Store.SaveCritic(c)
+		_ = p.Store.SaveCritic(ctx, c)
 
 		state.Stage = "recast"
 		state.Generation = c.Runtime.Generation
@@ -171,7 +171,7 @@ func (p *Poller) superviseSuccession(ctx context.Context, c *Critic) {
 		}
 		c.Runtime.Standby = standby
 		c.Runtime.StandbyMintedAt = time.Now().UTC().Format(time.RFC3339)
-		_ = p.Store.SaveCritic(c)
+		_ = p.Store.SaveCritic(ctx, c)
 
 		state.Stage = "standby-prepared"
 		state.Standby = standby
@@ -185,7 +185,7 @@ func (p *Poller) superviseSuccession(ctx context.Context, c *Critic) {
 		state.Note = "standby " + c.Runtime.Standby + " no longer resolves; will re-mint"
 		c.Runtime.Standby = ""
 		c.Runtime.StandbyMintedAt = ""
-		_ = p.Store.SaveCritic(c)
+		_ = p.Store.SaveCritic(ctx, c)
 		state.Standby = ""
 
 	case c.Runtime.Standby != "":

@@ -45,16 +45,12 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 	}
 	renew(ctx, p.Fig, formID)
 
-	critics, err := p.Store.ListCritics()
+	critics, err := p.Store.ListCritics(ctx)
 	if err != nil {
 		return nil, err
 	}
 	res := &PromoteResult{}
-	for _, c := range critics {
-		if !c.Runtime.Archived {
-			res.Active++
-		}
-	}
+	res.Active = activeCritics(critics)
 
 	// Each promotion changes the queue, so the version is re-read every
 	// pass rather than carried across the loop.
@@ -71,6 +67,22 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 			}
 		}
 		res.Items = items
+
+		wrote := 0
+		for _, it := range reapPromoted(items, critics) {
+			fmt.Fprintf(p.Out, "queue: done %s — %s\n", it.PRKey(), it.Note)
+			if p.Dry {
+				continue
+			}
+			if err := UpdateItem(ctx, p.Fig, formID, it); err != nil {
+				fmt.Fprintf(p.Out, "queue: could not close %s: %v\n", it.PRKey(), err)
+				continue
+			}
+			wrote++
+		}
+		if wrote > 0 {
+			continue // the queue moved: re-read it
+		}
 
 		if res.Active >= cfg.MaxActive {
 			res.Skipped = fmt.Sprintf("at capacity: %d/%d active", res.Active, cfg.MaxActive)
@@ -171,7 +183,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 	if err := ValidName(name); err != nil {
 		return "", err
 	}
-	if _, err := p.Store.LoadCritic(name); err == nil {
+	if _, err := p.Store.LoadCritic(ctx, name); err == nil {
 		return "", fmt.Errorf("critic %q already exists", name)
 	}
 
@@ -195,7 +207,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		return "", fmt.Errorf("mint role: %w", err)
 	}
 	c.FormID = formID
-	if err := p.Store.SaveCritic(c); err != nil {
+	if err := p.Store.SaveCritic(ctx, c); err != nil {
 		return "", err
 	}
 
@@ -208,7 +220,6 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 	}
 
 	poller := &Poller{Store: p.Store, GH: p.GH, Fig: p.Fig, Out: io.Discard}
-	poller.projectAll(ctx, c, nil, &Delta{})
 
 	// Adopt current state silently, so the first armed round reports the
 	// delta since promotion rather than one wake per standing thread.
@@ -239,4 +250,36 @@ func (p *Promoter) coveredBy(critics []*Critic, key PRKey) string {
 
 func criticNameFor(it QueueItem) string {
 	return fmt.Sprintf("%s-%d", it.Repo, it.Number)
+}
+
+// activeCritics counts the critics holding a slot: a stopped critic polls
+// nothing and must not keep the queue at capacity.
+func activeCritics(critics []*Critic) int {
+	n := 0
+	for _, c := range critics {
+		if !c.Runtime.Archived && !c.Runtime.Stopped {
+			n++
+		}
+	}
+	return n
+}
+
+// reapPromoted closes out promoted items whose critic is archived or gone.
+func reapPromoted(items []QueueItem, critics []*Critic) []QueueItem {
+	live := map[string]bool{}
+	for _, c := range critics {
+		if !c.Runtime.Archived {
+			live[c.Name] = true
+		}
+	}
+	var out []QueueItem
+	for _, it := range items {
+		if it.State != QPromoted || live[it.Critic] {
+			continue
+		}
+		it.State = QDone
+		it.Note = "critic " + it.Critic + " archived or gone"
+		out = append(out, it)
+	}
+	return out
 }

@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// The brief is what actually costs money: it is a turn. It carries the delta
-// only; the standing protocol lives on the role form, which the seat studies.
+// The brief is what actually costs money: it is a turn. The round's change is
+// already on the role form, which the seat studies, so the brief only says
+// where to look: the summary, the standing, the form, and the ack.
 func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int) string {
 	d := &Delta{Events: events}
 	var b strings.Builder
@@ -18,51 +19,23 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 	if retry > 0 {
 		fmt.Fprintf(&b, "(redelivery attempt %d; earlier sends failed, so this batch may repeat news you have)\n", retry+1)
 	}
-	b.WriteString("\n")
-
-	t1 := d.Tier1()
-	if len(t1) > 0 {
-		b.WriteString("WORTH YOUR ATTENTION\n")
-		for _, e := range t1 {
-			fmt.Fprintf(&b, "  - %s\n", e.Line())
-			if e.URL != "" {
-				fmt.Fprintf(&b, "    %s\n", e.URL)
-			}
-		}
-		b.WriteString("\n")
-	}
-	if bg := tier2(events); len(bg) > 0 {
-		fmt.Fprintf(&b, "BACKGROUND (%d, no action expected)\n", len(bg))
-		for i, e := range bg {
-			if i >= 6 {
-				fmt.Fprintf(&b, "  - ... and %d more\n", len(bg)-6)
-				break
-			}
-			fmt.Fprintf(&b, "  - %s\n", e.Line())
-		}
-		b.WriteString("\n")
-	}
-
-	if snap != nil && len(snap.PRs) > 0 {
-		b.WriteString("STANDING\n")
+	if snap != nil {
 		for _, k := range snap.SortedPRKeys() {
 			p := snap.PRs[k]
 			c := p.Counts(me)
 			flag := ""
 			if !p.Complete {
-				flag = "  [SCAN INCOMPLETE — deletions not inferred this round]"
+				flag = " [scan incomplete]"
 			}
-			fmt.Fprintf(&b, "  %s %s  head %s  %d unresolved, %d awaiting a reply%s\n",
+			fmt.Fprintf(&b, "  %s %s head %s: %d unresolved, %d awaiting a reply%s\n",
 				k, p.State, short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
 		}
-		b.WriteString("\n")
 	}
-
-	n := len(protocolChunks(protocolText(w, snap, me)))
-	fmt.Fprintf(&b, "Protocol: form %s keys harness, harness_protocol_1..%d; read whole with `figaro form %s -j`.\n",
-		w.FormID, n, w.FormID)
-	fmt.Fprintf(&b, "When finished: ebac ack --critic %s --round %d [--note '<one line>']\n",
-		w.Name, w.Runtime.Round)
+	fmt.Fprintf(&b, "The comments are in your studied form %s (keys prs.*): read them in its diff, in full. "+
+		"Also `figaro form %s -j`, or GitHub. Not studying %s is a bug: `figaro study %s`.\n",
+		w.FormID, w.FormID, w.FormID, w.FormID)
+	fmt.Fprintf(&b, "Post through the form (harness.post); protocol in harness_protocol_*. "+
+		"When finished: ebac ack --critic %s --round %d [--note '<one line>']\n", w.Name, w.Runtime.Round)
 	return b.String()
 }
 
@@ -325,13 +298,12 @@ func reviewerCharge(w *Critic, snap *Snapshot) string {
 	b.WriteString("  5. NEVER NITPICK. No style, naming, formatting, lint-catchable or pre-existing\n")
 	b.WriteString("     issues; no \"consider adding tests\" without the exact test; never re-raise a\n")
 	b.WriteString("     point the author answered. One root cause at several sites is one comment.\n")
-	b.WriteString("  6. POST ONE REVIEW PER HEAD so the body and inline comments land together:\n")
-	fmt.Fprintf(&b, "       GH_HOST=%s gh api repos/<owner>/<repo>/pulls/<n>/reviews -X POST --input review.json\n", w.Host)
-	b.WriteString("     review.json: {commit_id: <head sha>, event: \"APPROVE\" or \"COMMENT\", body,\n")
-	b.WriteString("     comments: [{path, line, side: \"RIGHT\", body}]}. Usually zero or one inline\n")
-	b.WriteString("     comment, never more than three: one or two sentences, then optionally a\n")
-	b.WriteString("     ```suggestion block of a few lines that you applied and tested. The body is one\n")
-	b.WriteString("     line, then the SIGNATURE below verbatim. Name no agent, session or local path.\n")
+	b.WriteString("  6. POST ONE REVIEW PER HEAD, through the form:\n")
+	fmt.Fprintf(&b, "       ebac post --critic %s --pr <owner/repo#n> --event COMMENT|APPROVE --body-file <file>\n", w.Name)
+	fmt.Fprintf(&b, "     and an inline finding: ebac post --critic %s --pr <pr> --path <file> --line <n> --body-file <file>\n", w.Name)
+	b.WriteString("     Usually zero or one inline comment, never more than three: one or two sentences, then\n")
+	b.WriteString("     optionally a ```suggestion block of a few lines that you applied and tested. The review\n")
+	b.WriteString("     body is one line, then the SIGNATURE below verbatim. Name no agent, session or local path.\n")
 	if w.Approve {
 		b.WriteString("  7. APPROVE unless a VERIFIED finding is a correctness, security or data-loss\n")
 		b.WriteString("     defect; then COMMENT and tell the operator in one line. A push may dismiss\n")

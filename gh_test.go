@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -79,6 +81,15 @@ func TestHelperProcess(t *testing.T) {
 			os.Stderr.WriteString("reviewsCursor argument missing\n")
 			os.Exit(1)
 		}
+	case "post-ok":
+		in, _ := io.ReadAll(os.Stdin)
+		f, _ := os.OpenFile(os.Getenv("EBAC_FAKE_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		fmt.Fprintf(f, "CALL %s\t%s\n", strings.Join(rest, " "), in)
+		f.Close()
+		os.Stdout.WriteString("https://x/pull/1#posted\n")
+	case "post-fail":
+		os.Stderr.WriteString("HTTP 502\n")
+		os.Exit(1)
 	default:
 		os.Exit(2)
 	}

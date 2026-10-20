@@ -68,6 +68,10 @@ type Runtime struct {
 	StandbyMintedAt string `json:"standby_minted_at,omitempty"`
 	LastRecast      string `json:"last_recast,omitempty"`
 
+	// OutboxWatermark is the form version up to which every post has
+	// reached an end (outbox.go).
+	OutboxWatermark uint64 `json:"outbox_watermark,omitempty"`
+
 	Stopped    bool      `json:"stopped"`
 	StopReason string    `json:"stop_reason,omitempty"`
 	Archived   bool      `json:"archived"`
@@ -145,9 +149,16 @@ func (w *Critic) AddPR(r PRRef) bool {
 
 // ---------- paths ----------
 
-type Store struct{ Root string }
+// Store holds ebac's state. Critic state lives in figaro forms (formstate.go);
+// Root keeps only what must outlive a form: archive exports and reports.
+type Store struct {
+	Root   string
+	Fig    *Figaro
+	Me     string            // the forge login, for protocol text
+	formOf map[string]string // critic name -> form id, for this process
+}
 
-func NewStore() (*Store, error) {
+func NewStore(fig *Figaro) (*Store, error) {
 	root := os.Getenv("EBAC_STATE")
 	if root == "" {
 		base := os.Getenv("XDG_STATE_HOME")
@@ -160,12 +171,12 @@ func NewStore() (*Store, error) {
 		}
 		root = filepath.Join(base, "ebac")
 	}
-	for _, d := range []string{"critics", "snapshots", "archive", "reports"} {
+	for _, d := range []string{"archive", "reports"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			return nil, err
 		}
 	}
-	return &Store{Root: root}, nil
+	return &Store{Root: root, Fig: fig, formOf: map[string]string{}}, nil
 }
 
 func ValidName(n string) error {
@@ -182,13 +193,6 @@ func ValidName(n string) error {
 		}
 	}
 	return nil
-}
-
-func (s *Store) criticPath(name string) string {
-	return filepath.Join(s.Root, "critics", name+".json")
-}
-func (s *Store) snapPath(name string) string {
-	return filepath.Join(s.Root, "snapshots", name+".json")
 }
 
 // writeJSONAtomic writes via a temp file and rename. A critic definition
@@ -211,81 +215,6 @@ func readJSON(path string, v any) error {
 		return err
 	}
 	return json.Unmarshal(b, v)
-}
-
-func (s *Store) SaveCritic(w *Critic) error { return writeJSONAtomic(s.criticPath(w.Name), w) }
-
-func (s *Store) LoadCritic(name string) (*Critic, error) {
-	var w Critic
-	if err := readJSON(s.criticPath(name), &w); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no critic named %q (try: ebac ls)", name)
-		}
-		return nil, err
-	}
-	return &w, nil
-}
-
-func (s *Store) ListCritics() ([]*Critic, error) {
-	entries, err := os.ReadDir(filepath.Join(s.Root, "critics"))
-	if err != nil {
-		return nil, err
-	}
-	var out []*Critic
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		w, err := s.LoadCritic(strings.TrimSuffix(e.Name(), ".json"))
-		if err != nil {
-			// A corrupt critic file is reported, not skipped in silence.
-			fmt.Fprintf(os.Stderr, "ebac: unreadable critic %s: %v\n", e.Name(), err)
-			continue
-		}
-		out = append(out, w)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-func (s *Store) SaveSnapshot(name string, snap *Snapshot) error {
-	return writeJSONAtomic(s.snapPath(name), snap)
-}
-
-func (s *Store) LoadSnapshot(name string) (*Snapshot, error) {
-	var snap Snapshot
-	if err := readJSON(s.snapPath(name), &snap); err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // first round: no previous state is not an error
-		}
-		return nil, err
-	}
-	if snap.PRs == nil {
-		snap.PRs = map[PRKey]*PRState{}
-	}
-	return &snap, nil
-}
-
-// Archive moves a finished critic out of the live population, keeping the
-// evidence. A reaped critic that leaves no corpse cannot be audited, and the
-// prangl log is explicit that reaping-as-deletion cost it 46 of 62 subjects.
-func (s *Store) Archive(w *Critic, snap *Snapshot) (string, error) {
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	dir := filepath.Join(s.Root, "archive", w.Name+"-"+stamp)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	if err := writeJSONAtomic(filepath.Join(dir, "critic.json"), w); err != nil {
-		return "", err
-	}
-	if snap != nil {
-		if err := writeJSONAtomic(filepath.Join(dir, "snapshot.json"), snap); err != nil {
-			return "", err
-		}
-	}
-	_ = os.Remove(s.criticPath(w.Name))
-	_ = os.Remove(s.snapPath(w.Name))
-	return dir, nil
 }
 
 // ValidAriaID rejects the shapes that reach this tool by accident.

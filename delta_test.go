@@ -575,28 +575,6 @@ func TestIsBot(t *testing.T) {
 	}
 }
 
-// The form is mirrored whole into a model's context, so a runaway projection
-// is a real cost, not a cosmetic one.
-func TestDeltaProjectionIsBounded(t *testing.T) {
-	var events []Event
-	for i := 0; i < 100; i++ {
-		events = append(events, Event{Kind: EvCommentNew, Tier: TierWake, PR: "acme/widget#1",
-			Detail: strings.Repeat("x", 400)})
-	}
-	p := projectDelta(3, events, true, time.Now(), 0)
-	if len(p.Events) > maxProjectedEvents {
-		t.Fatalf("projected %d event lines, cap is %d", len(p.Events), maxProjectedEvents)
-	}
-	if p.Elided != 100-maxProjectedEvents {
-		t.Fatalf("elided count = %d, want %d", p.Elided, 100-maxProjectedEvents)
-	}
-	for _, line := range p.Events {
-		if len([]rune(line)) > 300 {
-			t.Fatalf("projected line too long: %d runes", len([]rune(line)))
-		}
-	}
-}
-
 func TestFirstLineTrimsOnRuneBoundary(t *testing.T) {
 	in := strings.Repeat("é", 400)
 	got := firstLine(in)
