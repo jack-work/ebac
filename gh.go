@@ -24,13 +24,26 @@ type GH struct {
 	Host string
 	// Timeout bounds a single API invocation.
 	Timeout time.Duration
+	// WriteGap spaces content-creating calls, as GitHub asks: serially, a
+	// second apart. A burst of thread replies on 2026-10-20 left one of
+	// them opening a review that never submitted.
+	WriteGap  time.Duration
+	lastWrite time.Time
+}
+
+// pace waits until WriteGap has passed since the last write.
+func (g *GH) pace() {
+	if wait := time.Until(g.lastWrite.Add(g.WriteGap)); wait > 0 {
+		time.Sleep(wait)
+	}
+	g.lastWrite = time.Now()
 }
 
 func NewGH(bin, host string) *GH {
 	if bin == "" {
 		bin = "gh"
 	}
-	return &GH{Bin: bin, Host: host, Timeout: 90 * time.Second}
+	return &GH{Bin: bin, Host: host, Timeout: 90 * time.Second, WriteGap: time.Second}
 }
 
 // execCommandContext is exec.CommandContext, indirected so tests can fake an
@@ -91,6 +104,9 @@ query($owner:String!,$name:String!,$number:Int!,$cursor:String,$reviewsCursor:St
       number url title state isDraft merged reviewDecision updatedAt baseRefName
       author{login __typename}
       headRefOid
+      pending: reviews(states:PENDING, first:5){
+        nodes{ id databaseId createdAt author{login} comments{ totalCount } }
+      }
       reviews(first:50, after:$reviewsCursor){
         pageInfo{ hasNextPage endCursor }
         nodes{ id state submittedAt body author{login __typename} }
@@ -105,7 +121,7 @@ query($owner:String!,$name:String!,$number:Int!,$cursor:String,$reviewsCursor:St
           id isResolved isOutdated path line
           comments(first:100){
             pageInfo{ hasNextPage }
-            nodes{ id url body createdAt updatedAt author{login __typename} }
+            nodes{ id url body state createdAt updatedAt author{login __typename} }
           }
         }
       }
@@ -133,7 +149,18 @@ type gqlResp struct {
 				BaseRefName    string    `json:"baseRefName"`
 				Author         gqlAuthor `json:"author"`
 				HeadRefOid     string    `json:"headRefOid"`
-				Reviews        struct {
+				Pending        struct {
+					Nodes []struct {
+						ID         string    `json:"id"`
+						DatabaseID int64     `json:"databaseId"`
+						CreatedAt  string    `json:"createdAt"`
+						Author     gqlAuthor `json:"author"`
+						Comments   struct {
+							TotalCount int `json:"totalCount"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"pending"`
+				Reviews struct {
 					PageInfo struct {
 						HasNextPage bool   `json:"hasNextPage"`
 						EndCursor   string `json:"endCursor"`
@@ -178,6 +205,7 @@ type gqlResp struct {
 								ID        string    `json:"id"`
 								URL       string    `json:"url"`
 								Body      string    `json:"body"`
+								State     string    `json:"state"`
 								CreatedAt string    `json:"createdAt"`
 								UpdatedAt string    `json:"updatedAt"`
 								Author    gqlAuthor `json:"author"`
@@ -239,6 +267,12 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 		// runs on every page: once the reviews cursor is exhausted, later
 		// pages (still walking through reviewThreads) simply repeat its
 		// last, empty page, which is harmless.
+		// Pending is asked for on every page and is the same each time.
+		st.Pending = st.Pending[:0]
+		for _, pn := range pr.Pending.Nodes {
+			st.Pending = append(st.Pending, PendingReview{ID: pn.ID, DatabaseID: pn.DatabaseID,
+				Author: pn.Author.Login, CreatedAt: pn.CreatedAt, Comments: pn.Comments.TotalCount})
+		}
 		for _, rv := range pr.Reviews.Nodes {
 			st.Reviews[rv.ID] = &Review{
 				ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
@@ -286,6 +320,9 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 					ID: cn.ID, URL: cn.URL, Body: cn.Body,
 					CreatedAt: cn.CreatedAt, UpdatedAt: cn.UpdatedAt,
 					Author: cn.Author.Login, IsBot: isBot(cn.Author),
+				}
+				if cn.State == "PENDING" {
+					c.State = "PENDING"
 				}
 				c.computeDigest()
 				t.Comments = append(t.Comments, c)

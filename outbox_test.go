@@ -27,6 +27,9 @@ func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 	ro := *w
 	ro.Write = false
 	rev := Critic{Name: "rev", Mode: ModeReviewer, Approve: true}
+	pw := w
+	_, pendingSnap := outboxCritic()
+	pendingSnap.PRs["acme/widget#1"].Pending = []PendingReview{{ID: "PRR_p", DatabaseID: 213120916, Author: "jack", Comments: 344}}
 	revNoApprove := Critic{Name: "rev", Mode: ModeReviewer}
 	for _, tc := range []struct {
 		name string
@@ -57,8 +60,17 @@ func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 		{"reviewer reacts", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
 		{"react without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", React: "+1"}, "needs reply_to"},
 		{"unknown reaction", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "thumbsup"}, "use one of"},
+		{"pending: reply", pw, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1"}, "pending review 213120916"},
+		{"pending: inline", pw, "jack", Post{PR: "acme/widget#1", Body: "x", Path: "a.go", Line: 3}, "pending review"},
+		{"pending: review", pw, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "COMMENT"}, "pending review"},
+		{"pending: top-level comment", pw, "jack", Post{PR: "acme/widget#1", Body: "x"}, ""},
+		{"pending: react and resolve", pw, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true}, ""},
 	} {
-		got := authorize(tc.w, snap, tc.me, &tc.post)
+		s := snap
+		if strings.HasPrefix(tc.name, "pending:") {
+			s = pendingSnap
+		}
+		got := authorize(tc.w, s, tc.me, &tc.post)
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
 			t.Errorf("%s: refusal %q, want %q", tc.name, got, tc.want)
 		}
@@ -481,5 +493,41 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	round("post-ok")
 	if got := readPost(t, f, w, "k2"); got.Reacted == "" || got.Resolved == "" {
 		t.Fatalf("reaction not retried: %+v", got)
+	}
+}
+
+func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, w, snap := liveCritic(t, f, true)
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("EBAC_FAKE_LOG", log)
+	calls := func() int {
+		b, _ := os.ReadFile(log)
+		return strings.Count(string(b), "CALL ")
+	}
+	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
+	round := func(scenario string) {
+		p.GH = fakeGH(t, scenario)
+		if err := st.Save(ctx, w, snap, p.flushOutbox(ctx, w, snap)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writePost(t, st, w, "q1", Post{PR: "acme/widget#1", Body: "Fixed.", ReplyTo: "PRRT_1"})
+	round("reply-pending")
+	got := readPost(t, f, w, "q1")
+	if got.Sent != nil || !strings.Contains(got.Refused, "landed in pending review 213120916") {
+		t.Fatalf("a pending reply: %+v", got)
+	}
+	round("post-ok")
+	if calls() != 1 {
+		t.Fatalf("a reply that landed pending was retried: %d calls", calls())
+	}
+
+	writePost(t, st, w, "q2", Post{PR: "acme/widget#1", Body: "Review.", Event: "COMMENT"})
+	round("post-422")
+	if got := readPost(t, f, w, "q2"); got.Attempts != 1 || !strings.Contains(got.Refused, "HTTP 422") {
+		t.Fatalf("a 422 was not refused at once: %+v", got)
 	}
 }

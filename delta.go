@@ -47,6 +47,11 @@ const (
 	// because a top-level comment has no ThreadID and no resolution state.
 	EvPRCommentNew    EventKind = "pr_comment_new"
 	EvPRCommentEdited EventKind = "pr_comment_edited"
+	// EvPendingReview: an unsubmitted review of ours exists. Every thread
+	// reply lands in it unseen and every new review is refused until the
+	// operator submits or deletes it; ebac does neither.
+	EvPendingReview     EventKind = "pending_review"
+	EvPendingReviewGone EventKind = "pending_review_gone"
 )
 
 type Event struct {
@@ -225,6 +230,23 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			tier = TierRecord
 		}
 		d.Events = append(d.Events, Event{Kind: EvDraftChanged, Tier: tier, PR: key, Detail: detail})
+	}
+
+	had := map[string]bool{}
+	for _, r := range pp.Pending {
+		had[r.ID] = true
+	}
+	for _, r := range np.Pending {
+		if !had[r.ID] {
+			d.Events = append(d.Events, Event{Kind: EvPendingReview, Tier: TierWake, PR: key, ReviewID: r.ID, Author: r.Author,
+				Detail: fmt.Sprintf("review %d (opened %s) holds %d comments only its author can see; replies land in it and new reviews are refused until the operator submits or deletes it",
+					r.DatabaseID, r.CreatedAt, r.Comments)})
+		}
+		delete(had, r.ID)
+	}
+	for id := range had {
+		d.Events = append(d.Events, Event{Kind: EvPendingReviewGone, Tier: TierRecord, PR: key, ReviewID: id,
+			Detail: "the pending review was submitted or deleted"})
 	}
 
 	if pp.HeadSHA != np.HeadSHA && np.HeadSHA != "" {

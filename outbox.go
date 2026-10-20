@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -116,6 +118,12 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 	if pr == nil {
 		return fmt.Sprintf("%q is not a pull request of this critic", p.PR)
 	}
+	if len(pr.Pending) > 0 && (p.Event != "" || p.Path != "" || (p.ReplyTo != "" && p.hasBody())) {
+		r := pr.Pending[0]
+		return fmt.Sprintf("pending review %d by %s on %s (opened %s, %d comments only its author can see) would swallow a reply and refuses new reviews: "+
+			"the operator must submit or delete it; a top-level comment (no --reply-to, --path or --event), --react and --resolve still work",
+			r.DatabaseID, r.Author, p.PR, r.CreatedAt, r.Comments)
+	}
 	switch p.Event {
 	case "", "COMMENT":
 	case "APPROVE":
@@ -149,6 +157,9 @@ func findMarker(pr *PRState, me, marker string) (string, bool) {
 	}
 	for _, t := range pr.Threads {
 		for _, c := range t.Comments {
+			if c.State == "PENDING" {
+				continue // in an unsubmitted review: nobody else can see it
+			}
 			if mine(c.Author, c.Body) {
 				return c.URL, true
 			}
@@ -188,6 +199,15 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 		} else {
 			tried = true
 			url, err := p.GH.Post(ctx, pr, post, post.Body+"\n\n"+marker)
+			var pend *errPendingReply
+			if errors.As(err, &pend) {
+				post.Refused = fmt.Sprintf("landed in pending review %d, visible only to its author; not sent and not retried (a retry would add another hidden comment): the operator must submit or delete that review", pend.ReviewID)
+				return
+			}
+			if why := clientError(err); why != "" {
+				post.Refused = "the forge refused it: " + why
+				return
+			}
 			if err != nil {
 				post.Error = err.Error()
 				return
@@ -204,6 +224,10 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 		}
 		tried = true
 		if err := p.GH.React(ctx, first.ID, reactions[post.React]); err != nil {
+			if why := clientError(err); why != "" {
+				post.Refused = "the forge refused the reaction: " + why
+				return
+			}
 			post.Error = err.Error()
 			return
 		}
@@ -216,6 +240,10 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 		}
 		tried = true
 		if err := p.GH.ResolveThread(ctx, post.ReplyTo); err != nil {
+			if why := clientError(err); why != "" {
+				post.Refused = "the forge refused the resolve: " + why
+				return
+			}
 			post.Error = err.Error()
 			return
 		}
@@ -326,12 +354,31 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 
 // Post sends one post to the forge and returns where it landed.
 func (g *GH) Post(ctx context.Context, pr *PRState, p *Post, body string) (string, error) {
+	g.pace()
 	switch {
 	case p.ReplyTo != "":
-		q := `mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}`
+		q := `mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url state pullRequestReview{databaseId}}}}`
 		out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + p.ReplyTo, "-f", "b=" + body,
-			"-q", ".data.addPullRequestReviewThreadReply.comment.url"}, nil)
-		return strings.TrimSpace(string(out)), err
+			"-q", ".data.addPullRequestReviewThreadReply.comment"}, nil)
+		if err != nil {
+			return "", err
+		}
+		var c struct {
+			URL    string `json:"url"`
+			State  string `json:"state"`
+			Review struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"pullRequestReview"`
+		}
+		if err := json.Unmarshal(out, &c); err != nil {
+			return "", fmt.Errorf("reply: unreadable answer %q: %w", strings.TrimSpace(string(out)), err)
+		}
+		if c.State != "SUBMITTED" {
+			// PENDING: absorbed into an unsubmitted review. Anything else is
+			// unknown; neither is a published reply.
+			return "", &errPendingReply{ReviewID: c.Review.DatabaseID, State: c.State, URL: c.URL}
+		}
+		return c.URL, nil
 	case p.Path != "" || p.Event != "":
 		review := map[string]any{"commit_id": pr.HeadSHA, "event": firstNonEmpty(p.Event, "COMMENT")}
 		if p.Path != "" {
@@ -360,6 +407,7 @@ var reactions = map[string]string{
 // React adds a reaction. A second identical reaction by the same user is a
 // no-op on the forge, so a retry is safe.
 func (g *GH) React(ctx context.Context, subject, content string) error {
+	g.pace()
 	q := `mutation($s:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$s,content:$c}){reaction{content}}}`
 	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "s=" + subject, "-f", "c=" + content,
 		"-q", ".data.addReaction.reaction.content"}, nil)
@@ -375,6 +423,7 @@ func (g *GH) React(ctx context.Context, subject, content string) error {
 // ResolveThread resolves a review thread. Resolving a resolved thread is a
 // no-op on the forge, so a retry is safe.
 func (g *GH) ResolveThread(ctx context.Context, thread string) error {
+	g.pace()
 	q := `mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}`
 	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + thread,
 		"-q", ".data.resolveReviewThread.thread.isResolved"}, nil)
@@ -402,4 +451,34 @@ func literalJSON(v any) []byte {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
 	return []byte(strings.TrimSpace(b.String()))
+}
+
+// errPendingReply: the forge took the reply but did not publish it.
+type errPendingReply struct {
+	ReviewID int64
+	State    string
+	URL      string
+}
+
+func (e *errPendingReply) Error() string {
+	return fmt.Sprintf("reply landed as %s in review %d (%s)", e.State, e.ReviewID, e.URL)
+}
+
+var httpStatus = regexp.MustCompile(`\(HTTP (\d{3})\)|HTTP (\d{3})`)
+
+// clientError names a 4xx refusal, which no retry will change. 429 (rate
+// limited) is the exception: it is transient.
+func clientError(err error) string {
+	if err == nil {
+		return ""
+	}
+	m := httpStatus.FindStringSubmatch(err.Error())
+	if m == nil {
+		return ""
+	}
+	code := m[1] + m[2]
+	if code[0] != '4' || code == "429" {
+		return ""
+	}
+	return err.Error()
 }

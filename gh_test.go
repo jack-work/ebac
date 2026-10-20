@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +27,9 @@ func fakeGH(t *testing.T, scenario string) *GH {
 		return exec.CommandContext(ctx, os.Args[0], cs...)
 	}
 	t.Cleanup(func() { execCommandContext = orig })
-	return NewGH("unused", "microsoft.ghe.com")
+	g := NewGH("unused", "microsoft.ghe.com")
+	g.WriteGap = 0
+	return g
 }
 
 // TestHelperProcess is not a real test. It is the child process fakeGH
@@ -68,6 +71,8 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	switch scenario {
+	case "pending":
+		os.Stdout.WriteString(pendingJSON)
 	case "paginate":
 		if reviewsCursor == "" {
 			os.Stdout.WriteString(page1JSON)
@@ -81,7 +86,10 @@ func TestHelperProcess(t *testing.T) {
 			os.Stderr.WriteString("reviewsCursor argument missing\n")
 			os.Exit(1)
 		}
-	case "post-ok", "resolve-fail":
+	case "post-422":
+		os.Stderr.WriteString("gh: Validation Failed (HTTP 422)\n")
+		os.Exit(1)
+	case "post-ok", "resolve-fail", "reply-pending":
 		joined := strings.Join(rest, " ")
 		resolving := strings.Contains(joined, "resolveReviewThread")
 		reacting := strings.Contains(joined, "addReaction")
@@ -95,6 +103,12 @@ func TestHelperProcess(t *testing.T) {
 		f.Close()
 		if resolving {
 			os.Stdout.WriteString("true\n")
+		} else if strings.Contains(joined, "addPullRequestReviewThreadReply") {
+			state := "SUBMITTED"
+			if scenario == "reply-pending" {
+				state = "PENDING"
+			}
+			fmt.Fprintf(os.Stdout, `{"url":"https://x/pull/1#posted","state":%q,"pullRequestReview":{"databaseId":213120916}}`+"\n", state)
 		} else if reacting {
 			for _, a := range rest {
 				if v, ok := strings.CutPrefix(a, "c="); ok {
@@ -206,6 +220,76 @@ func TestForgeHost(t *testing.T) {
 		got, err := forgeHost(tc.refs, "fallback.example")
 		if tc.bad != (err != nil) || got != tc.want && !tc.bad {
 			t.Errorf("%s: got %q, %v", tc.name, got, err)
+		}
+	}
+}
+
+const pendingJSON = `{"data":{"repository":{"pullRequest":{
+  "number":1,"url":"https://x/pull/1","title":"t","state":"OPEN","isDraft":false,"merged":false,
+  "reviewDecision":"","updatedAt":"","baseRefName":"main","author":{"login":"a","__typename":"User"},
+  "headRefOid":"sha1",
+  "pending":{"nodes":[{"id":"PRR_p","databaseId":213120916,"createdAt":"2026-10-20T04:20:23Z","author":{"login":"jack"},"comments":{"totalCount":344}}]},
+  "reviews":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
+  "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+  "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+    {"id":"T1","isResolved":false,"isOutdated":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+      {"id":"C1","url":"u1","body":"finding","state":"SUBMITTED","createdAt":"1","updatedAt":"1","author":{"login":"amy","__typename":"User"}},
+      {"id":"C2","url":"u2","body":"fixed <!-- ebac:post:rw:p1 -->","state":"PENDING","createdAt":"2","updatedAt":"2","author":{"login":"jack","__typename":"User"}}]}}]}
+}}}}`
+
+// 2026-10-20: a pending review swallowed 344 thread replies on bic/aether#56134
+// while ebac recorded every one as sent.
+func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
+	g := fakeGH(t, "pending")
+	pr, err := g.FetchPR(context.Background(), "acme", "widget", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pr.Pending) != 1 || pr.Pending[0].DatabaseID != 213120916 || pr.Pending[0].Comments != 344 || pr.Pending[0].Author != "jack" {
+		t.Fatalf("pending = %+v", pr.Pending)
+	}
+	cs := pr.Threads["T1"].Comments
+	if cs[0].State != "" || cs[1].State != "PENDING" {
+		t.Fatalf("comment states %q %q; want published, PENDING", cs[0].State, cs[1].State)
+	}
+	if !pr.Threads["T1"].AwaitingUs("jack") {
+		t.Error("a reply held in a pending review counted as an answer")
+	}
+	if _, ok := findMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
+		t.Error("a pending comment was recovered as sent")
+	}
+	d := Diff(&Snapshot{PRs: map[PRKey]*PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
+		&Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}, Complete: true}, "jack")
+	var got []Event
+	for _, e := range d.Events {
+		if e.Kind == EvPendingReview {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 || got[0].Tier != TierWake || !strings.Contains(got[0].Detail, "213120916") {
+		t.Fatalf("pending review events %+v; want one wake naming 213120916", got)
+	}
+	gone := Diff(&Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}, Complete: true},
+		&Snapshot{PRs: map[PRKey]*PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}, Complete: true}, "jack")
+	found := false
+	for _, e := range gone.Events {
+		found = found || e.Kind == EvPendingReviewGone
+	}
+	if !found {
+		t.Error("the pending review going away was not recorded")
+	}
+}
+
+func TestClientErrorIsFinalExceptRateLimits(t *testing.T) {
+	for msg, final := range map[string]bool{
+		"gh: Validation Failed (HTTP 422)":       true,
+		"gh: Not Found (HTTP 404)":               true,
+		"gh: API rate limit exceeded (HTTP 429)": false,
+		"gh: Bad Gateway (HTTP 502)":             false,
+		"gh timed out after 90s":                 false,
+	} {
+		if got := clientError(errors.New(msg)) != ""; got != final {
+			t.Errorf("%q: final=%v, want %v", msg, got, final)
 		}
 	}
 }

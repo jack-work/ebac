@@ -60,12 +60,24 @@ type PRState struct {
 	// field existed: FetchPR never asked GraphQL for it.
 	Comments map[string]*Comment `json:"comments"`
 
+	// Pending lists unsubmitted reviews visible to us (only our own are).
+	// One absorbs every thread reply we make and blocks every new review.
+	Pending []PendingReview `json:"pending_reviews,omitempty"`
+
 	// Gate state for cheap polling.
 	ETag string `json:"etag,omitempty"`
 
 	// Complete is per-PR: one PR's pagination failure must not poison
 	// the other PRs in the same critic.
 	Complete bool `json:"complete"`
+}
+
+type PendingReview struct {
+	ID         string `json:"id"`
+	DatabaseID int64  `json:"database_id"`
+	Author     string `json:"author"`
+	CreatedAt  string `json:"created_at"`
+	Comments   int    `json:"comments"`
 }
 
 func (p *PRState) Closed() bool {
@@ -102,13 +114,19 @@ func (t *Thread) FirstComment() *Comment {
 	return t.Comments[0]
 }
 
-// AwaitingUs is true when the last word in an unresolved thread was not ours.
+// AwaitingUs is true when the last published word in an unresolved thread was
+// not ours. A reply of ours held in a pending review is not an answer: nobody
+// else can see it.
 func (t *Thread) AwaitingUs(me string) bool {
 	if t.IsResolved {
 		return false
 	}
-	last := t.LastComment()
-	return last != nil && !strings.EqualFold(last.Author, me)
+	for i := len(t.Comments) - 1; i >= 0; i-- {
+		if c := t.Comments[i]; c.State != "PENDING" {
+			return !strings.EqualFold(c.Author, me)
+		}
+	}
+	return false
 }
 
 type Comment struct {
@@ -119,6 +137,9 @@ type Comment struct {
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	URL       string `json:"url"`
+	// State is PENDING for a comment held in an unsubmitted review: only its
+	// author can see it. Empty means published.
+	State string `json:"state,omitempty"`
 	// Digest fingerprints the body so an edit is detectable without
 	// diffing prose. UpdatedAt alone is not enough: some edits do not
 	// move it, and some non-edits do.

@@ -27,6 +27,10 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 			if !p.Complete {
 				flag = " [scan incomplete]"
 			}
+			for _, r := range p.Pending {
+				flag += fmt.Sprintf(" [PENDING REVIEW %d by %s: %d comments nobody else can see; replies and reviews refused until the operator submits or deletes it]",
+					r.DatabaseID, r.Author, r.Comments)
+			}
 			fmt.Fprintf(&b, "  %s %s head %s: %d unresolved, %d awaiting a reply%s\n",
 				k, p.State, short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
 		}
