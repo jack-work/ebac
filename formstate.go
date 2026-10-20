@@ -305,9 +305,12 @@ func (s *Store) SaveCritic(ctx context.Context, w *Critic) error {
 	return s.Save(ctx, w, nil, nil)
 }
 
-// Save writes the critic, and the snapshot when one is given, as ONE patch.
-// extra carries further ebac-owned paths (outbox acks) in the same patch.
-func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, extra map[string]json.RawMessage) error {
+// Receipts are outbox fields to merge into post.<id>, by post id.
+type Receipts map[string]map[string]json.RawMessage
+
+// Save writes the critic, and the snapshot when one is given, as ONE patch,
+// with any outbox receipts merged into the posts they answer.
+func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, receipts Receipts) error {
 	if w.FormID == "" {
 		return fmt.Errorf("critic %s has no form", w.Name)
 	}
@@ -326,9 +329,6 @@ func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, extra map[s
 		return err
 	}
 	set["harness"] = harness
-	for k, v := range extra {
-		set[k] = v
-	}
 	s.formOf[w.Name] = w.FormID
 	return s.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys ebacState) (map[string]json.RawMessage, []string) {
 		sys.Runtime = w.Runtime
@@ -347,7 +347,23 @@ func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, extra map[s
 		for i, c := range protocolChunks(protocolText(w, view, s.Me)) {
 			set[fmt.Sprintf("%s%d", protocolKeyPrefix, i+1)] = mustJSON(c)
 		}
-		set["system.ebac"] = mustJSON(sys)
+		system := objectOf(cur["system"])
+		system["ebac"] = mustJSON(sys)
+		set["system"] = mustJSON(system)
+		if len(receipts) > 0 {
+			posts := objectOf(cur["post"])
+			for id, fields := range receipts {
+				if _, ok := posts[id]; !ok {
+					continue // removed since it was read
+				}
+				p := objectOf(posts[id])
+				for k, v := range fields {
+					p[k] = v
+				}
+				posts[id] = mustJSON(p)
+			}
+			set["post"] = mustJSON(posts)
+		}
 		var remove []string
 		for k := range cur {
 			if k == "delta" || k == "sync" {
@@ -381,9 +397,45 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-// commit diffs the paths build returns against the live form and writes the
-// difference as one versioned patch, re-reading on a lost race. Keys build
-// does not name are left as the seat or another writer left them.
+// nextBoard applies whole top-level values and removals to a board.
+func nextBoard(cur form.Snapshot, set map[string]json.RawMessage, remove []string) (form.Snapshot, error) {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range append(keys, remove...) {
+		if strings.Contains(k, ".") {
+			return cur, fmt.Errorf("%q is not a top-level key", k)
+		}
+	}
+	next := cur
+	for _, k := range keys {
+		next = next.SetPath(k, set[k])
+	}
+	for _, k := range remove {
+		next = next.DeletePath(k)
+	}
+	return next, nil
+}
+
+// objectOf reads a JSON object's members; anything else reads as empty.
+func objectOf(raw json.RawMessage) map[string]json.RawMessage {
+	m := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+		return map[string]json.RawMessage{}
+	}
+	return m
+}
+
+// commit diffs the top-level keys build returns against the live form and
+// writes the difference as one versioned patch, re-reading on a lost race.
+// Keys build does not name are left as the seat or another writer left them.
+//
+// Top-level only, always: form.SetPath through a member that is a leaf rather
+// than an object adds a flat "a.b" sibling instead of nesting
+// (jack-work/figaro#43); on 2026-10-20 that replaced one form's system subtree
+// with null. Subtrees (system, post) are merged here and written whole.
 func (s *Store) commit(ctx context.Context, id string, build func(cur map[string]json.RawMessage, sys ebacState) (map[string]json.RawMessage, []string)) error {
 	c, err := s.Fig.node(ctx, id)
 	if err != nil {
@@ -399,17 +451,9 @@ func (s *Store) commit(ctx context.Context, id string, build func(cur map[string
 			return err
 		}
 		set, remove := build(f.Keys, f.ebac())
-		next := f.Snap
-		keys := make([]string, 0, len(set))
-		for k := range set {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			next = next.SetPath(k, set[k])
-		}
-		for _, k := range remove {
-			next = next.DeletePath(k)
+		next, err := nextBoard(f.Snap, set, remove)
+		if err != nil {
+			return fmt.Errorf("write %s: %w", id, err)
 		}
 		patch := next.Diff(f.Snap)
 		if patch.IsIdentity() {

@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jack-work/figaro/api/form"
+	"strings"
 	"testing"
 	"time"
 )
@@ -163,5 +166,45 @@ func TestLiveRemovedFormIsGoneAndAnUnreachableDaemonIsNot(t *testing.T) {
 	_, err = NewFigaro("/nonexistent/angelus.sock").Form(ctx, id)
 	if err == nil || errors.Is(err, ErrFormGone) {
 		t.Errorf("unreachable daemon: %v; must not read as gone", err)
+	}
+}
+
+// 2026-10-20: a form whose system member was a leaf lost its whole system
+// subtree to a nested write (jack-work/figaro#43). Writes must not nest.
+func TestNextBoardSurvivesALeafSystem(t *testing.T) {
+	var cur form.Snapshot
+	if err := json.Unmarshal([]byte(`{"name":"f","system":null,"post":{"p1":{"pr":"a/b#1","body":"x"}}}`), &cur); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nextBoard(cur, map[string]json.RawMessage{"system.ebac": json.RawMessage(`{}`)}, nil); err == nil {
+		t.Fatal("a dotted key was accepted")
+	}
+	curKeys := map[string]json.RawMessage{}
+	b, _ := json.Marshal(cur)
+	_ = json.Unmarshal(b, &curKeys)
+
+	system := objectOf(curKeys["system"])
+	system["ebac"] = json.RawMessage(`{"runtime":{"round":41}}`)
+	posts := objectOf(curKeys["post"])
+	p1 := objectOf(posts["p1"])
+	p1["sent"] = json.RawMessage(`{"url":"u"}`)
+	posts["p1"] = mustJSON(p1)
+	next, err := nextBoard(cur, map[string]json.RawMessage{"system": mustJSON(system), "post": mustJSON(posts)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := json.Marshal(next)
+	var got map[string]json.RawMessage
+	_ = json.Unmarshal(out, &got)
+	for k := range got {
+		if strings.Contains(k, ".") {
+			t.Errorf("flat decoy key %q in %s", k, out)
+		}
+	}
+	if string(got["system"]) != `{"ebac":{"runtime":{"round":41}}}` {
+		t.Errorf("system = %s", got["system"])
+	}
+	if string(got["post"]) != `{"p1":{"body":"x","pr":"a/b#1","sent":{"url":"u"}}}` {
+		t.Errorf("post = %s", got["post"])
 	}
 }

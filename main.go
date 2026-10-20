@@ -736,7 +736,9 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 		}
 	}
 	err = st.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{key: mustJSON(post)}, nil
+		posts := objectOf(cur["post"])
+		posts[*id] = mustJSON(post)
+		return map[string]json.RawMessage{"post": mustJSON(posts)}, nil
 	})
 	if err != nil {
 		return err

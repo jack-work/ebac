@@ -159,10 +159,10 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 }
 
 // flushOutbox posts what the seat wrote since the watermark and returns the
-// receipts as form paths for the round's one patch, and moves the watermark
+// receipts for the round's one patch, and moves the watermark
 // in w. On any read failure it moves nothing.
-func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) map[string]json.RawMessage {
-	acks := map[string]json.RawMessage{}
+func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Receipts {
+	acks := Receipts{}
 	c, err := p.Fig.node(ctx, w.FormID)
 	if err != nil {
 		fmt.Fprintf(p.Out, "%s: outbox unreadable: %v\n", w.Name, err)
@@ -218,18 +218,20 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) map
 		} else {
 			p.sendPost(ctx, w, snap, id, post)
 		}
+		r := map[string]json.RawMessage{}
 		if post.Sent != nil {
-			acks["post."+id+".sent"] = mustJSON(post.Sent)
+			r["sent"] = mustJSON(post.Sent)
 		}
 		if post.Refused != "" {
-			acks["post."+id+".refused"] = mustJSON(post.Refused)
+			r["refused"] = mustJSON(post.Refused)
 		}
 		if post.Error != "" || hadError {
-			acks["post."+id+".error"] = mustJSON(post.Error)
+			r["error"] = mustJSON(post.Error)
 		}
 		if post.Attempts > 0 {
-			acks["post."+id+".attempts"] = mustJSON(post.Attempts)
+			r["attempts"] = mustJSON(post.Attempts)
 		}
+		acks[id] = r
 		switch {
 		case post.Sent != nil:
 			fmt.Fprintf(p.Out, "%s: posted %s -> %s\n", w.Name, id, post.Sent.URL)

@@ -237,8 +237,10 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 
 func writePost(t *testing.T, st *Store, w *Critic, id string, p Post) {
 	t.Helper()
-	err := st.commit(context.Background(), w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{"post." + id: mustJSON(p)}, nil
+	err := st.commit(context.Background(), w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
+		posts := objectOf(cur["post"])
+		posts[id] = mustJSON(p)
+		return map[string]json.RawMessage{"post": mustJSON(posts)}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

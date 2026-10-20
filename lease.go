@@ -54,8 +54,8 @@ func gone(err error) error {
 // form ebac creates is ever without one.
 func mintPatch(name string) message.Patch {
 	nb, _ := json.Marshal(name)
-	tb, _ := json.Marshal(FormLease.String())
-	return form.Build(form.Snapshot{}, map[string]json.RawMessage{"name": nb, systemTTLKey: tb}, nil)
+	sys := mustJSON(map[string]string{"ttl": FormLease.String()})
+	return form.Build(form.Snapshot{}, map[string]json.RawMessage{"name": nb, "system": sys}, nil)
 }
 
 // leaseTTL returns the system.ttl that puts the deadline FormLease from now,
@@ -97,8 +97,8 @@ func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
 	return false, fmt.Errorf("renew %s: %w", id, ErrFormGone)
 }
 
-// setLease writes system.ttl through figaro's own path builder: ebac's flat
-// SetJSON refuses dotted keys, and a flat "system.ttl" key would be a decoy.
+// setLease merges ttl into the system subtree and writes it whole: a nested
+// SetPath can land as a flat decoy when system is a leaf (jack-work/figaro#43).
 func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) error {
 	c, err := f.node(ctx, id)
 	if err != nil {
@@ -111,7 +111,10 @@ func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) err
 		if err != nil {
 			return fmt.Errorf("read %s: %w", id, err)
 		}
-		patch := form.Build(cur.Snapshot, map[string]json.RawMessage{systemTTLKey: tb}, nil)
+		raw, _ := cur.Snapshot.Get("system")
+		system := objectOf(raw)
+		system["ttl"] = tb
+		patch := cur.Snapshot.SetPath("system", mustJSON(system)).Diff(cur.Snapshot)
 		if _, lastErr = c.Set(ctx, patch, cur.Version); lastErr == nil || !isVersionConflict(lastErr) {
 			return lastErr
 		}
