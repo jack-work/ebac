@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -130,8 +131,13 @@ func FindFormsByKind(ctx context.Context, fig *Figaro, kind string) ([]string, e
 	var out []string
 	for _, id := range ids {
 		f, err := fig.Form(ctx, id)
+		if errors.Is(err, ErrFormGone) {
+			continue // removed between the list and the read
+		}
 		if err != nil {
-			continue
+			// An unread form may be the one we are looking for: a caller
+			// that mints on "none found" must not be told none were found.
+			return nil, fmt.Errorf("find kind %s: %w", kind, err)
 		}
 		if k, _ := f["kind"].(string); k == kind {
 			out = append(out, id)

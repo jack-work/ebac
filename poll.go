@@ -184,6 +184,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	}
 
 	p.projectAll(ctx, w, next, delta)
+	renew(ctx, p.Fig, w.FormID)
 
 	// --- deliver ---
 	if err := p.deliver(ctx, w, next); err != nil {

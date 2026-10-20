@@ -43,6 +43,7 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	renew(ctx, p.Fig, formID)
 
 	critics, err := p.Store.ListCritics()
 	if err != nil {

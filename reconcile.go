@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -22,9 +22,8 @@ import (
 // problem: pollers never touch the roster, so there is no lost update, and
 // `ebac ls` can read one form instead of interrogating every critic.
 //
-// Detection is by PROPERTY, never by name: an ebac-owned form is one carrying
-// `kind` = ebac.critic or ebac.roster. A form named "ebac-something" that we
-// did not write is not ours, and a form of ours that somebody renamed still is.
+// It never deletes a form. Every form ebac mints carries a lease (lease.go)
+// that its user renews, so an unclaimed form expires on its own.
 
 type Finding struct {
 	Rule    string `json:"rule"`
@@ -35,15 +34,14 @@ type Finding struct {
 }
 
 type ReconcileReport struct {
-	Ran        string    `json:"ran"`
-	Critics    int       `json:"critics"`
-	OwnedForms int       `json:"owned_forms"`
-	Findings   []Finding `json:"findings"`
-	Fixed      int       `json:"fixed"`
-	DryRun     bool      `json:"dry_run"`
+	Ran      string    `json:"ran"`
+	Critics  int       `json:"critics"`
+	Findings []Finding `json:"findings"`
+	Fixed    int       `json:"fixed"`
+	DryRun   bool      `json:"dry_run"`
 }
 
-func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRun, prune bool) (*ReconcileReport, error) {
+func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRun bool) (*ReconcileReport, error) {
 	rep := &ReconcileReport{Ran: time.Now().UTC().Format(time.RFC3339), DryRun: dryRun}
 
 	critics, err := st.ListCritics()
@@ -52,23 +50,6 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 	}
 	rep.Critics = len(critics)
 
-	// Index every form we own, by id, with the kind it declares.
-	ownedKind := map[string]string{}
-	ids, err := fig.ListFormIDs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("enumerate forms: %w", err)
-	}
-	for _, id := range ids {
-		f, err := fig.Form(ctx, id)
-		if err != nil {
-			continue
-		}
-		if k, _ := f["kind"].(string); strings.HasPrefix(k, "ebac.") {
-			ownedKind[id] = k
-		}
-	}
-	rep.OwnedForms = len(ownedKind)
-
 	add := func(rule, subject, problem, action string, fixed bool) {
 		rep.Findings = append(rep.Findings, Finding{rule, subject, problem, action, fixed})
 		if fixed {
@@ -76,18 +57,21 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 		}
 	}
 
-	claimed := map[string]bool{}
-	rosterID, _ := st.rosterFormID()
-	if rosterID != "" {
-		claimed[rosterID] = true
-	}
-
 	for _, c := range critics {
-		claimed[c.FormID] = true
+		if c.Runtime.Archived {
+			continue // its form expires with its lease
+		}
 
 		// R1: the critic's role form is gone. Re-mint rather than leave a
-		// critic that polls forever and delivers to nothing.
+		// critic that polls forever and delivers to nothing. Only the daemon
+		// saying "not found" counts: on 2026-10-19 a transport fault made
+		// every form unreadable and this rule minted a fresh, empty role
+		// every half hour.
 		if _, err := fig.Form(ctx, c.FormID); err != nil {
+			if !errors.Is(err, ErrFormGone) {
+				add("R1-form-unreadable", c.Name, "role form "+c.FormID+" unreadable: "+err.Error(), "left alone", false)
+				continue
+			}
 			if dryRun {
 				add("R1-form-missing", c.Name, "role form "+c.FormID+" unreadable", "would re-mint and re-project", false)
 			} else {
@@ -106,19 +90,6 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 				p := &Poller{Store: st, Fig: fig, Out: io.Discard}
 				p.projectAll(ctx, c, snap, &Delta{})
 				add("R1-form-missing", c.Name, "role form "+old+" was gone", "re-minted as "+newID+" (SEAT IS EMPTY: ebac cast --critic "+c.Name+" --aria <id>)", true)
-				claimed[newID] = true
-			}
-			continue
-		}
-
-		if c.Runtime.Archived {
-			// R4: an archived critic has no business holding a form.
-			if prune && !dryRun {
-				if err := fig.FormRemove(ctx, c.FormID); err == nil {
-					add("R4-archived-form", c.Name, "archived critic still holds "+c.FormID, "removed", true)
-				}
-			} else {
-				add("R4-archived-form", c.Name, "archived critic still holds "+c.FormID, "run with --prune to remove", false)
 			}
 			continue
 		}
@@ -160,26 +131,6 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 		}
 	}
 
-	// R2: a form of ours that no critic claims. This is the only rule that can
-	// destroy something, so it needs --prune AND it refuses to touch the
-	// roster.
-	for id, kind := range ownedKind {
-		if claimed[id] {
-			continue
-		}
-		if kind == "ebac.roster" {
-			add("R2-orphan-form", id, "a second roster form exists", "left alone; check state/roster.json", false)
-			continue
-		}
-		if prune && !dryRun {
-			if err := fig.FormRemove(ctx, id); err == nil {
-				add("R2-orphan-form", id, "no critic claims this "+kind, "removed", true)
-				continue
-			}
-		}
-		add("R2-orphan-form", id, "no critic claims this "+kind, "run with --prune to remove", false)
-	}
-
 	// R6: rebuild the index. Unconditional — this is the only writer, so the
 	// roster is exactly as fresh as the last reconcile, and it stamps its own
 	// age so a stale one cannot pass for a current one.
@@ -200,8 +151,8 @@ func printReconcile(out io.Writer, rep *ReconcileReport) {
 	if rep.DryRun {
 		mode = " (DRY RUN)"
 	}
-	fmt.Fprintf(out, "ebac reconcile%s — %d critic(s), %d owned form(s), %d finding(s), %d fixed\n",
-		mode, rep.Critics, rep.OwnedForms, len(rep.Findings), rep.Fixed)
+	fmt.Fprintf(out, "ebac reconcile%s — %d critic(s), %d finding(s), %d fixed\n",
+		mode, rep.Critics, len(rep.Findings), rep.Fixed)
 	for _, f := range rep.Findings {
 		mark := " "
 		if f.Fixed {
@@ -227,7 +178,6 @@ func (s *Store) rosterFormID() (string, error) {
 func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("reconcile")
 	dry := fs.Bool("dry-run", false, "report what would change, change nothing")
-	prune := fs.Bool("prune", false, "allow removal of orphaned and archived forms")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
 	st, err := NewStore()
@@ -238,7 +188,7 @@ func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	if *asJSON {
 		sink = io.Discard
 	}
-	rep, err := Reconcile(ctx, st, NewFigaro(g.figaro), sink, *dry, *prune)
+	rep, err := Reconcile(ctx, st, NewFigaro(g.figaro), sink, *dry)
 	if err != nil {
 		return err
 	}

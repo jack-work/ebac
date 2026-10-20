@@ -30,7 +30,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac issue  --critic N --title T --body-file F   file a harness defect
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
-  ebac reconcile [--prune] [--dry-run]      rectify drift between critics/, forms and timers
+  ebac reconcile [--dry-run]                rectify drift between critics/, forms and timers
   ebac gc                                   reap forms whose critic is archived
 
 Global flags: --gh <path> --socket <angelus.sock> --host <ghe host>

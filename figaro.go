@@ -115,7 +115,7 @@ func (f *Figaro) node(ctx context.Context, id string) (*sdk.Aria, error) {
 	// Attach still matters: it restores a dormant aria or form so the door
 	// has someone to route to.
 	if _, err := ang.Attach(ctx, id); err != nil {
-		return nil, fmt.Errorf("attach %s: %w", id, err)
+		return nil, fmt.Errorf("attach %s: %w", id, gone(err))
 	}
 	c, err := sdk.DialAria(f.addr(id), nil)
 	if err != nil {
@@ -149,8 +149,7 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	nb, _ := json.Marshal(name)
-	patch := onePatch("name", nb)
+	patch := mintPatch(name)
 	resp, err := ang.FormCreate(ctx, "", nil, &patch)
 	if err != nil {
 		return "", fmt.Errorf("form create: %w", err)
@@ -174,7 +173,7 @@ func (f *Figaro) FormRaw(ctx context.Context, id string) (map[string]json.RawMes
 	}
 	resp, err := c.Form(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read %s: %w", id, err)
+		return nil, 0, fmt.Errorf("read %s: %w", id, gone(err))
 	}
 	b, err := json.Marshal(resp.Snapshot)
 	if err != nil {

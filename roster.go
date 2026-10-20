@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,8 +56,12 @@ type rosterMeta struct {
 func (s *Store) RosterForm(ctx context.Context, fig *Figaro) (string, error) {
 	var m rosterMeta
 	if err := readJSON(s.rosterPath(), &m); err == nil && m.FormID != "" {
-		if _, err := fig.Form(ctx, m.FormID); err == nil {
+		_, err := fig.Form(ctx, m.FormID)
+		if err == nil {
 			return m.FormID, nil
+		}
+		if !errors.Is(err, ErrFormGone) {
+			return "", err
 		}
 		fmt.Fprintf(os.Stderr, "ebac: roster form %s is gone; minting a new one\n", m.FormID)
 	}
@@ -161,6 +166,7 @@ func SyncRoster(ctx context.Context, st *Store, fig *Figaro, me string) (string,
 	if err != nil {
 		return "", RosterSummary{}, err
 	}
+	renew(ctx, fig, id)
 	rows, sum, err := BuildRoster(ctx, st, fig, me)
 	if err != nil {
 		return "", RosterSummary{}, err
@@ -206,6 +212,9 @@ func ReadRoster(ctx context.Context, st *Store, fig *Figaro) (rows []RosterRow, 
 	form, err := fig.Form(ctx, id)
 	if err != nil {
 		return nil, sum, 0, fmt.Errorf("roster form %s unreadable: %w", id, err)
+	}
+	if _, ok := form["critics"]; !ok {
+		return nil, sum, 0, fmt.Errorf("roster form %s not yet published: run `ebac reconcile`", id)
 	}
 	raw, err := json.Marshal(form["critics"])
 	if err != nil {
