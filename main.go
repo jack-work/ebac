@@ -19,6 +19,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
+  ebac add-teams --name N --chat ID --topic T --aria SEAT [--quiet "A,B"] [--every 60s]
+                                            watch one Teams chat through tomb
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -68,6 +70,8 @@ func main() {
 	switch cmd {
 	case "init":
 		err = cmdInit(args)
+	case "add-teams":
+		err = cmdAddTeams(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
 	case "set-write":
@@ -498,7 +502,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {

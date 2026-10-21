@@ -72,6 +72,12 @@ type Runtime struct {
 	// reached an end (outbox.go).
 	OutboxWatermark uint64 `json:"outbox_watermark,omitempty"`
 
+	// GoneStreak counts consecutive "not found" rounds per PR key.
+	GoneStreak map[string]int `json:"gone_streak,omitempty"`
+
+	// Teams is a teams critic's seen-map and gone tracking.
+	Teams *TeamsState `json:"teams,omitempty"`
+
 	Stopped    bool      `json:"stopped"`
 	StopReason string    `json:"stop_reason,omitempty"`
 	Archived   bool      `json:"archived"`
@@ -120,6 +126,13 @@ type Critic struct {
 	Notes string `json:"notes,omitempty"`
 
 	FigaroSock string `json:"figaro_socket,omitempty"`
+
+	// Source names the upstream this critic translates (source.go); empty
+	// means github-pr.
+	Source string `json:"source,omitempty"`
+
+	// Chat is the Teams chat a teams critic watches (Mode teams only).
+	Chat *ChatRef `json:"chat,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`

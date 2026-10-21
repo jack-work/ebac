@@ -61,6 +61,8 @@ func protocolText(w *Critic, snap *Snapshot, me string) string {
 		b.WriteString("  touch their PRs and you have no gate. Report; do not act.\n\n")
 	}
 	switch w.Mode {
+	case ModeTeams:
+		b.WriteString(teamsCharge(w))
 	case ModeDevelop:
 		b.WriteString(developCharge(w))
 	case ModeReviewer:
@@ -328,4 +330,17 @@ func reviewerCharge(w *Critic, snap *Snapshot) string {
 		fmt.Fprintf(&b, "\nNO SIGNATURE: %v. Post nothing until the operator fixes it.\n", err)
 	}
 	return b.String()
+}
+
+func teamsCharge(w *Critic) string {
+	topic := ""
+	if w.Chat != nil {
+		topic = w.Chat.Topic
+	}
+	return "YOUR JOB — TEAMS WATCH\n" +
+		"  You are told of every new or edited message in the Teams chat " + fmt.Sprintf("%q", topic) + ". Each delivery names\n" +
+		"  the round; the messages are in key inbox (sender, time, kind, text cut at 1.5 KB, has_image, and the exact\n" +
+		"  tomb command for the full text and images). Messages from quiet senders are recorded but do not wake you.\n" +
+		"  ebac only reads this chat; it never posts to it. If key gone appears, the chat is unreadable: polling has\n" +
+		"  stopped and the form says what to do.\n"
 }

@@ -20,6 +20,7 @@ const (
 type Poller struct {
 	Store  *Store
 	GH     *GH
+	Tomb   *Tomb
 	Fig    *Figaro
 	Out    io.Writer
 	DryRun bool
@@ -42,157 +43,11 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		fmt.Fprintf(p.Out, "%s: stopped (%s)\n", name, w.Runtime.StopReason)
 		return nil
 	}
-
-	if w.Host != "" {
-		p.GH.Host = w.Host
+	src, ok := sources[w.SourceName()]
+	if !ok {
+		return fmt.Errorf("%s: unknown source %q", name, w.SourceName())
 	}
-
-	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
-
-	if p.Me == "" {
-		if me, err := p.GH.Whoami(ctx); err == nil {
-			p.Me = me
-		}
-	}
-
-	// --- hard stops, checked before we spend an API call ---
-	if reason := hardStop(w); reason != "" {
-		w.Runtime.Stopped, w.Runtime.StopReason = true, reason
-		_ = p.Store.SaveCritic(ctx, w)
-		fmt.Fprintf(p.Out, "%s: stopping — %s\n", name, reason)
-		return p.maybeArchive(ctx, w, nil)
-	}
-
-	// --- discovery: keep the PR set live ---
-	if w.DiscoverRepo != "" {
-		refs, derr := p.GH.ListPRs(ctx, w.DiscoverRepo, w.DiscoverAuthor, "open", 100)
-		if derr != nil {
-			// Discovery failure must not look like "no PRs match".
-			fmt.Fprintf(p.Out, "%s: discovery failed (retained %d known PRs): %v\n", name, len(w.PRs), derr)
-		} else {
-			added := 0
-			for _, r := range refs {
-				if w.AddPR(r) {
-					added++
-				}
-			}
-			if added > 0 {
-				fmt.Fprintf(p.Out, "%s: discovery added %d PR(s)\n", name, added)
-			}
-		}
-	}
-
-	if len(w.PRs) == 0 {
-		w.Runtime.LastError = "critic has no pull requests"
-		_ = p.Store.SaveCritic(ctx, w)
-		fmt.Fprintf(p.Out, "%s: no PRs in scope\n", name)
-		return nil
-	}
-
-	// --- fetch ---
-	next := &Snapshot{
-		Critic: name, Round: w.Runtime.Round, TakenAt: time.Now().UTC(),
-		PRs: map[PRKey]*PRState{}, Complete: true,
-	}
-	var fetchErrs []string
-	for _, ref := range w.PRs {
-		st, ferr := p.GH.FetchPR(ctx, ref.Owner, ref.Repo, ref.Number)
-		if ferr != nil {
-			fetchErrs = append(fetchErrs, fmt.Sprintf("%s: %v", ref.Key(), ferr))
-			// One PR we could not read makes the SCAN partial. The differ
-			// will refuse to infer deletions; it must not conclude that a
-			// PR vanished because a request timed out.
-			next.Complete = false
-			// Carry the previous state forward so the PR does not blink
-			// out of the projection.
-			if prev, _ := p.Store.LoadSnapshot(ctx, name); prev != nil {
-				if old, ok := prev.PRs[ref.Key()]; ok {
-					old.Complete = false
-					next.PRs[ref.Key()] = old
-				}
-			}
-			continue
-		}
-		if !st.Complete {
-			next.Complete = false
-		}
-		next.PRs[st.Key] = st
-	}
-
-	prev, err := p.Store.LoadSnapshot(ctx, name)
-	if err != nil {
-		return fmt.Errorf("load previous snapshot: %w", err)
-	}
-
-	if len(fetchErrs) == len(w.PRs) {
-		// Total failure: change nothing, do not diff, count the failure.
-		w.Runtime.ConsecutiveFailures++
-		w.Runtime.LastError = fmt.Sprintf("all %d PR fetches failed: %s", len(w.PRs), fetchErrs[0])
-		_ = p.Store.SaveCritic(ctx, w)
-		return fmt.Errorf("%s: %s", name, w.Runtime.LastError)
-	}
-
-	if len(fetchErrs) > 0 {
-		w.Runtime.LastError = fmt.Sprintf("%d/%d PR fetches failed: %s", len(fetchErrs), len(w.PRs), fetchErrs[0])
-	} else {
-		w.Runtime.LastError = ""
-		w.Runtime.ConsecutiveFailures = 0
-		w.Runtime.LastSuccess = next.TakenAt
-	}
-
-	delta := Diff(prev, next, p.Me)
-	if w.Mode == ModeReviewer {
-		asReviewer(delta, p.Me)
-	}
-
-	if p.DryRun {
-		fmt.Fprintf(p.Out, "%s: DRY RUN round %d — %s (%d events, %d wake-worthy)\n",
-			name, w.Runtime.Round, delta.Summary(), len(delta.Events), len(delta.Tier1()))
-		for _, e := range delta.Events {
-			fmt.Fprintf(p.Out, "  [t%d] %s\n", e.Tier, e.Line())
-		}
-		if len(delta.SuppressedDeletions) > 0 {
-			fmt.Fprintf(p.Out, "  NOTE: deletions suppressed for %v (partial scan)\n", delta.SuppressedDeletions)
-		}
-		// A dry run still persists observed state — that is what makes the
-		// FIRST armed round quiet instead of an avalanche.
-		return p.Store.Save(ctx, w, next, nil)
-	}
-
-	// --- outbox: what the seat wrote onto the form goes to the forge ---
-	acks := p.flushOutbox(ctx, w, next)
-
-	// --- accumulate the debt BEFORE attempting delivery ---
-	if len(delta.Events) > 0 {
-		if len(w.Runtime.PendingEvents) == 0 {
-			w.Runtime.PendingSince = next.TakenAt
-		}
-		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, delta.Events)
-	}
-
-	// One patch: the observed PRs, the debt and the outbox receipts. It lands
-	// before delivery, so a crash mid-send leaves the debt on the form and
-	// the seat's wake finds the round's change already in its study diff.
-	if err := p.Store.SaveRound(ctx, w, next, acks, inboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
-		return err
-	}
-	renew(ctx, p.Fig, w.FormID)
-
-	derr := p.deliver(ctx, w, next)
-	if derr == nil {
-		// Succession runs on the same heartbeat: the timer already fires
-		// every 5m and already knows the seat.
-		p.superviseSuccession(ctx, w)
-	}
-	// Runtime only, under system.ebac: invisible to the seat.
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
-	}
-	if derr != nil {
-		return derr
-	}
-	return p.maybeArchive(ctx, w, next)
+	return src.Round(ctx, p, w)
 }
 
 func (p *Poller) deliver(ctx context.Context, w *Critic, snap *Snapshot) error {

@@ -18,14 +18,18 @@ const (
 )
 
 type InboxItem struct {
-	PR     string `json:"pr"`
-	Kind   string `json:"kind"`
-	By     string `json:"by"`
-	At     string `json:"at"`
-	URL    string `json:"url,omitempty"`
-	Thread string `json:"thread,omitempty"`
-	Body   string `json:"body"`
-	Cut    bool   `json:"cut,omitempty"` // the full text is at URL
+	PR       string `json:"pr,omitempty"`
+	Chat     string `json:"chat,omitempty"`
+	Time     string `json:"time,omitempty"` // when the message was written (teams)
+	HasImage bool   `json:"has_image,omitempty"`
+	Fetch    string `json:"fetch,omitempty"` // exact command for the full text
+	Kind     string `json:"kind"`
+	By       string `json:"by"`
+	At       string `json:"at"`
+	URL      string `json:"url,omitempty"`
+	Thread   string `json:"thread,omitempty"`
+	Body     string `json:"body"`
+	Cut      bool   `json:"cut,omitempty"` // the full text is at URL
 }
 
 // inboxItems turns a round's events into inbox entries, keyed by comment or
@@ -83,7 +87,7 @@ func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]Inbo
 	box := map[string]InboxItem{}
 	_ = json.Unmarshal(cur, &box)
 	for id, it := range box {
-		if it.Body == "" && it.PR == "" {
+		if it.Kind == "" {
 			delete(box, id) // null or malformed
 		}
 	}
