@@ -111,9 +111,11 @@ func (t *Tomb) Messages(ctx context.Context, conv string, limit int) ([]TeamsMsg
 	return resp.Messages, nil
 }
 
-// A 404 or 403 from the chat API, or a chat tomb cannot find, means the chat
-// may be gone; anything else (daemon down, timeout, 5xx, auth) is transient.
-var teamsGoneText = regexp.MustCompile(`(?i)returned (404|403)\b|\bnot found\b|forbidden`)
+// Only the CHAT API's 404 or 403 means the chat may be gone. tomb's auth
+// errors read "auth service returned 403: ..." and an expired login must stay
+// transient: matching any "returned 403" would stop the critic for good after
+// three rounds of a sign-in problem.
+var teamsGoneText = regexp.MustCompile(`\bchat API returned (404|403)\b`)
 
 var (
 	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</li>`)

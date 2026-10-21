@@ -1,0 +1,292 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+)
+
+func tmsg(id, from, content string) TeamsMsg {
+	return TeamsMsg{ID: id, Version: id, ComposeTime: "2026-10-21T22:00:00Z", MessageType: "RichText/Html", From: from, Content: content}
+}
+
+func testChat() *ChatRef {
+	return &ChatRef{ID: "19:abc@thread.v2", Topic: "MD1 + Cowork", Quiet: []string{"Jack Kelliher"}}
+}
+
+func baseline(t *testing.T, msgs ...TeamsMsg) *TeamsState {
+	t.Helper()
+	st := &TeamsState{}
+	ev, items := teamsDiff(st, msgs, testChat())
+	if len(ev) != 0 || len(items) != 0 {
+		t.Fatalf("first round announced %d event(s), %d item(s); it must only record", len(ev), len(items))
+	}
+	return st
+}
+
+func TestTeamsFirstRoundBaselinesSilently(t *testing.T) {
+	st := baseline(t, tmsg("100", "Akshay", "<p>hi</p>"), tmsg("101", "Liang", "yo"),
+		TeamsMsg{ID: "102", MessageType: "ThreadActivity/AddMember"})
+	if len(st.Seen) != 2 {
+		t.Fatalf("seen = %v; want the two messages and no thread activity", st.Seen)
+	}
+	// Positive control: the same state now reports a new message.
+	ev, _ := teamsDiff(st, []TeamsMsg{tmsg("103", "Akshay", "new")}, testChat())
+	if len(ev) != 1 {
+		t.Fatalf("after the baseline a new message gave %d events", len(ev))
+	}
+}
+
+func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
+	st := baseline(t, tmsg("100", "Akshay", "old"))
+	ev, items := teamsDiff(st, []TeamsMsg{tmsg("100", "Akshay", "old"),
+		tmsg("200", "Liang Shi", `<p>Ship it &amp; tell <b>Jack</b><br>line two</p><img src="x">`)}, testChat())
+	if len(ev) != 1 || ev[0].Kind != "teams_new" || ev[0].Tier != TierWake || ev[0].Author != "Liang Shi" {
+		t.Fatalf("events = %+v", ev)
+	}
+	it, ok := items["teams-200"]
+	if !ok {
+		t.Fatalf("no inbox item for 200: %v", items)
+	}
+	if it.Body != "Ship it & tell Jack\nline two" {
+		t.Fatalf("body = %q", it.Body)
+	}
+	if !it.HasImage || !strings.Contains(it.Fetch, "--download-images") || !strings.Contains(it.Fetch, `select(.id=="200")`) {
+		t.Fatalf("image/fetch wrong: %+v", it)
+	}
+	if it.Chat != "19:abc@thread.v2" || it.By != "Liang Shi" {
+		t.Fatalf("item = %+v", it)
+	}
+}
+
+func TestTeamsQuietSenderIsRecordedNotWoken(t *testing.T) {
+	st := baseline(t)
+	ev, items := teamsDiff(st, []TeamsMsg{tmsg("300", "jack kelliher", "note to self")}, testChat())
+	if len(ev) != 1 || ev[0].Tier != TierRecord {
+		t.Fatalf("quiet sender (case-insensitive) must be TierRecord: %+v", ev)
+	}
+	if _, ok := items["teams-300"]; !ok {
+		t.Fatal("quiet sender's message must still reach the inbox")
+	}
+	if (&Delta{Events: ev}).WakeWorthy() {
+		t.Fatal("a quiet-only round is wake-worthy")
+	}
+}
+
+func TestTeamsEditIsContentNotVersion(t *testing.T) {
+	st := baseline(t, tmsg("400", "Akshay", "v1"))
+	// A reaction bumps version but not content: no event.
+	r := tmsg("400", "Akshay", "v1")
+	r.Version = "999"
+	r.Properties = map[string]any{"emotions": []any{map[string]any{"key": "like"}}}
+	if ev, _ := teamsDiff(st, []TeamsMsg{r}, testChat()); len(ev) != 0 {
+		t.Fatalf("a reaction produced %+v", ev)
+	}
+	ev, items := teamsDiff(st, []TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat())
+	if len(ev) != 1 || ev[0].Kind != "teams_edited" || ev[0].Tier != TierWake {
+		t.Fatalf("edit gave %+v", ev)
+	}
+	if items["teams-400"].Body != "v2" {
+		t.Fatalf("edit inbox body = %q", items["teams-400"].Body)
+	}
+	if ev, _ := teamsDiff(st, []TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat()); len(ev) != 0 {
+		t.Fatalf("an unchanged edit re-announced: %+v", ev)
+	}
+}
+
+func TestTeamsDeletes(t *testing.T) {
+	st := baseline(t, tmsg("500", "Akshay", "oops"))
+	d := tmsg("500", "Akshay", "")
+	d.Properties = map[string]any{"deletetime": "1792621672158"}
+	ev, _ := teamsDiff(st, []TeamsMsg{d}, testChat())
+	if len(ev) != 1 || ev[0].Kind != "teams_deleted" || ev[0].Tier != TierRecord {
+		t.Fatalf("delete gave %+v", ev)
+	}
+	// Created and deleted between two rounds: nothing to say.
+	ev, items := teamsDiff(st, []TeamsMsg{d, func() TeamsMsg { m := d; m.ID = "501"; return m }()}, testChat())
+	if len(ev) != 0 || len(items) != 0 {
+		t.Fatalf("born-dead message gave %+v %v", ev, items)
+	}
+}
+
+func TestTeamsSeenIsPrunedOldestFirst(t *testing.T) {
+	st := &TeamsState{Seen: map[string]string{}}
+	var msgs []TeamsMsg
+	for i := 0; i < teamsSeenMax+20; i++ {
+		msgs = append(msgs, tmsg(fmt.Sprint(1792621000000+i), "A", fmt.Sprint(i)))
+	}
+	teamsDiff(st, msgs, testChat())
+	if len(st.Seen) != teamsSeenMax {
+		t.Fatalf("seen = %d; want %d", len(st.Seen), teamsSeenMax)
+	}
+	if _, ok := st.Seen["1792621000000"]; ok {
+		t.Fatal("oldest id survived pruning")
+	}
+	if _, ok := st.Seen[fmt.Sprint(1792621000000+teamsSeenMax+19)]; !ok {
+		t.Fatal("newest id was pruned")
+	}
+}
+
+// ---------- tomb: fake exec ----------
+
+func fakeTomb(t *testing.T, scenario string) *Tomb {
+	t.Helper()
+	orig := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=TestTombHelperProcess", "--", scenario}, args...)...)
+	}
+	t.Cleanup(func() { execCommandContext = orig })
+	return &Tomb{Bin: "unused", Timeout: 10 * time.Second}
+}
+
+// TestTombHelperProcess is the fake tomb; gated on "--" in argv like TestHelperProcess.
+func TestTombHelperProcess(t *testing.T) {
+	args := os.Args
+	for len(args) > 0 && args[0] != "--" {
+		args = args[1:]
+	}
+	if len(args) < 2 {
+		return
+	}
+	scenario := args[1]
+	switch scenario {
+	case "ok":
+		os.Stdout.WriteString(`{"messages":[{"id":"1","messagetype":"RichText/Html","imdisplayname":"A","content":"<p>x</p>"}]}`)
+		os.Exit(0)
+	case "ok2":
+		os.Stdout.WriteString(`{"messages":[{"id":"1","messagetype":"RichText/Html","imdisplayname":"A","content":"<p>x</p>"},` +
+			`{"id":"2","messagetype":"RichText/Html","imdisplayname":"Akshay","content":"<p>please look</p>"}]}`)
+		os.Exit(0)
+	case "gone404":
+		os.Stderr.WriteString("Error: chat API returned 404\n")
+	case "gone403":
+		os.Stderr.WriteString("Error: chat API returned 403\n")
+	case "auth403":
+		os.Stderr.WriteString("Error: auth service returned 403: {\"error\":\"interaction_required\"}\n")
+	case "down":
+		os.Stderr.WriteString("Error: dial unix /run/user/1000/tomb.sock: connect: connection refused\n")
+	case "garbage":
+		os.Stdout.WriteString("not json")
+		os.Exit(0)
+	}
+	os.Exit(1)
+}
+
+func TestTombErrorClassification(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		scenario string
+		gone     bool
+		text     string
+	}{
+		{"gone404", true, "chat API returned 404"},
+		{"gone403", true, "chat API returned 403"},
+		{"auth403", false, "auth service returned 403"},
+		{"down", false, "connection refused"},
+		{"garbage", false, "unreadable answer"},
+	} {
+		_, err := fakeTomb(t, c.scenario).Messages(ctx, "19:abc@thread.v2", 5)
+		if err == nil {
+			t.Fatalf("%s: no error", c.scenario)
+		}
+		if errors.Is(err, errTombGone) != c.gone || !strings.Contains(err.Error(), c.text) {
+			t.Errorf("%s: gone=%v err=%v; want gone=%v containing %q", c.scenario, errors.Is(err, errTombGone), err, c.gone, c.text)
+		}
+	}
+	// Positive control: the fake answers when it should.
+	msgs, err := fakeTomb(t, "ok").Messages(ctx, "19:abc@thread.v2", 5)
+	if err != nil || len(msgs) != 1 || msgs[0].From != "A" {
+		t.Fatalf("ok scenario: %v %+v", err, msgs)
+	}
+}
+
+// ---------- live: one teams critic through baseline, news and gone ----------
+
+func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, err := NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-teams")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &Critic{Name: "livetest-teams-" + strings.TrimPrefix(id, "@")[:8], Mode: ModeTeams, Source: "teams-chat",
+		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	round := func(scenario string) error {
+		p := &Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
+		return p.Poll(ctx, w.Name)
+	}
+	load := func() *Critic {
+		c, err := st.LoadCritic(ctx, w.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	if err := round("ok"); err != nil {
+		t.Fatalf("baseline round: %v", err)
+	}
+	if c := load(); len(c.Runtime.Teams.Seen) != 1 || len(c.Runtime.PendingEvents) != 0 {
+		t.Fatalf("baseline: seen %v pending %v", c.Runtime.Teams.Seen, c.Runtime.PendingEvents)
+	}
+
+	// News with nobody seated: recorded, inbox written, delivery refused loudly.
+	if err := round("ok2"); err != nil {
+		t.Fatalf("news round: %v", err)
+	}
+	c := load()
+	if len(c.Runtime.PendingEvents) != 1 || !strings.Contains(c.Runtime.LastError, "no reachable target-aria") {
+		t.Fatalf("news: pending %+v lastError %q", c.Runtime.PendingEvents, c.Runtime.LastError)
+	}
+	form, err := f.Form(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox, _ := json.Marshal(form["inbox"])
+	if !strings.Contains(string(inbox), "please look") {
+		t.Fatalf("inbox lacks the new message: %s", inbox)
+	}
+
+	// Transient failures never count toward gone; two gones then a success reset the streak.
+	_ = round("auth403")
+	_ = round("gone404")
+	_ = round("gone404")
+	if c := load(); c.Runtime.Teams.GoneStreak != 2 || c.Runtime.Stopped {
+		t.Fatalf("after auth403+2x404: streak %d stopped %v", c.Runtime.Teams.GoneStreak, c.Runtime.Stopped)
+	}
+	_ = round("ok2")
+	if c := load(); c.Runtime.Teams.GoneStreak != 0 {
+		t.Fatalf("success did not reset the streak: %d", c.Runtime.Teams.GoneStreak)
+	}
+	for i := 0; i < teamsGoneAfter; i++ {
+		_ = round("gone404")
+	}
+	c = load()
+	if !c.Runtime.Stopped || !strings.Contains(c.Runtime.StopReason, "chat gone") {
+		t.Fatalf("not stopped after %d gones: %+v", teamsGoneAfter, c.Runtime)
+	}
+	form, _ = f.Form(ctx, id)
+	gone, _ := json.Marshal(form["gone"])
+	if !strings.Contains(string(gone), "19:abc@thread.v2") {
+		t.Fatalf("gone marker missing: %s", gone)
+	}
+	if err := round("ok2"); err != nil || !strings.Contains(out.String(), "stopped") {
+		t.Fatalf("a stopped critic polled again: %v\n%s", err, out.String())
+	}
+}

@@ -435,7 +435,6 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	// path that never got it. Best-effort: a Whoami failure degrades to
 	// the old (wrong-but-not-crashing) behavior rather than erroring the
 	// whole command.
-	me, _ := NewGH(g.gh, w.Host).Whoami(ctx)
 	fmt.Printf("critic     %s (%s)\n", w.Name, w.Mode)
 	fmt.Printf("role      %s -> %s\n", w.FormID, seat)
 	fmt.Printf("timer     %s, next %s\n", TimerState(w.Name).Display, NextElapse(w.Name))
@@ -448,6 +447,14 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("pending   %d undelivered event(s), retry %d, next %s\n",
 			n, w.Runtime.RetryCount, stamp(w.Runtime.NextRetryAt))
 	}
+	if w.Chat != nil {
+		fmt.Printf("chat      %s (%s), quiet: %s\n", w.Chat.Topic, w.Chat.ID, strings.Join(w.Chat.Quiet, ", "))
+		if t := w.Runtime.Teams; t != nil {
+			fmt.Printf("seen      %d message(s), gone streak %d\n", len(t.Seen), t.GoneStreak)
+		}
+		return nil
+	}
+	me, _ := NewGH(g.gh, w.Host).Whoami(ctx)
 	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "PR\tSTATE\tHEAD\tTHREADS\tUNRES\tAWAITING\tTITLE")
