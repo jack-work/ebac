@@ -255,7 +255,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 		}
 	}
 	for _, k := range seen {
-		if !strings.HasPrefix(k, "prs.acme/widget#1.threads.PRRT_1.comments.C2.") {
+		if !strings.HasPrefix(k, "prs.acme/widget#1.threads.PRRT_1.c.C2.") {
 			t.Errorf("seat-visible change outside the new comment: %s", k)
 		}
 	}
@@ -275,7 +275,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 	if err != nil || gs == nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if cs := gs.PRs["acme/widget#1"].Threads["PRRT_1"].Comments; len(cs) != 2 || cs[1].Body != "second" {
+	if cs := gs.PRs["acme/widget#1"].Threads["PRRT_1"].Comments; len(cs) != 2 || cs[1].ID != "C2" || cs[1].Author != "amy" || cs[1].Body != "" {
 		t.Fatalf("thread round-trip: %+v", cs)
 	}
 	form, _ := f.Form(ctx, w.FormID)
