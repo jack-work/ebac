@@ -217,6 +217,27 @@ func EnableTimer(name string, interval time.Duration) error {
 	return systemctl("enable", "--now", fmt.Sprintf("ebac@%s.timer", name))
 }
 
+// removeTimerDropIns deletes the critic's ebac@<name>.timer.d (its interval
+// drop-ins): a removed critic left them behind, and they piled up in
+// ~/.config/systemd/user for every critic that ever ran.
+func removeTimerDropIns(name string) error {
+	if err := ValidName(name); err != nil {
+		return err
+	}
+	dir, err := unitDir()
+	if err != nil {
+		return err
+	}
+	dd := filepath.Join(dir, fmt.Sprintf("ebac@%s.timer.d", name))
+	if _, err := os.Stat(dd); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.RemoveAll(dd); err != nil {
+		return fmt.Errorf("remove %s: %w", dd, err)
+	}
+	return systemctl("daemon-reload")
+}
+
 func disableTimer(name string) error {
 	unit := fmt.Sprintf("ebac@%s.timer", name)
 	if _, err := systemctlOut("is-enabled", unit); err != nil {

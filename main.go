@@ -627,6 +627,9 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	_ = disableTimer(w.Name)
+	if err := removeTimerDropIns(w.Name); err != nil {
+		fmt.Fprintf(os.Stderr, "ebac: %s: %v\n", w.Name, err)
+	}
 	snap, _ := st.LoadSnapshot(ctx, w.Name)
 	w.Runtime.Stopped, w.Runtime.Archived = true, true
 	w.Runtime.ArchivedAt = time.Now().UTC()

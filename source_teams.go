@@ -27,6 +27,7 @@ const (
 	ModeTeams      Mode = "teams"
 	teamsLimit          = 50
 	teamsSeenMax        = 300
+	teamsNamesMax       = 200
 	teamsBodyBytes      = 1500
 	teamsGoneAfter      = 3 // consecutive "gone" answers before the chat is declared gone
 	teamsTombWait       = 60 * time.Second
@@ -46,9 +47,12 @@ type TeamsState struct {
 	GoneSince  string            `json:"gone_since,omitempty"`
 	// FailSince is the start of the current run of failed rounds of any kind;
 	// Blind is set once that run passes teamsBlindAfter and the seat was told.
-	FailSince string `json:"fail_since,omitempty"`
-	Blind     bool   `json:"blind,omitempty"`
-	BlindErr  string `json:"blind_err,omitempty"`
+	// Names maps a sender id (8:orgid:...) to the display name seen on another
+	// row: Teams leaves imdisplayname blank on some rows (all of a self-chat).
+	Names     map[string]string `json:"names,omitempty"`
+	FailSince string            `json:"fail_since,omitempty"`
+	Blind     bool              `json:"blind,omitempty"`
+	BlindErr  string            `json:"blind_err,omitempty"`
 }
 
 // teamsBlindAfter is how long the watcher may fail to read the chat before it
@@ -62,6 +66,8 @@ type TeamsMsg struct {
 	Arrival     string         `json:"originalarrivaltime"`
 	MessageType string         `json:"messagetype"`
 	From        string         `json:"imdisplayname"`
+	FromURL     string         `json:"from"`
+	TokenName   string         `json:"fromDisplayNameInToken"`
 	Content     string         `json:"content"`
 	Properties  map[string]any `json:"properties"`
 }
@@ -77,6 +83,22 @@ func (m TeamsMsg) deleted() bool {
 		}
 	}
 	return strings.TrimSpace(m.Content) == ""
+}
+
+// senderID is the last segment of the from URL: 8:orgid:<guid> for a person.
+func (m TeamsMsg) senderID() string {
+	return m.FromURL[strings.LastIndex(m.FromURL, "/")+1:]
+}
+
+// sender names who wrote m: the row's name, the token's, a name learned from
+// another row of the same sender, and at worst the sender id itself.
+func (m TeamsMsg) sender(names map[string]string) string {
+	for _, n := range []string{m.From, m.TokenName, names[m.senderID()], m.senderID()} {
+		if n = strings.TrimSpace(n); n != "" {
+			return n
+		}
+	}
+	return "unknown sender"
 }
 
 func (m TeamsMsg) hasImage() bool { return strings.Contains(m.Content, "<img") }
@@ -148,9 +170,24 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 	if first {
 		st.Seen = map[string]string{}
 	}
+	if st.Names == nil {
+		st.Names = map[string]string{}
+	}
+	for _, m := range msgs {
+		if n := strings.TrimSpace(m.From); n != "" && m.isMessage() && m.senderID() != "" {
+			if _, ok := st.Names[m.senderID()]; ok || len(st.Names) < teamsNamesMax {
+				st.Names[m.senderID()] = n
+			}
+		}
+	}
 	quiet := map[string]bool{}
 	for _, q := range chat.Quiet {
 		quiet[strings.ToLower(q)] = true
+	}
+	// A quiet sender is matched by name, by sender id, or by the bare orgid guid.
+	isQuiet := func(m TeamsMsg, who string) bool {
+		id := strings.ToLower(m.senderID())
+		return quiet[strings.ToLower(who)] || (id != "" && (quiet[id] || quiet[strings.TrimPrefix(id, "8:orgid:")]))
 	}
 	for _, m := range msgs {
 		if !m.isMessage() || m.ID == "" {
@@ -175,13 +212,14 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 			continue // created and deleted between two rounds
 		}
 		tier := TierWake
-		if kind == "teams_deleted" || quiet[strings.ToLower(m.From)] {
+		who := m.sender(st.Names)
+		if kind == "teams_deleted" || isQuiet(m, who) {
 			tier = TierRecord
 		}
 		body, cut := cutBody(teamsText(m.Content), teamsBodyBytes)
-		events = append(events, Event{Kind: EventKind(kind), Tier: tier, PR: PRKey(chat.Topic), Comment: m.ID, Author: m.From,
+		events = append(events, Event{Kind: EventKind(kind), Tier: tier, PR: PRKey(chat.Topic), Comment: m.ID, Author: who,
 			Detail: firstLine(body)})
-		it := InboxItem{Chat: chat.ID, Kind: kind, By: m.From, Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.hasImage(),
+		it := InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.senderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.hasImage(),
 			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
 		if it.HasImage {
 			it.Fetch += fmt.Sprintf("; images: tomb --log '' --download-images <dir> messages '%s' --limit %d", chat.ID, teamsLimit)
@@ -383,7 +421,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	chat := fs.String("chat", "", "Teams conversation id (19:...@thread.v2)")
 	topic := fs.String("topic", "", "chat topic, used to find it again")
 	aria := fs.String("aria", "", "seat: the aria cast into the role")
-	quiet := fs.String("quiet", "", "comma-separated senders that never wake the seat")
+	quiet := fs.String("quiet", "", "comma-separated senders that never wake the seat: display names or sender ids (8:orgid:<guid> or the bare guid)")
 	every := fs.Duration("every", 60*time.Second, "poll interval")
 	_ = fs.Parse(args)
 	if err := ValidName(*name); err != nil {

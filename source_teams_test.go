@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -322,5 +323,94 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	}
 	if err := round("ok2"); err != nil || !strings.Contains(out.String(), "stopped") {
 		t.Fatalf("a stopped critic polled again: %v\n%s", err, out.String())
+	}
+}
+
+const jackID = "8:orgid:bc3cb0f4-1239-4ec7-a528-4913522f79c5"
+
+func from(m TeamsMsg, id string) TeamsMsg {
+	m.FromURL = "https://noam-pilot2.msgapi.teams.microsoft.com/v1/users/ME/contacts/" + id
+	return m
+}
+
+// Teams leaves imdisplayname blank on some rows (every row of a self-chat).
+// The name learned from the same sender's other rows fills it, and quiet
+// still matches.
+func TestTeamsBlankNameUsesLearnedNameAndStaysQuiet(t *testing.T) {
+	st := baseline(t, from(tmsg("600", "Jack Kelliher", "named row"), jackID))
+	ev, items := teamsDiff(st, []TeamsMsg{from(tmsg("601", "", "blank row"), jackID)}, testChat())
+	if len(ev) != 1 || ev[0].Author != "Jack Kelliher" || ev[0].Tier != TierRecord {
+		t.Fatalf("blank-name row from a quiet sender: %+v", ev)
+	}
+	if it := items["teams-601"]; it.By != "Jack Kelliher" || it.FromID != jackID {
+		t.Fatalf("inbox item: %+v", it)
+	}
+}
+
+func TestTeamsUnknownBlankSenderShowsIDAndQuietMatchesByID(t *testing.T) {
+	chat := testChat()
+	chat.Quiet = []string{"bc3cb0f4-1239-4ec7-a528-4913522f79c5"} // bare guid
+	st := &TeamsState{}
+	teamsDiff(st, nil, chat)
+	ev, _ := teamsDiff(st, []TeamsMsg{
+		from(tmsg("700", "", "self note"), jackID),
+		from(tmsg("701", "", "someone else"), "8:orgid:00000000-0000-0000-0000-000000000001"),
+	}, chat)
+	if len(ev) != 2 {
+		t.Fatalf("events: %+v", ev)
+	}
+	byID := map[string]Event{ev[0].Comment: ev[0], ev[1].Comment: ev[1]}
+	if e := byID["700"]; e.Author != jackID || e.Tier != TierRecord {
+		t.Fatalf("quiet by guid with no name: %+v", e)
+	}
+	// Control: an id that is not quiet still wakes, and is named by its id.
+	if e := byID["701"]; e.Author != "8:orgid:00000000-0000-0000-0000-000000000001" || e.Tier != TierWake {
+		t.Fatalf("non-quiet unknown sender: %+v", e)
+	}
+}
+
+func TestTeamsTokenNameFallback(t *testing.T) {
+	st := baseline(t)
+	m := from(tmsg("800", "", "x"), "8:orgid:00000000-0000-0000-0000-000000000002")
+	m.TokenName = "Liang Shi"
+	if ev, _ := teamsDiff(st, []TeamsMsg{m}, testChat()); len(ev) != 1 || ev[0].Author != "Liang Shi" {
+		t.Fatalf("token name not used: %+v", ev)
+	}
+}
+
+func TestRemoveTimerDropIns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := t.TempDir()
+	log := filepath.Join(bin, "calls")
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	dd := filepath.Join(home, ".config", "systemd", "user", "ebac@gone-critic.timer.d")
+	keep := filepath.Join(home, ".config", "systemd", "user", "ebac@other.timer.d")
+	for _, d := range []string{dd, keep} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(d, "interval.conf"), []byte("[Timer]\n"), 0o644)
+	}
+	if err := removeTimerDropIns("gone-critic"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dd); !os.IsNotExist(err) {
+		t.Fatalf("drop-in dir survived: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("another critic's drop-ins were touched: %v", err)
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "daemon-reload") {
+		t.Fatalf("no daemon-reload: %q", b)
+	}
+	if err := removeTimerDropIns("never-existed"); err != nil {
+		t.Fatalf("absent dir is not an error: %v", err)
+	}
+	if err := removeTimerDropIns("../escape"); err == nil {
+		t.Fatal("a path-like name was accepted")
 	}
 }

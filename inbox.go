@@ -20,7 +20,8 @@ const (
 type InboxItem struct {
 	PR       string `json:"pr,omitempty"`
 	Chat     string `json:"chat,omitempty"`
-	Time     string `json:"time,omitempty"` // when the message was written (teams)
+	FromID   string `json:"from_id,omitempty"` // teams sender id (8:orgid:...)
+	Time     string `json:"time,omitempty"`    // when the message was written (teams)
 	HasImage bool   `json:"has_image,omitempty"`
 	Fetch    string `json:"fetch,omitempty"` // exact command for the full text
 	Kind     string `json:"kind"`
