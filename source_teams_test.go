@@ -263,6 +263,40 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 		t.Fatalf("inbox lacks the new message: %s", inbox)
 	}
 
+	// Blind: a failure younger than teamsBlindAfter writes nothing (control) ...
+	hasBlind := func() bool {
+		form, err := f.Form(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, ok := form["blind"]
+		return ok
+	}
+	_ = round("down")
+	if hasBlind() || load().Runtime.Teams.Blind {
+		t.Fatal("one failed round already marked the chat blind")
+	}
+	// ... one past it marks the form and stays marked ...
+	orig := teamsBlindAfter
+	teamsBlindAfter = 0
+	t.Cleanup(func() { teamsBlindAfter = orig })
+	_ = round("down")
+	if c := load(); !hasBlind() || !c.Runtime.Teams.Blind || c.Runtime.Teams.FailSince == "" {
+		t.Fatalf("not blind after the threshold: %+v", c.Runtime.Teams)
+	}
+	_ = round("down")
+	if !hasBlind() {
+		t.Fatal("blind marker vanished while still failing")
+	}
+	// ... and the first good round clears it.
+	if err := round("ok2"); err != nil {
+		t.Fatalf("recovery round: %v", err)
+	}
+	if c := load(); hasBlind() || c.Runtime.Teams.Blind || c.Runtime.Teams.FailSince != "" {
+		t.Fatalf("blind not cleared on recovery: %+v", c.Runtime.Teams)
+	}
+	teamsBlindAfter = orig
+
 	// Transient failures never count toward gone; two gones then a success reset the streak.
 	_ = round("auth403")
 	_ = round("gone404")

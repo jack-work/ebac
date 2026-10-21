@@ -44,7 +44,16 @@ type TeamsState struct {
 	Seen       map[string]string `json:"seen,omitempty"` // message id -> content digest
 	GoneStreak int               `json:"gone_streak,omitempty"`
 	GoneSince  string            `json:"gone_since,omitempty"`
+	// FailSince is the start of the current run of failed rounds of any kind;
+	// Blind is set once that run passes teamsBlindAfter and the seat was told.
+	FailSince string `json:"fail_since,omitempty"`
+	Blind     bool   `json:"blind,omitempty"`
+	BlindErr  string `json:"blind_err,omitempty"`
 }
+
+// teamsBlindAfter is how long the watcher may fail to read the chat before it
+// tells the seat it is not hearing it. A var so a test can shorten it.
+var teamsBlindAfter = 10 * time.Minute
 
 type TeamsMsg struct {
 	ID          string         `json:"id"`
@@ -221,13 +230,26 @@ func (p *Poller) pollTeams(ctx context.Context, w *Critic) error {
 		}
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = err.Error()
+		if st.FailSince == "" {
+			st.FailSince = time.Now().UTC().Format(time.RFC3339)
+		}
 		if st.GoneStreak >= teamsGoneAfter {
 			return p.teamsGone(ctx, w, err)
 		}
+		p.teamsBlind(ctx, w, err)
 		_ = p.Store.SaveCritic(ctx, w)
 		return fmt.Errorf("%s: %w", w.Name, err)
 	}
 	st.GoneStreak, st.GoneSince = 0, ""
+	if st.Blind {
+		if err := p.Store.commit(ctx, w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
+			return nil, []string{"blind"}
+		}); err != nil {
+			return fmt.Errorf("%s: clear blind marker: %w", w.Name, err)
+		}
+		fmt.Fprintf(p.Out, "%s: hearing the chat again (blind since %s)\n", w.Name, st.FailSince)
+	}
+	st.FailSince, st.Blind, st.BlindErr = "", false, ""
 	w.Runtime.ConsecutiveFailures = 0
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
@@ -307,6 +329,35 @@ func teamsBrief(w *Critic, events []Event) string {
 		"Not studying %s is a bug: `figaro study %s`. When finished: ebac ack --critic %s --round %d\n",
 		w.Name, w.Runtime.Round, strings.Join(parts, ", "), w.Chat.Topic, strings.Join(from, ", "),
 		w.FormID, teamsBodyBytes, w.FormID, w.FormID, w.Name, w.Runtime.Round)
+}
+
+// teamsBlind tells the seat, once, that the chat has been unreadable for
+// longer than teamsBlindAfter: the form's key blind says since when and the
+// last error, refreshed only when the error changes, and is removed by the
+// first good round.
+func (p *Poller) teamsBlind(ctx context.Context, w *Critic, cause error) {
+	st := w.Runtime.Teams
+	since, err := time.Parse(time.RFC3339, st.FailSince)
+	if err != nil || time.Since(since) < teamsBlindAfter {
+		return
+	}
+	if st.Blind && st.BlindErr == cause.Error() {
+		return
+	}
+	marker := map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
+		"meaning": "ebac cannot read the chat " + w.Chat.Topic + ": messages since then are unseen until this key disappears"}
+	if err := p.Store.commit(ctx, w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
+		return map[string]json.RawMessage{"blind": mustJSON(marker)}, nil
+	}); err != nil {
+		fmt.Fprintf(p.Out, "%s: could not write blind marker: %v\n", w.Name, err)
+		return
+	}
+	if !st.Blind {
+		p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: BLIND since %s: cannot read %q (%v). Messages are unseen until your form's key blind disappears; it clears itself on recovery. If it persists, the Boss may need to sign tomb in again.",
+			w.Name, st.FailSince, w.Chat.Topic, cause))
+		fmt.Fprintf(p.Out, "%s: blind since %s: %v\n", w.Name, st.FailSince, cause)
+	}
+	st.Blind, st.BlindErr = true, cause.Error()
 }
 
 // teamsGone marks the chat gone on the form, wakes the seat once and stops.
