@@ -29,6 +29,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac ack    --critic N --round R           the seat says it has acted on a delta
   ebac post   --critic N --pr P [--reply-to T [--react +1] [--resolve] | --path F --line L] [--event E] --body-file F
                                             queue a comment or review on the form; the next round sends it
+  ebac compact --critic N [--dry-run]        rewrite the form without comment bodies
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
   ebac selfcheck [--critic N]                harness invariants, for develop mode
@@ -89,6 +90,8 @@ func main() {
 		err = cmdPost(ctx, g, args)
 	case "migrate":
 		err = cmdMigrate(ctx, g, args)
+	case "compact":
+		err = cmdCompact(ctx, g, args)
 	case "ack":
 		err = cmdAck(ctx, g, args)
 	case "roster":

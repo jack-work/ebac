@@ -330,6 +330,9 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		if post.Attempts > 0 {
 			r["attempts"] = mustJSON(post.Attempts)
 		}
+		if post.terminal() {
+			r["done_at"] = mustJSON(time.Now().UTC().Format(time.RFC3339))
+		}
 		acks[id] = r
 		switch {
 		case post.Refused != "":

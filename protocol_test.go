@@ -31,7 +31,7 @@ func TestBriefCarriesTheDeltaNotTheProtocol(t *testing.T) {
 		for _, want := range []string{
 			"ebac " + w.Name + " round 42: ",
 			"  acme/widget#7 OPEN head ",
-			"The comments are in your studied form @f (keys prs.*)",
+			"New and edited comments are in your studied form @f, key inbox",
 			"`figaro study @f`",
 			"When finished: ebac ack --critic " + w.Name + " --round 42",
 		} {

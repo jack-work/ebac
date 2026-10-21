@@ -363,7 +363,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 	for id, nr := range np.Reviews {
 		pv, existed := pp.Reviews[id]
 		if existed && pv.State == nr.State {
-			if pv.Body == nr.Body {
+			if pv.digest() == nr.digest() {
 				continue
 			}
 			// Same state, different body: some reviewer accounts edit

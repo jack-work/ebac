@@ -146,9 +146,11 @@ type Comment struct {
 	Digest string `json:"digest"`
 }
 
-func (c *Comment) computeDigest() {
-	sum := sha256.Sum256([]byte(c.Body))
-	c.Digest = hex.EncodeToString(sum[:8])
+func (c *Comment) computeDigest() { c.Digest = bodyDigest(c.Body) }
+
+func bodyDigest(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:8])
 }
 
 type Review struct {
@@ -161,6 +163,16 @@ type Review struct {
 	// Stamped marks a bot's verdict re-submitted under a person's login so it
 	// counts toward merge rules. It still counts; it is not a person's review.
 	Stamped bool `json:"stamped,omitempty"`
+	// Digest fingerprints Body; the form keeps it instead of the body.
+	Digest string `json:"digest,omitempty"`
+}
+
+// digest is the body's fingerprint, whichever of the two the review carries.
+func (r *Review) digest() string {
+	if r.Digest != "" {
+		return r.Digest
+	}
+	return bodyDigest(r.Body)
 }
 
 // SortedPRKeys gives deterministic iteration. Every projection and every

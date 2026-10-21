@@ -40,42 +40,139 @@ type ebacState struct {
 	Note     string    `json:"snapshot_note,omitempty"`
 }
 
-// treePR is a PRState whose threads hold comments keyed by id: a list would
-// make one new comment a rewrite of the whole thread.
-type treePR struct {
-	*PRState
-	Threads map[string]*treeThread `json:"threads"`
+// The form keeps what the next round compares against, never the text:
+// figaro writes a form's whole state at the head of every log segment, so
+// state is held under FormStateBudget. Bodies reach the seat through inbox.
+
+// formItem is one comment or review: identity and digest, no body.
+type formItem struct {
+	By  string `json:"by"`
+	D   string `json:"d"`
+	I   int    `json:"i,omitempty"`   // position in its thread
+	S   string `json:"s,omitempty"`   // review state
+	P   bool   `json:"p,omitempty"`   // pending: not published
+	Bot bool   `json:"bot,omitempty"` // bot author
+	St  bool   `json:"st,omitempty"`  // bot verdict stamped under a person
 }
 
-type treeThread struct {
-	*Thread
-	Comments map[string]*Comment `json:"comments"`
+type formThread struct {
+	R bool                 `json:"r,omitempty"` // resolved
+	O bool                 `json:"o,omitempty"` // outdated
+	C map[string]*formItem `json:"c"`
+}
+
+type formPR struct {
+	Key            PRKey                  `json:"key"`
+	Owner          string                 `json:"owner"`
+	Repo           string                 `json:"repo"`
+	Number         int                    `json:"number"`
+	URL            string                 `json:"url"`
+	Title          string                 `json:"title"`
+	Author         string                 `json:"author"`
+	State          string                 `json:"state"`
+	IsDraft        bool                   `json:"is_draft,omitempty"`
+	HeadSHA        string                 `json:"head_sha"`
+	ReviewDecision string                 `json:"review_decision,omitempty"`
+	Complete       bool                   `json:"complete"`
+	Pending        []PendingReview        `json:"pending_reviews,omitempty"`
+	Threads        map[string]*formThread `json:"threads"`
+	Reviews        map[string]*formItem   `json:"reviews"`
+	Comments       map[string]*formItem   `json:"comments"`
 }
 
 // prFormKey makes a PR key safe as one path segment.
 func prFormKey(k PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
 
-func prsTree(s *Snapshot) map[string]*treePR {
-	out := map[string]*treePR{}
+func prsTree(s *Snapshot) map[string]*formPR {
+	out := map[string]*formPR{}
 	if s == nil {
 		return out
 	}
 	for k, p := range s.PRs {
-		cp := *p
-		cp.Threads = nil
-		t := &treePR{PRState: &cp, Threads: map[string]*treeThread{}}
+		f := &formPR{Key: p.Key, Owner: p.Owner, Repo: p.Repo, Number: p.Number, URL: p.URL, Title: p.Title,
+			Author: p.Author, State: p.State, IsDraft: p.IsDraft, HeadSHA: p.HeadSHA, ReviewDecision: p.ReviewDecision,
+			Complete: p.Complete, Pending: p.Pending,
+			Threads: map[string]*formThread{}, Reviews: map[string]*formItem{}, Comments: map[string]*formItem{}}
 		for id, th := range p.Threads {
-			tc := *th
-			tc.Comments = nil
-			tt := &treeThread{Thread: &tc, Comments: map[string]*Comment{}}
-			for _, c := range th.Comments {
-				tt.Comments[c.ID] = c
+			t := &formThread{R: th.IsResolved, O: th.IsOutdated, C: map[string]*formItem{}}
+			for i, c := range th.Comments {
+				t.C[c.ID] = &formItem{By: c.Author, D: c.Digest, I: i, P: c.State == "PENDING", Bot: c.IsBot}
 			}
-			t.Threads[id] = tt
+			f.Threads[id] = t
 		}
-		out[prFormKey(k)] = t
+		for id, r := range p.Reviews {
+			f.Reviews[id] = &formItem{By: r.Author, D: r.digest(), S: r.State, Bot: r.IsBot, St: r.Stamped}
+		}
+		for id, c := range p.Comments {
+			f.Comments[id] = &formItem{By: c.Author, D: c.Digest, Bot: c.IsBot}
+		}
+		out[prFormKey(k)] = f
 	}
 	return out
+}
+
+// readItem accepts the compact item and the full objects ebac wrote before
+// 2026-10-21, so a form is readable either side of its compaction.
+type readItem struct {
+	By, D, S        string
+	I               *int
+	P, Bot, St      bool
+	Body, CreatedAt string
+}
+
+func (r *readItem) UnmarshalJSON(b []byte) error {
+	var m struct {
+		By      string `json:"by"`
+		D       string `json:"d"`
+		I       *int   `json:"i"`
+		S       string `json:"s"`
+		P       bool   `json:"p"`
+		Bot     bool   `json:"bot"`
+		St      bool   `json:"st"`
+		Author  string `json:"author"`
+		Digest  string `json:"digest"`
+		Body    string `json:"body"`
+		State   string `json:"state"`
+		IsBot   bool   `json:"is_bot"`
+		Stamped bool   `json:"stamped"`
+		Created string `json:"created_at"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*r = readItem{By: firstNonEmpty(m.By, m.Author), D: firstNonEmpty(m.D, m.Digest), S: firstNonEmpty(m.S, m.State),
+		I: m.I, P: m.P || m.State == "PENDING", Bot: m.Bot || m.IsBot, St: m.St || m.Stamped, Body: m.Body, CreatedAt: m.Created}
+	if r.D == "" && m.Body != "" {
+		r.D = bodyDigest(m.Body)
+	}
+	return nil
+}
+
+type readThread struct {
+	R, O       bool
+	C          map[string]*readItem
+	IsResolved bool                 `json:"is_resolved"`
+	IsOutdated bool                 `json:"is_outdated"`
+	Comments   map[string]*readItem `json:"comments"`
+}
+
+func (t *readThread) UnmarshalJSON(b []byte) error {
+	var m struct {
+		R          bool                 `json:"r"`
+		O          bool                 `json:"o"`
+		C          map[string]*readItem `json:"c"`
+		IsResolved bool                 `json:"is_resolved"`
+		IsOutdated bool                 `json:"is_outdated"`
+		Comments   map[string]*readItem `json:"comments"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*t = readThread{R: m.R || m.IsResolved, O: m.O || m.IsOutdated, C: m.C}
+	if t.C == nil {
+		t.C = m.Comments
+	}
+	return nil
 }
 
 func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
@@ -83,53 +180,73 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return out, nil
 	}
-	var tree map[string]*treePR
+	var tree map[string]*struct {
+		formPR
+		Threads  map[string]*readThread `json:"threads"`
+		Reviews  map[string]*readItem   `json:"reviews"`
+		Comments map[string]*readItem   `json:"comments"`
+	}
 	if err := json.Unmarshal(raw, &tree); err != nil {
 		return nil, fmt.Errorf("prs: %w", err)
 	}
-	for _, t := range tree {
-		if t == nil || t.PRState == nil {
+	for _, f := range tree {
+		// A member removed on the forge can come back as a null leaf rather
+		// than an absent key; null means absent, at every level.
+		if f == nil || f.Key == "" {
 			continue
 		}
-		p := t.PRState
-		p.Threads = map[string]*Thread{}
-		for id, tt := range t.Threads {
-			if tt == nil || tt.Thread == nil {
+		p := &PRState{Key: f.Key, Owner: f.Owner, Repo: f.Repo, Number: f.Number, URL: f.URL, Title: f.Title,
+			Author: f.Author, State: f.State, IsDraft: f.IsDraft, HeadSHA: f.HeadSHA, ReviewDecision: f.ReviewDecision,
+			Complete: f.Complete, Pending: f.formPR.Pending,
+			Threads: map[string]*Thread{}, Reviews: map[string]*Review{}, Comments: map[string]*Comment{}}
+		for id, t := range f.Threads {
+			if t == nil {
 				continue
 			}
-			th := tt.Thread
-			th.Comments = make([]*Comment, 0, len(tt.Comments))
-			for _, c := range tt.Comments {
-				if c != nil {
-					th.Comments = append(th.Comments, c)
-				}
+			th := &Thread{ID: id, IsResolved: t.R, IsOutdated: t.O}
+			type ordered struct {
+				c   *Comment
+				pos int
+				at  string
 			}
-			sort.Slice(th.Comments, func(i, j int) bool {
-				a, b := th.Comments[i], th.Comments[j]
-				if a.CreatedAt != b.CreatedAt {
-					return a.CreatedAt < b.CreatedAt
+			var cs []ordered
+			for cid, it := range t.C {
+				if it == nil {
+					continue
 				}
-				return a.ID < b.ID
+				c := &Comment{ID: cid, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
+				if it.P {
+					c.State = "PENDING"
+				}
+				pos := -1
+				if it.I != nil {
+					pos = *it.I
+				}
+				cs = append(cs, ordered{c, pos, it.CreatedAt})
+			}
+			sort.Slice(cs, func(i, j int) bool {
+				a, b := cs[i], cs[j]
+				if a.pos != b.pos {
+					return a.pos < b.pos
+				}
+				if a.at != b.at {
+					return a.at < b.at
+				}
+				return a.c.ID < b.c.ID
 			})
+			for _, o := range cs {
+				th.Comments = append(th.Comments, o.c)
+			}
 			p.Threads[id] = th
 		}
-		if p.Reviews == nil {
-			p.Reviews = map[string]*Review{}
-		}
-		if p.Comments == nil {
-			p.Comments = map[string]*Comment{}
-		}
-		// A member removed on the forge can come back as a null leaf rather
-		// than an absent key (a whole-object member deleted by Diff is
-		// written as After:null); null means absent.
-		for id, r := range p.Reviews {
-			if r == nil {
-				delete(p.Reviews, id)
+		for id, it := range f.Reviews {
+			if it != nil {
+				p.Reviews[id] = &Review{ID: id, Author: it.By, State: it.S, Digest: it.D, IsBot: it.Bot, Stamped: it.St}
 			}
 		}
-		for id, c := range p.Comments {
-			if c == nil {
-				delete(p.Comments, id)
+		for id, it := range f.Comments {
+			if it != nil {
+				p.Comments[id] = &Comment{ID: id, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
 			}
 		}
 		out[p.Key] = p
@@ -326,6 +443,11 @@ type Receipts map[string]map[string]json.RawMessage
 // Save writes the critic, and the snapshot when one is given, as ONE patch,
 // with any outbox receipts merged into the posts they answer.
 func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, receipts Receipts) error {
+	return s.SaveRound(ctx, w, snap, receipts, nil)
+}
+
+// SaveRound is Save plus the round's fresh inbox items (nil leaves the inbox).
+func (s *Store) SaveRound(ctx context.Context, w *Critic, snap *Snapshot, receipts Receipts, fresh map[string]InboxItem) error {
 	if w.FormID == "" {
 		return fmt.Errorf("critic %s has no form", w.Name)
 	}
@@ -365,18 +487,26 @@ func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, receipts Re
 		system := objectOf(cur["system"])
 		system["ebac"] = mustJSON(sys)
 		set["system"] = mustJSON(system)
-		if len(receipts) > 0 {
-			posts := objectOf(cur["post"])
-			for id, fields := range receipts {
-				if _, ok := posts[id]; !ok {
-					continue // removed since it was read
-				}
-				p := objectOf(posts[id])
-				for k, v := range fields {
-					p[k] = v
-				}
-				posts[id] = mustJSON(p)
+		if fresh != nil {
+			set["inbox"] = mustJSON(mergeInbox(cur["inbox"], fresh))
+		}
+		posts := objectOf(cur["post"])
+		changed := false
+		for id, fields := range receipts {
+			if _, ok := posts[id]; !ok {
+				continue // removed since it was read
 			}
+			p := objectOf(posts[id])
+			for k, v := range fields {
+				p[k] = v
+			}
+			posts[id] = mustJSON(p)
+			changed = true
+		}
+		if prunePosts(posts, time.Now()) {
+			changed = true
+		}
+		if changed {
 			set["post"] = mustJSON(posts)
 		}
 		var remove []string
@@ -434,6 +564,45 @@ func nextBoard(cur form.Snapshot, set map[string]json.RawMessage, remove []strin
 	return next, nil
 }
 
+// postKeep is how long a finished post stays on the form after its receipt.
+const postKeep = time.Hour
+
+// prunePosts drops finished posts whose receipt is older than postKeep, or
+// that finished before receipts carried done_at. Unfinished posts stay.
+func prunePosts(posts map[string]json.RawMessage, now time.Time) bool {
+	pruned := false
+	for id, raw := range posts {
+		var p struct {
+			Post
+			DoneAt string `json:"done_at"`
+		}
+		if json.Unmarshal(raw, &p) != nil || !p.Post.terminal() {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, p.DoneAt); err == nil && now.Sub(t) < postKeep {
+			continue
+		}
+		delete(posts, id)
+		pruned = true
+	}
+	return pruned
+}
+
+// FormStateBudget caps a form's whole state. figaro writes the entire state
+// at the head of every log segment, so a form near the segment size blocks
+// every write on the box (jack-work/figaro#44, 2026-10-21).
+const FormStateBudget = 192 * 1024
+
+// checkBudget refuses a write that grows the state past the budget. A write
+// that shrinks it always passes, so an oversized form can still be compacted.
+func checkBudget(id string, curBytes, nextBytes int) error {
+	if nextBytes > FormStateBudget && nextBytes > curBytes {
+		return fmt.Errorf("write %s refused: form state would be %d B, over the %d B budget "+
+			"(figaro writes the whole state at every log segment head; jack-work/figaro#44)", id, nextBytes, FormStateBudget)
+	}
+	return nil
+}
+
 // objectOf reads a JSON object's members; anything else reads as empty.
 func objectOf(raw json.RawMessage) map[string]json.RawMessage {
 	m := map[string]json.RawMessage{}
@@ -469,6 +638,14 @@ func (s *Store) commit(ctx context.Context, id string, build func(cur map[string
 		next, err := nextBoard(f.Snap, set, remove)
 		if err != nil {
 			return fmt.Errorf("write %s: %w", id, err)
+		}
+		curRaw, _ := json.Marshal(f.Snap)
+		nextRaw, err := json.Marshal(next)
+		if err != nil {
+			return fmt.Errorf("write %s: %w", id, err)
+		}
+		if err := checkBudget(id, len(curRaw), len(nextRaw)); err != nil {
+			return err
 		}
 		patch := next.Diff(f.Snap)
 		if patch.IsIdentity() {

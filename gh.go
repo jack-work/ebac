@@ -276,7 +276,7 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 		for _, rv := range pr.Reviews.Nodes {
 			st.Reviews[rv.ID] = &Review{
 				ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
-				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body,
+				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body, Digest: bodyDigest(rv.Body),
 			}
 		}
 

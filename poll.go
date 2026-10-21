@@ -174,7 +174,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	// One patch: the observed PRs, the debt and the outbox receipts. It lands
 	// before delivery, so a crash mid-send leaves the debt on the form and
 	// the seat's wake finds the round's change already in its study diff.
-	if err := p.Store.Save(ctx, w, next, acks); err != nil {
+	if err := p.Store.SaveRound(ctx, w, next, acks, inboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
 		return err
 	}
 	renew(ctx, p.Fig, w.FormID)

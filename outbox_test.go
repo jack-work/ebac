@@ -113,17 +113,25 @@ func TestGHPostChoosesTheEndpoint(t *testing.T) {
 	}
 }
 
-func TestPrsTreeRoundTripsAndOrdersComments(t *testing.T) {
+func TestPrsTreeKeepsOrderAndDigestsButNoBodies(t *testing.T) {
 	_, snap := outboxCritic()
 	pr := snap.PRs["acme/widget#1"]
-	pr.Threads["PRRT_1"].Comments = []*Comment{
-		{ID: "C2", Author: "b", Body: "second", CreatedAt: "2026-10-20T02:00:00Z"},
-		{ID: "C1", Author: "a", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"},
-	}
-	pr.Comments["IC1"] = &Comment{ID: "IC1", Body: "top"}
+	c1 := &Comment{ID: "C1", Author: "a", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}
+	c2 := &Comment{ID: "C2", Author: "b", Body: "second", CreatedAt: "2026-10-20T02:00:00Z", State: "PENDING"}
+	c1.computeDigest()
+	c2.computeDigest()
+	pr.Threads["PRRT_1"].Comments = []*Comment{c1, c2}
+	pr.Threads["PRRT_1"].IsResolved = true
+	pr.Comments["IC1"] = &Comment{ID: "IC1", Author: "c", Body: "top"}
+	pr.Reviews["R1"] = &Review{ID: "R1", Author: "d", State: "APPROVED", Body: "lgtm"}
 	snap.PRs["acme/web.site#2"] = &PRState{Key: "acme/web.site#2", Owner: "acme", Repo: "web.site", Number: 2}
 
 	raw := mustJSON(prsTree(snap))
+	for _, body := range []string{"first", "second", "top", "lgtm"} {
+		if strings.Contains(string(raw), `"`+body+`"`) {
+			t.Fatalf("body %q reached the form: %s", body, raw)
+		}
+	}
 	var keys map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &keys)
 	for k := range keys {
@@ -138,12 +146,32 @@ func TestPrsTreeRoundTripsAndOrdersComments(t *testing.T) {
 	if _, ok := got["acme/web.site#2"]; !ok {
 		t.Fatalf("dotted repo lost: keys %v", got)
 	}
-	cs := got["acme/widget#1"].Threads["PRRT_1"].Comments
-	if len(cs) != 2 || cs[0].ID != "C1" || cs[1].ID != "C2" {
-		t.Fatalf("thread comments not in created order: %+v", cs)
+	th := got["acme/widget#1"].Threads["PRRT_1"]
+	if len(th.Comments) != 2 || th.Comments[0].ID != "C1" || th.Comments[1].ID != "C2" || !th.IsResolved {
+		t.Fatalf("thread: %+v", th)
 	}
-	if got["acme/widget#1"].Comments["IC1"].Body != "top" {
-		t.Error("PR comment lost")
+	if th.Comments[0].Digest != c1.Digest || th.Comments[1].State != "PENDING" || th.Comments[0].Author != "a" {
+		t.Fatalf("comment identity lost: %+v %+v", th.Comments[0], th.Comments[1])
+	}
+	if r := got["acme/widget#1"].Reviews["R1"]; r == nil || r.digest() != bodyDigest("lgtm") || r.State != "APPROVED" {
+		t.Fatalf("review: %+v", r)
+	}
+
+	// The full objects ebac wrote before compaction still read.
+	old := json.RawMessage(`{"acme/widget#1":{"key":"acme/widget#1","state":"OPEN","threads":{"T":{"is_resolved":true,"comments":{
+	  "B":{"id":"B","author":"y","body":"two","created_at":"2","digest":"bbbb"},
+	  "A":{"id":"A","author":"x","body":"one","created_at":"1","digest":"aaaa","state":"PENDING"}}}},
+	  "reviews":{"R":{"id":"R","author":"z","state":"COMMENTED","body":"hm"}},"comments":{"I":{"id":"I","author":"w","body":"x","digest":"cccc"}}}}`)
+	o, err := prsFromTree(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ot := o["acme/widget#1"].Threads["T"]
+	if len(ot.Comments) != 2 || ot.Comments[0].ID != "A" || ot.Comments[0].State != "PENDING" || !ot.IsResolved || ot.Comments[1].Digest != "bbbb" {
+		t.Fatalf("old thread: %+v", ot)
+	}
+	if r := o["acme/widget#1"].Reviews["R"]; r.digest() != bodyDigest("hm") {
+		t.Fatalf("old review digest %q", r.digest())
 	}
 }
 

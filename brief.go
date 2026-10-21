@@ -35,7 +35,7 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 				k, p.State, short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
 		}
 	}
-	fmt.Fprintf(&b, "The comments are in your studied form %s (keys prs.*): read them in its diff, in full. "+
+	fmt.Fprintf(&b, "New and edited comments are in your studied form %s, key inbox (each cut at 2 KB; the url has the rest). "+
 		"Also `figaro form %s -j`, or GitHub. Not studying %s is a bug: `figaro study %s`.\n",
 		w.FormID, w.FormID, w.FormID, w.FormID)
 	fmt.Fprintf(&b, "Post through the form (harness.post); protocol in harness_protocol_*. "+
