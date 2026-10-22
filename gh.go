@@ -29,6 +29,24 @@ type GH struct {
 	// them opening a review that never submitted.
 	WriteGap  time.Duration
 	lastWrite time.Time
+	// Every call runs with a token minted by band-cred for the CURRENT Host
+	// (the poller retargets Host per critic, so the credential is chosen per
+	// call, not at construction). NoCred is the test seam for a fake gh.
+	NoCred bool
+	creds  map[string]*Cred
+}
+
+// cred is the band-cred credential for g.Host, one per host per process.
+func (g *GH) cred() *Cred {
+	if g.creds == nil {
+		g.creds = map[string]*Cred{}
+	}
+	c, ok := g.creds[g.Host]
+	if !ok {
+		c = credForHost(g.Host)
+		g.creds[g.Host] = c
+	}
+	return c
 }
 
 // pace waits until WriteGap has passed since the last write.
@@ -46,6 +64,18 @@ func NewGH(bin, host string) *GH {
 	return &GH{Bin: bin, Host: host, Timeout: 90 * time.Second, WriteGap: time.Second}
 }
 
+// ghCreds names the band-cred credential for each forge host ebac may call.
+// A host without one is refused by band-cred: never another host's token.
+var ghCreds = map[string]string{"microsoft.ghe.com": credGitHub}
+
+func credForHost(host string) *Cred {
+	name, ok := ghCreds[host]
+	if !ok {
+		name = "no-credential-for-" + host
+	}
+	return NewCred(os.Getenv("EBAC_BAND_CRED"), name)
+}
+
 // execCommandContext is exec.CommandContext, indirected so tests can fake an
 // external `gh` without a shell shebang (which does not resolve inside the
 // Nix build sandbox's checkPhase -- there is no /usr/bin/env or /bin/bash to
@@ -56,8 +86,17 @@ var execCommandContext = exec.CommandContext
 func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
 	defer cancel()
+	env := append(os.Environ(), "GH_HOST="+g.Host, "GH_PAGER=", "NO_COLOR=1")
+	if !g.NoCred {
+		tok, err := g.cred().Token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// GH_ENTERPRISE_TOKEN is what gh reads for a non-github.com host.
+		env = append(env, "GH_TOKEN="+tok, "GH_ENTERPRISE_TOKEN="+tok)
+	}
 	cmd := execCommandContext(ctx, g.Bin, args...)
-	cmd.Env = append(os.Environ(), "GH_HOST="+g.Host, "GH_PAGER=", "NO_COLOR=1")
+	cmd.Env = env
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

@@ -29,6 +29,7 @@ func fakeGH(t *testing.T, scenario string) *GH {
 	t.Cleanup(func() { execCommandContext = orig })
 	g := NewGH("unused", "microsoft.ghe.com")
 	g.WriteGap = 0
+	g.NoCred = true // the fake gh needs no token
 	return g
 }
 

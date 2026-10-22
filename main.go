@@ -509,7 +509,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait, Cred: NewCred(env("EBAC_BAND_CRED", ""), credTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {

@@ -108,6 +108,10 @@ func (m TeamsMsg) hasImage() bool { return strings.Contains(m.Content, "<img") }
 type Tomb struct {
 	Bin     string
 	Timeout time.Duration
+	// Cred mints the Teams token (band-cred teams-ebac), handed to tomb on fd 3
+	// with TOMB_AAD_TOKEN_FD=3: the env carries the fd number, never the token.
+	// nil only in tests that fake tomb.
+	Cred *Cred
 }
 
 var errTombGone = errors.New("chat gone")
@@ -118,6 +122,25 @@ func (t *Tomb) Messages(ctx context.Context, conv string, limit int) ([]TeamsMsg
 	cmd := execCommandContext(ctx, t.Bin, "--log", "", "--json", "--raw", "messages", conv, "--limit", fmt.Sprint(limit))
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	if t.Cred != nil {
+		tok, err := t.Cred.Token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		r, w, err := os.Pipe()
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+		// A token is a few KB, far under the pipe buffer: write it all, then close.
+		if _, err := w.WriteString(tok); err != nil {
+			w.Close()
+			return nil, err
+		}
+		w.Close()
+		cmd.ExtraFiles = []*os.File{r} // fd 3 in the child
+		cmd.Env = append(cmd.Env, "TOMB_AAD_TOKEN_FD=3")
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
