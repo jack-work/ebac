@@ -198,7 +198,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 
 	c := &Critic{
 		Name: name, Mode: mode, Host: it.Ref().HostOf(p.Host), CreatedAt: time.Now().UTC(),
-		IssueRepo: cfg.IssueRepo, Stop: DefaultStop(),
+		IssueRepo: cfg.IssueRepo, Stop: DefaultStop(), EverySec: int(interval.Seconds()),
 	}
 	c.AddPR(it.Ref())
 

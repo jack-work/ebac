@@ -188,7 +188,15 @@ func setInterval(name string, d time.Duration) error {
 	if err := os.MkdirAll(dd, 0o755); err != nil {
 		return err
 	}
-	body := fmt.Sprintf("[Timer]\nOnUnitActiveSec=%ds\nOnBootSec=60s\n", int(d.Seconds()))
+	// OnUnitActiveSec and OnBootSec are LISTS: a drop-in that does not reset them
+	// first ADDS to the template's 5 minutes instead of replacing it. Jitter is
+	// scaled to the interval (the template's 45 s would swamp a 60 s critic).
+	jitter := int(d.Seconds()) / 10
+	if jitter > 45 {
+		jitter = 45
+	}
+	body := fmt.Sprintf("[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec=%ds\nOnBootSec=\nOnBootSec=60s\nRandomizedDelaySec=%ds\nAccuracySec=5s\n",
+		int(d.Seconds()), jitter)
 	return os.WriteFile(filepath.Join(dd, "interval.conf"), []byte(body), 0o644)
 }
 

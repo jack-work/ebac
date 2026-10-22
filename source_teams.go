@@ -460,7 +460,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	w := &Critic{Name: *name, Mode: ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
+	w := &Critic{Name: *name, Mode: ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
 		Chat: &ChatRef{ID: *chat, Topic: *topic}, Stop: StopConditions{}}
 	for _, q := range strings.Split(*quiet, ",") {
 		if q = strings.TrimSpace(q); q != "" {
@@ -483,30 +483,9 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
 	}
-	if err := enableTeamsTimer(*name, *every); err != nil {
+	if err := EnableTimer(*name, *every); err != nil {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("teams critic %q: role %s, chat %s (%s), seat %s, every %s\n", *name, formID, *chat, *topic, *aria, *every)
 	return nil
-}
-
-// enableTeamsTimer replaces the template's 5-minute trigger and jitter: a drop-in
-// adds to a list unless it first resets it.
-func enableTeamsTimer(name string, every time.Duration) error {
-	dir, err := unitDir()
-	if err != nil {
-		return err
-	}
-	dd := fmt.Sprintf("%s/ebac@%s.timer.d", dir, name)
-	if err := os.MkdirAll(dd, 0o755); err != nil {
-		return err
-	}
-	body := fmt.Sprintf("[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec=%ds\nOnBootSec=60s\nRandomizedDelaySec=0\nAccuracySec=5s\n", int(every.Seconds()))
-	if err := os.WriteFile(dd+"/interval.conf", []byte(body), 0o644); err != nil {
-		return err
-	}
-	if err := systemctl("daemon-reload"); err != nil {
-		return err
-	}
-	return systemctl("enable", "--now", fmt.Sprintf("ebac@%s.timer", name))
 }

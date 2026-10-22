@@ -119,10 +119,10 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 			if ts := TimerState(c.Name); !ts.Armed() {
 				if dryRun {
 					add("R3-timer", c.Name, "timer "+ts.Display, "would re-arm", false)
-				} else if err := EnableTimer(c.Name, 5*time.Minute); err != nil {
+				} else if err := EnableTimer(c.Name, c.Interval()); err != nil {
 					add("R3-timer", c.Name, "timer "+ts.Display, "re-arm FAILED: "+err.Error(), false)
 				} else {
-					add("R3-timer", c.Name, "timer was "+ts.Display, "re-armed at 5m", true)
+					add("R3-timer", c.Name, "timer was "+ts.Display, "re-armed at "+c.Interval().String(), true)
 				}
 			}
 		}

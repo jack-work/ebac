@@ -243,7 +243,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		Name: *name, Mode: m, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		DiscoverRepo: *repo, DiscoverAuthor: *author, IssueRepo: *issueRepo,
 		Write: *write, Approve: *approve, Notes: *notes,
-		Stop: DefaultStop(),
+		Stop: DefaultStop(), EverySec: int(interval.Seconds()),
 	}
 	if *clone != "" {
 		w.Worktree = &Worktree{Clone: *clone, Root: *wtRoot}

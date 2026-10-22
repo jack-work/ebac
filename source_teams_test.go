@@ -414,3 +414,40 @@ func TestRemoveTimerDropIns(t *testing.T) {
 		t.Fatal("a path-like name was accepted")
 	}
 }
+
+// A drop-in that does not reset OnUnitActiveSec ADDS to the template's 5 minutes.
+// Reconcile (R3) re-armed a 60 s Teams critic at a hard-coded 5m after a reboot.
+func TestEnableTimerResetsTheTemplateAndUsesTheCriticsInterval(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	w := &Critic{Name: "every-test", EverySec: 60}
+	if err := EnableTimer(w.Name, w.Interval()); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "ebac@every-test.timer.d", "interval.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{"OnUnitActiveSec=\nOnUnitActiveSec=60s\n", "OnBootSec=\nOnBootSec=60s\n", "RandomizedDelaySec=6s\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("drop-in lacks %q:\n%s", want, got)
+		}
+	}
+	if (&Critic{}).Interval() != 5*time.Minute || (&Critic{EverySec: 600}).Interval() != 10*time.Minute {
+		t.Fatal("Interval default/explicit wrong")
+	}
+	// Jitter is capped at the template's 45 s.
+	if err := EnableTimer("every-test", 30*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "ebac@every-test.timer.d", "interval.conf"))
+	if !strings.Contains(string(b), "RandomizedDelaySec=45s\n") {
+		t.Fatalf("jitter not capped:\n%s", b)
+	}
+}

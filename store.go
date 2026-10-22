@@ -90,6 +90,9 @@ type Critic struct {
 	Mode      Mode      `json:"mode"`
 	Host      string    `json:"host"`
 	CreatedAt time.Time `json:"created_at"`
+	// EverySec is the critic's poll interval as armed at creation. Reconcile
+	// re-arms a stopped timer with it; 0 means the default (5 minutes).
+	EverySec int `json:"every_sec,omitempty"`
 
 	PRs []PRRef `json:"prs"`
 
@@ -253,4 +256,12 @@ func ValidAriaID(id string) error {
 		}
 	}
 	return nil
+}
+
+// Interval is the critic's poll interval: EverySec, else the default 5 minutes.
+func (w *Critic) Interval() time.Duration {
+	if w.EverySec > 0 {
+		return time.Duration(w.EverySec) * time.Second
+	}
+	return 5 * time.Minute
 }
