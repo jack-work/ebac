@@ -434,7 +434,11 @@ func TestEnableTimerResetsTheTemplateAndUsesTheCriticsInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(b)
-	for _, want := range []string{"OnUnitActiveSec=\nOnUnitActiveSec=60s\n", "OnBootSec=\nOnBootSec=60s\n", "RandomizedDelaySec=6s\n"} {
+	// ANY empty On*Sec= assignment resets the whole timer list: exactly one, first.
+	if strings.Count(got, "Sec=\n") != 1 || !strings.HasPrefix(got, "[Timer]\nOnUnitActiveSec=\n") {
+		t.Fatalf("drop-in must reset the timer list exactly once, first:\n%s", got)
+	}
+	for _, want := range []string{"OnBootSec=60s\n", "OnUnitActiveSec=60s\n", "RandomizedDelaySec=6s\n"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("drop-in lacks %q:\n%s", want, got)
 		}
