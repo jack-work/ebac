@@ -122,9 +122,14 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	p := &Poller{Store: st, Fig: f, Out: &out, GH: fakeGH(t, "author")}
+	gh := fakeGH(t, "author")
+	gh.Host = "github.com" // the poller's default: the round must retarget it to the critic's host
+	p := &Poller{Store: st, Fig: f, Out: &out, GH: gh}
 	if err := p.Poll(ctx, w.Name); err != nil {
 		t.Fatalf("round: %v", err)
+	}
+	if gh.Host != "microsoft.ghe.com" {
+		t.Fatalf("round ran against %s, not the critic's host", gh.Host)
 	}
 	form, err := f.Form(ctx, id)
 	if err != nil {

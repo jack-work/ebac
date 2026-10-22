@@ -182,6 +182,9 @@ func (p *Poller) pollAuthor(ctx context.Context, w *Critic) error {
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 		return p.Store.SaveCritic(ctx, w)
 	}
+	if w.Host != "" {
+		p.GH.Host = w.Host // the poller's client starts on its default host; the token follows the host
+	}
 	if w.Runtime.Author == nil {
 		w.Runtime.Author = &AuthorState{}
 	}
