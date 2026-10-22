@@ -191,6 +191,12 @@ func TestReapPromotedClosesItemsOfFinishedCritics(t *testing.T) {
 	if n := activeCritics(critics); n != 1 {
 		t.Fatalf("active = %d; a stopped or archived critic must not hold a slot", n)
 	}
+	// A Teams chat or author watch is not a PR review: it holds no queue slot.
+	critics = append(critics, &Critic{Name: "chat", Mode: ModeTeams, Source: "teams-chat"},
+		&Critic{Name: "author", Mode: ModeAuthor, Source: "github-author"}, &Critic{Name: "pr2", Mode: ModeReview})
+	if n := activeCritics(critics); n != 2 {
+		t.Fatalf("active = %d; want 2 (live + pr2): non-PR sources must not hold a slot", n)
+	}
 }
 
 // ---------- live: the form is the state ----------

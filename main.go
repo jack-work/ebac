@@ -21,6 +21,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
   ebac add-teams --name N --chat ID --topic T --aria SEAT [--quiet "A,B"] [--every 60s]
                                             watch one Teams chat through tomb
+  ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--every 5m]
+                                            watch one author's PRs: wake on a new PR or a merge
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -72,6 +74,8 @@ func main() {
 		err = cmdInit(args)
 	case "add-teams":
 		err = cmdAddTeams(ctx, g, args)
+	case "add-author":
+		err = cmdAddAuthor(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
 	case "set-write":
@@ -446,6 +450,13 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	if n := len(w.Runtime.PendingEvents); n > 0 {
 		fmt.Printf("pending   %d undelivered event(s), retry %d, next %s\n",
 			n, w.Runtime.RetryCount, stamp(w.Runtime.NextRetryAt))
+	}
+	if a := w.Author; a != nil {
+		fmt.Printf("author    %s in %s since %s, alert %s\n", a.Login, strings.Join(a.Repos, ","), a.Since.UTC().Format(time.RFC3339), w.alertTarget())
+		if s := w.Runtime.Author; s != nil {
+			fmt.Printf("seen      %d PR(s)\n", len(s.Seen))
+		}
+		return nil
 	}
 	if w.Chat != nil {
 		fmt.Printf("chat      %s (%s), quiet: %s\n", w.Chat.Topic, w.Chat.ID, strings.Join(w.Chat.Quiet, ", "))

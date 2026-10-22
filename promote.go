@@ -254,10 +254,13 @@ func criticNameFor(it QueueItem) string {
 
 // activeCritics counts the critics holding a slot: a stopped critic polls
 // nothing and must not keep the queue at capacity.
+// activeCritics counts live PR review critics: the queue's budget is for
+// them. A Teams chat or author watch is not a PR review and holds no slot
+// (both did until 2026-10-22, so the budget of 3 quietly shrank).
 func activeCritics(critics []*Critic) int {
 	n := 0
 	for _, c := range critics {
-		if !c.Runtime.Archived && !c.Runtime.Stopped {
+		if !c.Runtime.Archived && !c.Runtime.Stopped && c.SourceName() == "github-pr" {
 			n++
 		}
 	}

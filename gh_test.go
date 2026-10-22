@@ -72,6 +72,16 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	switch scenario {
+	case "author":
+		if p := os.Getenv("EBAC_FAKE_LOG"); p != "" {
+			f, _ := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			fmt.Fprintf(f, "CALL %s\n", strings.Join(rest, " "))
+			f.Close()
+		}
+		os.Stdout.WriteString(`[{"number":61586,"url":"https://x/pull/61586","title":"feat: one","state":"OPEN","isDraft":false,` +
+			`"headRefOid":"ffff8f68aaaabbbbcccc","createdAt":"2026-10-22T20:43:20Z","updatedAt":"2026-10-22T21:00:00Z","mergedAt":"0001-01-01T00:00:00Z"},` +
+			`{"number":61434,"url":"https://x/pull/61434","title":"feat: two","state":"MERGED","isDraft":false,` +
+			`"headRefOid":"ce1bd297dddd","createdAt":"2026-10-22T19:29:02Z","updatedAt":"2026-10-22T20:56:29Z","mergedAt":"2026-10-22T20:56:29Z"}]`)
 	case "pending":
 		os.Stdout.WriteString(pendingJSON)
 	case "paginate":

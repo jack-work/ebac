@@ -63,6 +63,8 @@ func protocolText(w *Critic, snap *Snapshot, me string) string {
 	switch w.Mode {
 	case ModeTeams:
 		b.WriteString(teamsCharge(w))
+	case ModeAuthor:
+		b.WriteString(authorCharge(w))
 	case ModeDevelop:
 		b.WriteString(developCharge(w))
 	case ModeReviewer:

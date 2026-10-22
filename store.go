@@ -76,7 +76,8 @@ type Runtime struct {
 	GoneStreak map[string]int `json:"gone_streak,omitempty"`
 
 	// Teams is a teams critic's seen-map and gone tracking.
-	Teams *TeamsState `json:"teams,omitempty"`
+	Teams  *TeamsState  `json:"teams,omitempty"`
+	Author *AuthorState `json:"author,omitempty"`
 
 	Stopped    bool      `json:"stopped"`
 	StopReason string    `json:"stop_reason,omitempty"`
@@ -136,6 +137,8 @@ type Critic struct {
 
 	// Chat is the Teams chat a teams critic watches (Mode teams only).
 	Chat *ChatRef `json:"chat,omitempty"`
+	// Author is an author watch's configuration (source github-author).
+	Author *AuthorRef `json:"author_watch,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`

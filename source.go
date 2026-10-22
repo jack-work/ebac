@@ -19,7 +19,7 @@ type Source interface {
 var sources = map[string]Source{}
 
 func init() {
-	for _, s := range []Source{githubPRs{}, teamsChat{}} {
+	for _, s := range []Source{githubPRs{}, teamsChat{}, authorWatch{}} {
 		sources[s.Name()] = s
 	}
 }
@@ -32,6 +32,9 @@ func (w *Critic) SourceName() string {
 	}
 	if w.Mode == ModeTeams {
 		return "teams-chat"
+	}
+	if w.Mode == ModeAuthor {
+		return "github-author"
 	}
 	return "github-pr"
 }
