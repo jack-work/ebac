@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jack-work/figaro/api/form"
+	"github.com/jack-work/figaro/api/rpc"
 )
 
 // A critic's role form IS its state. Config, runtime, and the observed pull
@@ -329,7 +330,7 @@ func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := ang.ListGlobal(ctx)
+	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}

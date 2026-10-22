@@ -11,6 +11,7 @@ import (
 
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
+	"github.com/jack-work/figaro/api/rpc"
 )
 
 // Every form ebac mints carries figaro's native lifetime (system.ttl) and is
@@ -80,7 +81,7 @@ func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	resp, err := ang.ListGlobal(ctx)
+	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return false, fmt.Errorf("list for lease: %w", err)
 	}

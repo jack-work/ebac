@@ -114,10 +114,10 @@ func (f *Figaro) node(ctx context.Context, id string) (*sdk.Aria, error) {
 	}
 	// Attach still matters: it restores a dormant aria or form so the door
 	// has someone to route to.
-	if _, err := ang.Attach(ctx, id); err != nil {
+	if _, err := auditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
 		return nil, fmt.Errorf("attach %s: %w", id, gone(err))
 	}
-	c, err := sdk.DialAria(f.addr(id), nil)
+	c, err := sdk.DialAriaWith(f.addr(id), nil, auditTap)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", id, err)
 	}
@@ -150,13 +150,13 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	patch := mintPatch(name)
-	resp, err := ang.FormCreate(ctx, "", nil, &patch)
+	resp, err := auditAng(rpc.MethodFormCreate, "", ang).FormCreate(ctx, "", nil, &patch)
 	if err != nil {
 		return "", fmt.Errorf("form create: %w", err)
 	}
 	// A fresh form is live, so seed the cache and skip an Attach on the
 	// writes that always follow.
-	if c, derr := sdk.DialAria(f.addr(resp.FormID), nil); derr == nil {
+	if c, derr := sdk.DialAriaWith(f.addr(resp.FormID), nil, auditTap); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FormID] = c
 		f.mu.Unlock()
@@ -323,7 +323,7 @@ func (f *Figaro) FormRemove(ctx context.Context, id string) error {
 		delete(f.nodes, id)
 	}
 	f.mu.Unlock()
-	return ang.Kill(ctx, id, false)
+	return auditAng(rpc.MethodKill, id, ang).Kill(ctx, id, false)
 }
 
 // ---------- arias ----------
@@ -337,11 +337,11 @@ func (f *Figaro) NewAria(ctx context.Context, outfits string) (string, error) {
 	if outfits != "" {
 		names = splitComma(outfits)
 	}
-	resp, err := ang.Create(ctx, names, nil)
+	resp, err := auditAng(rpc.MethodCreate, "", ang).Create(ctx, names, nil)
 	if err != nil {
 		return "", fmt.Errorf("create aria: %w", err)
 	}
-	if c, derr := sdk.DialAria(f.addr(resp.FigaroID), nil); derr == nil {
+	if c, derr := sdk.DialAriaWith(f.addr(resp.FigaroID), nil, auditTap); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FigaroID] = c
 		f.mu.Unlock()
@@ -407,7 +407,7 @@ func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
 	if err != nil {
 		return false
 	}
-	if _, err := ang.Attach(ctx, id); err != nil {
+	if _, err := auditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
 		return false
 	}
 	return true
@@ -420,7 +420,7 @@ func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens,
 	if e != nil {
 		return 0, 0, 0, e
 	}
-	resp, e := ang.ListGlobal(ctx)
+	resp, e := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if e != nil {
 		return 0, 0, 0, e
 	}
@@ -451,7 +451,7 @@ func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, promp
 	if outfits != "" {
 		names = splitComma(outfits)
 	}
-	resp, err := ang.Fork(ctx, id, uint64(turn), 0, names, nil)
+	resp, err := auditAng(rpc.MethodFork, id, ang).Fork(ctx, id, uint64(turn), 0, names, nil)
 	if err != nil {
 		return "", fmt.Errorf("fork %s at turn %d: %w", id, turn, err)
 	}
@@ -477,7 +477,7 @@ func (f *Figaro) ListFormIDs(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := ang.ListGlobal(ctx)
+	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return nil, err
 	}
