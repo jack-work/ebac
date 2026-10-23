@@ -281,6 +281,14 @@ func TimerState(name string) TimerStatus {
 
 	t := TimerStatus{}
 	t.Active = activeErr == nil && activeOut == "active"
+	// An ELAPSED timer is "active" but will never fire again (every trigger is
+	// in the past: a drop-in that wiped OnUnitActiveSec left exactly that, and
+	// ls said "armed"). It is not armed: R3 re-arms it, selfcheck flags it.
+	if t.Active {
+		if sub, _ := systemctlOut("show", unit, "-p", "SubState", "--value"); sub == "elapsed" {
+			t.Active, activeOut = false, "elapsed"
+		}
+	}
 	switch enabledOut {
 	case "enabled", "enabled-runtime", "static", "linked", "linked-runtime", "indirect", "generated":
 		t.Enabled, t.Known = true, true

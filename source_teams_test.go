@@ -455,3 +455,24 @@ func TestEnableTimerResetsTheTemplateAndUsesTheCriticsInterval(t *testing.T) {
 		t.Fatalf("jitter not capped:\n%s", b)
 	}
 }
+
+// An elapsed timer (all triggers in the past) is "active" to is-active but will
+// never fire again; it must not read as armed.
+func TestTimerStateElapsedIsNotArmed(t *testing.T) {
+	for _, c := range []struct {
+		sub   string
+		armed bool
+		show  string
+	}{{"elapsed", false, "enabled/elapsed"}, {"waiting", true, "armed"}} {
+		bin := t.TempDir()
+		script := "#!/bin/sh\ncase \"$*\" in\n*is-active*) echo active;;\n*is-enabled*) echo enabled;;\n*SubState*) echo " + c.sub + ";;\nesac\n"
+		if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin)
+		ts := TimerState("x")
+		if ts.Armed() != c.armed || ts.Display != c.show {
+			t.Fatalf("substate %s: armed=%v display=%q; want %v %q", c.sub, ts.Armed(), ts.Display, c.armed, c.show)
+		}
+	}
+}
