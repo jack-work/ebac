@@ -139,3 +139,23 @@ func TestTombGetsItsTokenOnFd3(t *testing.T) {
 		t.Fatalf("control: expected the fake to refuse without fd, got %v", err)
 	}
 }
+
+// A shorthand PR (owner/repo#N) took the github.com default, which ebac cannot
+// reach since phase 1: three critics failed every round (2026-10-24).
+func TestShorthandPRResolvesToTheCredentialedForge(t *testing.T) {
+	ref, err := ParsePRRef("bic/aether#64462")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := forgeHost([]PRRef{ref}, defaultForgeHost())
+	if err != nil || host != "microsoft.ghe.com" {
+		t.Fatalf("shorthand resolved to %q (%v); want microsoft.ghe.com", host, err)
+	}
+	if err := checkForgeHost(host); err != nil {
+		t.Fatalf("credentialed host refused: %v", err)
+	}
+	// Control: an uncredentialed host is refused at creation, naming the fix.
+	if err := checkForgeHost("github.com"); err == nil || !strings.Contains(err.Error(), "full PR URL") {
+		t.Fatalf("github.com accepted or unhelpful: %v", err)
+	}
+}

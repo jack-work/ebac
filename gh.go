@@ -68,6 +68,32 @@ func NewGH(bin, host string) *GH {
 // A host without one is refused by band-cred: never another host's token.
 var ghCreds = map[string]string{"microsoft.ghe.com": credGitHub}
 
+// defaultForgeHost is the host a PR reference without one (owner/repo#N)
+// resolves to: the one forge ebac holds a band-cred credential for. It was
+// github.com, which ebac cannot reach since every call takes a band-cred token:
+// three critics added from shorthand on 2026-10-24 failed every round.
+func defaultForgeHost() string {
+	if len(ghCreds) == 1 {
+		for h := range ghCreds {
+			return h
+		}
+	}
+	return "microsoft.ghe.com"
+}
+
+// checkForgeHost refuses, at creation, a host ebac holds no credential for:
+// such a critic could never poll.
+func checkForgeHost(host string) error {
+	if _, ok := ghCreds[host]; !ok {
+		hosts := make([]string, 0, len(ghCreds))
+		for h := range ghCreds {
+			hosts = append(hosts, h)
+		}
+		return fmt.Errorf("no band-cred credential for forge host %q (ebac can poll: %s): give the full PR URL or --host", host, strings.Join(hosts, ", "))
+	}
+	return nil
+}
+
 func credForHost(host string) *Cred {
 	name, ok := ghCreds[host]
 	if !ok {

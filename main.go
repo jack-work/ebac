@@ -59,7 +59,7 @@ func main() {
 	g := globals{
 		gh:     env("EBAC_GH", "gh"),
 		figaro: os.Getenv("EBAC_SOCKET"),
-		host:   env("EBAC_HOST", "github.com"),
+		host:   env("EBAC_HOST", defaultForgeHost()),
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -269,6 +269,9 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		w.AddPR(ref)
 	}
 	if w.Host, err = forgeHost(w.PRs, g.host); err != nil {
+		return err
+	}
+	if err := checkForgeHost(w.Host); err != nil {
 		return err
 	}
 	gh := NewGH(g.gh, w.Host)

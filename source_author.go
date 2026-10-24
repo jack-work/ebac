@@ -352,6 +352,9 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 			ref.Repos = append(ref.Repos, r)
 		}
 	}
+	if err := checkForgeHost(*host); err != nil {
+		return err
+	}
 	if ref.AlertRole != "" && !strings.HasPrefix(ref.AlertRole, "@") {
 		return fmt.Errorf("--alert %q: want a role form (@id)", ref.AlertRole)
 	}
