@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
@@ -56,8 +57,8 @@ func teamsText(content string) string {
 
 // teamsDiff compares a fetch with what was seen. The first round only
 // records: a watcher that starts by announcing fifty old messages is noise.
-func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]InboxItem) {
-	items = map[string]InboxItem{}
+func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]form.InboxItem) {
+	items = map[string]form.InboxItem{}
 	first := st.Seen == nil
 	if first {
 		st.Seen = map[string]string{}
@@ -111,7 +112,7 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		body, cut := model.CutBody(teamsText(m.Content), teamsBodyBytes)
 		events = append(events, model.Event{Kind: model.EventKind(kind), Tier: tier, PR: model.PRKey(chat.Topic), Comment: m.ID, Author: who,
 			Detail: model.FirstLine(body)})
-		it := InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.SenderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(),
+		it := form.InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.SenderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(),
 			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
 		if it.HasImage {
 			it.Fetch += fmt.Sprintf("; images: tomb --log '' --download-images <dir> messages '%s' --limit %d", chat.ID, teamsLimit)
@@ -172,7 +173,7 @@ func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 	}
 	st.GoneStreak, st.GoneSince = 0, ""
 	if st.Blind {
-		if err := p.Store.commit(ctx, w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
+		if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
 			return nil, []string{"blind"}
 		}); err != nil {
 			return fmt.Errorf("%s: clear blind marker: %w", w.Name, err)
@@ -276,7 +277,7 @@ func teamsBlind(ctx context.Context, p *Poller, w *model.Critic, cause error) {
 	}
 	marker := map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
 		"meaning": "ebac cannot read the chat " + w.Chat.Topic + ": messages since then are unseen until this key disappears"}
-	if err := p.Store.commit(ctx, w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
+	if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
 		return map[string]json.RawMessage{"blind": model.MustJSON(marker)}, nil
 	}); err != nil {
 		fmt.Fprintf(p.Out, "%s: could not write blind marker: %v\n", w.Name, err)
@@ -322,7 +323,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if *chat == "" {
 		return fmt.Errorf("--chat is required")
 	}
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

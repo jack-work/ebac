@@ -1,4 +1,4 @@
-package main
+package form
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 	pr.Comments["IC1"] = &model.Comment{ID: "IC1", Author: "amy", URL: "u1", Body: strings.Repeat("é", 1500)}
 	pr.Comments["IC2"] = &model.Comment{ID: "IC2", Author: "jack", URL: "u2", Body: "mine"}
 	ev := []model.Event{{Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC1"}, {Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC2"}}
-	got := inboxItems(snap, ev, "jack", time.Unix(0, 0))
+	got := InboxItems(snap, ev, "jack", time.Unix(0, 0))
 	if _, mine := got["IC2"]; mine || len(got) != 1 {
 		t.Fatalf("inbox %v; want only amy's comment", got)
 	}
@@ -72,7 +72,7 @@ func TestLiveBudgetGuardControl(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
 	fill := func(total int) error {
-		return st.commit(ctx, id, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
+		return st.Commit(ctx, id, func(cur map[string]json.RawMessage, _ EbacState) (map[string]json.RawMessage, []string) {
 			base := 0
 			for k, v := range cur {
 				if k != "filler" {
@@ -84,7 +84,7 @@ func TestLiveBudgetGuardControl(t *testing.T) {
 		})
 	}
 	size := func() int {
-		fr, err := st.readForm(ctx, id)
+		fr, err := st.ReadForm(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}

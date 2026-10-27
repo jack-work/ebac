@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/tomb"
 )
@@ -186,7 +187,7 @@ func TestTombHelperProcess(t *testing.T) {
 func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	f := liveOrSkip(t)
 	ctx := context.Background()
-	st, err := NewStore(f)
+	st, err := form.NewStore(f)
 	if err != nil {
 		t.Fatal(err)
 	}

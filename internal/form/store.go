@@ -1,4 +1,4 @@
-package main
+package form
 
 import (
 	"encoding/json"
@@ -54,7 +54,7 @@ func writeJSONAtomic(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
-func readJSON(path string, v any) error {
+func ReadJSON(path string, v any) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err

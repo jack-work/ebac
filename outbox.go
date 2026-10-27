@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -174,8 +175,8 @@ func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snap
 // flushOutbox posts what the seat wrote since the watermark and returns the
 // receipts for the round's one patch, and moves the watermark
 // in w. On any read failure it moves nothing.
-func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) Receipts {
-	acks := Receipts{}
+func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) form.Receipts {
+	acks := form.Receipts{}
 	c, err := p.Fig.Node(ctx, w.FormID)
 	if err != nil {
 		fmt.Fprintf(p.Out, "%s: outbox unreadable: %v\n", w.Name, err)

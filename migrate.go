@@ -12,6 +12,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
+	ebacform "github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
@@ -24,7 +25,7 @@ func cmdMigrate(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	dry := fs.Bool("dry-run", false, "report only")
 	_ = fs.Parse(args)
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := ebacform.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -45,18 +46,18 @@ func cmdMigrate(ctx context.Context, g globals, args []string) error {
 		}
 		name := strings.TrimSuffix(e.Name(), ".json")
 		var w model.Critic
-		if err := readJSON(filepath.Join(dir, e.Name()), &w); err != nil {
+		if err := ebacform.ReadJSON(filepath.Join(dir, e.Name()), &w); err != nil {
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
 		var snap *model.Snapshot
 		snapPath := filepath.Join(st.Root, "snapshots", name+".json")
 		if _, err := os.Stat(snapPath); err == nil {
 			snap = &model.Snapshot{}
-			if err := readJSON(snapPath, snap); err != nil {
+			if err := ebacform.ReadJSON(snapPath, snap); err != nil {
 				return fmt.Errorf("%s: %w", snapPath, err)
 			}
 		}
-		if _, err := st.readForm(ctx, w.FormID); err != nil {
+		if _, err := st.ReadForm(ctx, w.FormID); err != nil {
 			return fmt.Errorf("%s: role form %s: %w", name, w.FormID, err)
 		}
 		prs := 0
@@ -108,15 +109,15 @@ func cmdCompact(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	dry := fs.Bool("dry-run", false, "show the delete patch and stop")
 	_ = fs.Parse(args)
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := ebacform.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	f, err := st.findCritic(ctx, *name)
+	f, err := st.FindCritic(ctx, *name)
 	if err != nil {
 		return err
 	}
-	if w, err := f.critic(); err == nil {
+	if w, err := f.Critic(); err == nil {
 		if me, err := forge.NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
 			st.Me = me
 		}
@@ -124,12 +125,12 @@ func cmdCompact(ctx context.Context, g globals, args []string) error {
 	return compactForm(ctx, st, f, *dry)
 }
 
-func compactForm(ctx context.Context, st *Store, f *criticForm, dry bool) error {
-	w, err := f.critic()
+func compactForm(ctx context.Context, st *ebacform.Store, f *ebacform.CriticForm, dry bool) error {
+	w, err := f.Critic()
 	if err != nil {
 		return err
 	}
-	snap, err := f.snapshot()
+	snap, err := f.Snapshot()
 	if err != nil {
 		return err
 	}
@@ -159,7 +160,7 @@ func compactForm(ctx context.Context, st *Store, f *criticForm, dry bool) error 
 	if err := st.Save(ctx, w, snap, nil); err != nil {
 		return fmt.Errorf("write compact prs: %w", err)
 	}
-	f2, err := st.readForm(ctx, f.ID)
+	f2, err := st.ReadForm(ctx, f.ID)
 	if err != nil {
 		return err
 	}

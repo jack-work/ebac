@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -29,7 +30,7 @@ type CheckResult struct {
 	Detail  string
 }
 
-func Selfcheck(ctx context.Context, st *Store, fig *figaro.Figaro, out io.Writer, only string) (warns int, err error) {
+func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.Writer, only string) (warns int, err error) {
 	critics, err := st.ListCritics(ctx)
 	if err != nil {
 		return 0, err

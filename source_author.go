@@ -10,6 +10,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -136,7 +137,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	if err := p.Store.SaveRound(ctx, w, nil, nil, nil); err != nil {
 		return err
 	}
-	if err := p.Store.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
+	if err := p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
 		next := model.MustJSON(authored)
 		if string(cur["authored"]) == string(next) {
 			return nil, nil
@@ -255,7 +256,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if ref.AlertRole != "" && !strings.HasPrefix(ref.AlertRole, "@") {
 		return fmt.Errorf("--alert %q: want a role form (@id)", ref.AlertRole)
 	}
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

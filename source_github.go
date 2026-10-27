@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -54,7 +55,7 @@ func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PR
 		if len(w.PRs) == 0 {
 			action = "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge); a moved PR needs a NEW critic."
 		}
-		if err := p.markGone(ctx, w, "pr:"+prFormKey(k), "pull request "+string(k), now, errors.New(errs[k]), action); err != nil {
+		if err := p.markGone(ctx, w, "pr:"+form.PrFormKey(k), "pull request "+string(k), now, errors.New(errs[k]), action); err != nil {
 			return err
 		}
 	}
@@ -227,7 +228,7 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	// One patch: the observed PRs, the debt and the outbox receipts. It lands
 	// before delivery, so a crash mid-send leaves the debt on the form and
 	// the seat's wake finds the round's change already in its study diff.
-	if err := p.Store.SaveRound(ctx, w, next, acks, inboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
+	if err := p.Store.SaveRound(ctx, w, next, acks, form.InboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
 		return err
 	}
 	figaro.Renew(ctx, p.Fig, w.FormID)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -29,7 +30,7 @@ func Register(s Source) { sources[s.Name()] = s }
 // reads the same shape whatever went away.
 func (p *Poller) markGone(ctx context.Context, w *model.Critic, key, resource, since string, cause error, action string) error {
 	marker := map[string]string{"resource": resource, "since": since, "error": cause.Error(), "action": action}
-	return p.Store.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
+	return p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
 		gone := model.ObjectOf(cur["gone"])
 		gone[key] = model.MustJSON(marker)
 		return map[string]json.RawMessage{"gone": model.MustJSON(gone)}, nil

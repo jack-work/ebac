@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -108,7 +109,7 @@ func TestAuthorBrief(t *testing.T) {
 func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	f := liveOrSkip(t)
 	ctx := context.Background()
-	st, err := NewStore(f)
+	st, err := form.NewStore(f)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-package main
+package form
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 const criticKind = "ebac.critic"
 
 // ebacState is what ebac keeps under system.ebac.
-type ebacState struct {
+type EbacState struct {
 	Runtime  model.Runtime `json:"runtime"`
 	Round    int           `json:"snapshot_round,omitempty"`
 	TakenAt  time.Time     `json:"snapshot_taken_at,omitempty"`
@@ -82,7 +82,7 @@ type formPR struct {
 }
 
 // prFormKey makes a PR key safe as one path segment.
-func prFormKey(k model.PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
+func PrFormKey(k model.PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
 
 func prsTree(s *model.Snapshot) map[string]*formPR {
 	out := map[string]*formPR{}
@@ -107,7 +107,7 @@ func prsTree(s *model.Snapshot) map[string]*formPR {
 		for id, c := range p.Comments {
 			f.Comments[id] = &formItem{By: c.Author, D: c.Digest, Bot: c.IsBot}
 		}
-		out[prFormKey(k)] = f
+		out[PrFormKey(k)] = f
 	}
 	return out
 }
@@ -256,14 +256,14 @@ func prsFromTree(raw json.RawMessage) (map[model.PRKey]*model.PRState, error) {
 }
 
 // criticForm is one read of a role form.
-type criticForm struct {
+type CriticForm struct {
 	ID      string
 	Version uint64
 	Snap    form.Snapshot
 	Keys    map[string]json.RawMessage
 }
 
-func (s *Store) readForm(ctx context.Context, id string) (*criticForm, error) {
+func (s *Store) ReadForm(ctx context.Context, id string) (*CriticForm, error) {
 	c, err := s.Fig.Node(ctx, id)
 	if err != nil {
 		return nil, err
@@ -280,18 +280,18 @@ func (s *Store) readForm(ctx context.Context, id string) (*criticForm, error) {
 	if err := json.Unmarshal(b, &keys); err != nil {
 		return nil, err
 	}
-	return &criticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys}, nil
+	return &CriticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys}, nil
 }
 
-func (f *criticForm) ebac() ebacState {
+func (f *CriticForm) ebac() EbacState {
 	var sys struct {
-		Ebac ebacState `json:"ebac"`
+		Ebac EbacState `json:"ebac"`
 	}
 	_ = json.Unmarshal(f.Keys["system"], &sys)
 	return sys.Ebac
 }
 
-func (f *criticForm) critic() (*model.Critic, error) {
+func (f *CriticForm) Critic() (*model.Critic, error) {
 	raw, ok := f.Keys["critic"]
 	if !ok {
 		return nil, fmt.Errorf("form %s has no critic", f.ID)
@@ -308,7 +308,7 @@ func (f *criticForm) critic() (*model.Critic, error) {
 	return &w, nil
 }
 
-func (f *criticForm) snapshot() (*model.Snapshot, error) {
+func (f *CriticForm) Snapshot() (*model.Snapshot, error) {
 	e := f.ebac()
 	prs, err := prsFromTree(f.Keys["prs"])
 	if err != nil {
@@ -318,14 +318,14 @@ func (f *criticForm) snapshot() (*model.Snapshot, error) {
 		return nil, nil // never polled
 	}
 	name := ""
-	if w, err := f.critic(); err == nil {
+	if w, err := f.Critic(); err == nil {
 		name = w.Name
 	}
 	return &model.Snapshot{Critic: name, Round: e.Round, TakenAt: e.TakenAt, PRs: prs, Complete: e.Complete, Note: e.Note}, nil
 }
 
 // criticForms reads every form declaring kind ebac.critic.
-func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
+func (s *Store) criticForms(ctx context.Context) ([]*CriticForm, error) {
 	ang, err := s.Fig.Angelus()
 	if err != nil {
 		return nil, err
@@ -334,12 +334,12 @@ func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}
-	var out []*criticForm
+	var out []*CriticForm
 	for _, r := range resp.Figaros {
 		if r.Kind != "form" || !strings.HasPrefix(r.Name, "ebac-") {
 			continue
 		}
-		f, err := s.readForm(ctx, r.ID)
+		f, err := s.ReadForm(ctx, r.ID)
 		if errors.Is(err, figaro.ErrFormGone) {
 			continue
 		}
@@ -356,11 +356,11 @@ func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
 }
 
 // findCritic locates a critic's form by the name its critic key carries.
-func (s *Store) findCritic(ctx context.Context, name string) (*criticForm, error) {
+func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error) {
 	if id, ok := s.formOf[name]; ok {
-		f, err := s.readForm(ctx, id)
+		f, err := s.ReadForm(ctx, id)
 		if err == nil {
-			if w, err := f.critic(); err == nil && w.Name == name {
+			if w, err := f.Critic(); err == nil && w.Name == name {
 				return f, nil
 			}
 		} else if !errors.Is(err, figaro.ErrFormGone) {
@@ -372,9 +372,9 @@ func (s *Store) findCritic(ctx context.Context, name string) (*criticForm, error
 	if err != nil {
 		return nil, err
 	}
-	var hits []*criticForm
+	var hits []*CriticForm
 	for _, f := range forms {
-		if w, err := f.critic(); err == nil && w.Name == name {
+		if w, err := f.Critic(); err == nil && w.Name == name {
 			hits = append(hits, f)
 		}
 	}
@@ -393,19 +393,19 @@ func (s *Store) findCritic(ctx context.Context, name string) (*criticForm, error
 }
 
 func (s *Store) LoadCritic(ctx context.Context, name string) (*model.Critic, error) {
-	f, err := s.findCritic(ctx, name)
+	f, err := s.FindCritic(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	return f.critic()
+	return f.Critic()
 }
 
 func (s *Store) LoadSnapshot(ctx context.Context, name string) (*model.Snapshot, error) {
-	f, err := s.findCritic(ctx, name)
+	f, err := s.FindCritic(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	return f.snapshot()
+	return f.Snapshot()
 }
 
 func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
@@ -416,7 +416,7 @@ func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
 	var out []*model.Critic
 	seen := map[string]string{}
 	for _, f := range forms {
-		w, err := f.critic()
+		w, err := f.Critic()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ebac: unreadable critic form %s: %v\n", f.ID, err)
 			continue
@@ -468,7 +468,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	}
 	set["harness"] = harness
 	s.formOf[w.Name] = w.FormID
-	return s.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys ebacState) (map[string]json.RawMessage, []string) {
+	return s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
 		sys.Runtime = w.Runtime
 		view := snap
 		if snap != nil {
@@ -604,7 +604,7 @@ func checkBudget(id string, curBytes, nextBytes int) error {
 // than an object adds a flat "a.b" sibling instead of nesting
 // (jack-work/figaro#43); on 2026-10-20 that replaced one form's system subtree
 // with null. Subtrees (system, post) are merged here and written whole.
-func (s *Store) commit(ctx context.Context, id string, build func(cur map[string]json.RawMessage, sys ebacState) (map[string]json.RawMessage, []string)) error {
+func (s *Store) Commit(ctx context.Context, id string, build func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string)) error {
 	c, err := s.Fig.Node(ctx, id)
 	if err != nil {
 		return err
@@ -614,7 +614,7 @@ func (s *Store) commit(ctx context.Context, id string, build func(cur map[string
 		if attempt > 0 {
 			time.Sleep(time.Duration(rand.Intn(attempt*2+1)) * time.Millisecond)
 		}
-		f, err := s.readForm(ctx, id)
+		f, err := s.ReadForm(ctx, id)
 		if err != nil {
 			return err
 		}

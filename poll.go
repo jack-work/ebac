@@ -10,6 +10,7 @@ import (
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
@@ -25,7 +26,7 @@ const (
 )
 
 type Poller struct {
-	Store  *Store
+	Store  *form.Store
 	GH     *forge.GH
 	Tomb   *tomb.Tomb
 	Fig    *figaro.Figaro

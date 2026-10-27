@@ -1,4 +1,4 @@
-package main
+package form
 
 import (
 	"encoding/json"
@@ -36,7 +36,7 @@ type InboxItem struct {
 
 // inboxItems turns a round's events into inbox entries, keyed by comment or
 // review id. The operator's own posts are skipped: the seat wrote them.
-func inboxItems(next *model.Snapshot, events []model.Event, me string, now time.Time) map[string]InboxItem {
+func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.Time) map[string]InboxItem {
 	out := map[string]InboxItem{}
 	if next == nil {
 		return out

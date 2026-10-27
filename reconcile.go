@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -44,7 +45,7 @@ type ReconcileReport struct {
 	DryRun   bool      `json:"dry_run"`
 }
 
-func Reconcile(ctx context.Context, st *Store, fig *figaro.Figaro, out io.Writer, dryRun bool) (*ReconcileReport, error) {
+func Reconcile(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.Writer, dryRun bool) (*ReconcileReport, error) {
 	rep := &ReconcileReport{Ran: time.Now().UTC().Format(time.RFC3339), DryRun: dryRun}
 
 	critics, err := st.ListCritics(ctx)
@@ -170,7 +171,7 @@ func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	dry := fs.Bool("dry-run", false, "report what would change, change nothing")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

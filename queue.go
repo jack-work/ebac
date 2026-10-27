@@ -13,6 +13,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -201,7 +202,7 @@ func SortQueue(items []QueueItem) {
 // wasteful, it is two reviewers replying to the same human in the same
 // thread. Measured the hard way: promoting #23650 and #23654 gave them
 // critics of their own while the `aether` critic was already watching both.
-func Enqueue(ctx context.Context, st *Store, fig *figaro.Figaro, formID, host string, ref model.PRRef, priority int, mode, note string) (QueueItem, error) {
+func Enqueue(ctx context.Context, st *form.Store, fig *figaro.Figaro, formID, host string, ref model.PRRef, priority int, mode, note string) (QueueItem, error) {
 	// 1. Already watched by a live critic?
 	if critics, err := st.ListCritics(ctx); err == nil {
 		for _, c := range critics {
@@ -284,7 +285,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
-	st, err := NewStore(figaro.NewFigaro(g.figaro))
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

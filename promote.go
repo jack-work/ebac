@@ -8,6 +8,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -25,7 +26,7 @@ import (
 // Slots free themselves. A critic archives when all its PRs close, so the
 // loop closes without anybody sweeping it.
 type Promoter struct {
-	Store *Store
+	Store *form.Store
 	Fig   *figaro.Figaro
 	GH    *forge.GH
 	Out   io.Writer
