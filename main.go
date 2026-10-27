@@ -15,6 +15,7 @@ import (
 
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
@@ -370,21 +371,21 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 	fig := st.Fig
 
 	var (
-		rows   []RosterRow
-		sum    RosterSummary
+		rows   []fleet.RosterRow
+		sum    fleet.RosterSummary
 		age    time.Duration
 		source = "index"
 	)
 	if *live {
-		rows, sum, err = BuildRoster(ctx, st, fig, "")
+		rows, sum, err = fleet.BuildRoster(ctx, st, fig, "")
 		source = "live"
 	} else {
-		rows, sum, age, err = ReadRoster(ctx, st, fig)
+		rows, sum, age, err = fleet.ReadRoster(ctx, st, fig)
 		if err != nil {
 			// Falling back is right, but doing it SILENTLY is not: an
 			// operator must never mistake a rebuild for the index.
 			fmt.Fprintf(os.Stderr, "ebac: %v; rebuilding live\n", err)
-			rows, sum, err = BuildRoster(ctx, st, fig, "")
+			rows, sum, err = fleet.BuildRoster(ctx, st, fig, "")
 			source = "live (index unavailable)"
 		}
 	}
@@ -393,7 +394,7 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 	}
 
 	if *asJSON {
-		dumpJSON(map[string]any{"source": source, "age_seconds": int(age.Seconds()), "summary": sum, "critics": rows})
+		fleet.DumpJSON(map[string]any{"source": source, "age_seconds": int(age.Seconds()), "summary": sum, "critics": rows})
 		return nil
 	}
 	if len(rows) == 0 {
@@ -441,7 +442,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	}
 	snap, _ := st.LoadSnapshot(ctx, *name)
 	if *asJSON {
-		dumpJSON(map[string]any{"critic": w, "snapshot": snap})
+		fleet.DumpJSON(map[string]any{"critic": w, "snapshot": snap})
 		return nil
 	}
 	fig := st.Fig
@@ -815,7 +816,7 @@ func cmdRoster(ctx context.Context, g globals, args []string) error {
 	}
 	fig := st.Fig
 	if *sync || *cast != "" || *mint {
-		id, sum, err := SyncRoster(ctx, st, fig, "")
+		id, sum, err := fleet.SyncRoster(ctx, st, fig, "")
 		if err != nil {
 			return err
 		}
@@ -837,15 +838,15 @@ func cmdRoster(ctx context.Context, g globals, args []string) error {
 		}
 		return nil
 	}
-	rows, sum, err := BuildRoster(ctx, st, fig, "")
+	rows, sum, err := fleet.BuildRoster(ctx, st, fig, "")
 	if err != nil {
 		return err
 	}
 	if *asJSON {
-		dumpJSON(map[string]any{"summary": sum, "critics": rows})
+		fleet.DumpJSON(map[string]any{"summary": sum, "critics": rows})
 		return nil
 	}
-	dumpJSON(rows)
+	fleet.DumpJSON(rows)
 	return nil
 }
 
@@ -860,7 +861,7 @@ func cmdSelfcheck(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	warns, err := Selfcheck(ctx, st, st.Fig, os.Stdout, *name)
+	warns, err := fleet.Selfcheck(ctx, st, st.Fig, os.Stdout, *name)
 	if err != nil {
 		return err
 	}

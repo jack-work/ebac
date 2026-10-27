@@ -1,4 +1,4 @@
-package main
+package fleet
 
 import (
 	"context"
@@ -189,7 +189,7 @@ func SyncRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me stri
 	return id, sum, nil
 }
 
-func dumpJSON(v any) {
+func DumpJSON(v any) {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println(string(b))
 }
