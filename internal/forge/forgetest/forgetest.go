@@ -1,4 +1,10 @@
-package author
+// Package forgetest is the fake gh shared by tests outside internal/forge:
+// a package's tests call FakeGH and declare
+//
+//	func TestHelperProcess(t *testing.T) { forgetest.HelperProcess(t) }
+//
+// because the fake re-execs that package's own test binary.
+package forgetest
 
 import (
 	"context"
@@ -12,7 +18,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 )
 
-// fakeGH points GH.run at THIS test binary, re-executed as a child process
+// FakeGH points GH.run at THIS test binary, re-executed as a child process
 // (the same helper-process trick os/exec's own tests use), rather than an
 // external shell script. A script with a `#!/usr/bin/env bash` shebang works
 // on a developer machine but not inside the Nix build sandbox's checkPhase --
@@ -20,7 +26,7 @@ import (
 // lookup fails and reports ENOENT confusingly on the SCRIPT's own path, not
 // the missing interpreter. Re-execing the already-built Go test binary needs
 // no interpreter at all.
-func fakeGH(t *testing.T, scenario string) *forge.GH {
+func FakeGH(t *testing.T, scenario string) *forge.GH {
 	t.Helper()
 	orig := forge.ExecCommandContext
 	forge.ExecCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
@@ -34,7 +40,7 @@ func fakeGH(t *testing.T, scenario string) *forge.GH {
 	return g
 }
 
-// TestHelperProcess is not a real test. It is the child process fakeGH
+// HelperProcess, called from TestHelperProcess, is not a real test. It is the child process FakeGH
 // re-execs; gated on argv rather than an env var because GH.run overwrites
 // cmd.Env wholesale right after exec.CommandContext returns (`cmd.Env =
 // append(os.Environ(), "GH_HOST="+g.Host, ...)`, in gh.go) -- a real, useful
@@ -45,7 +51,7 @@ func fakeGH(t *testing.T, scenario string) *forge.GH {
 // landed on stdout where the fake JSON was expected -- a real external `gh`
 // would never emit that, so decode failed on the 'P'. An ordinary `go test`
 // run never has "--" in os.Args, so that alone is enough to gate on.
-func TestHelperProcess(t *testing.T) {
+func HelperProcess(t *testing.T) {
 	args := os.Args
 	found := false
 	for len(args) > 0 {

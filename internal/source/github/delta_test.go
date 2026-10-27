@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
 )
@@ -508,7 +509,7 @@ func TestReviewEditedInPlaceStillWakes(t *testing.T) {
 // 2026-10-20: a pending review swallowed 344 thread replies on bic/aether#56134
 // while ebac recorded every one as sent.
 func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
-	g := fakeGH(t, "pending")
+	g := forgetest.FakeGH(t, "pending")
 	pr, err := g.FetchPR(context.Background(), "acme", "widget", 1)
 	if err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
@@ -74,7 +75,7 @@ func TestAuthorDiff(t *testing.T) {
 
 func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 	t.Setenv("EBAC_FAKE_LOG", t.TempDir()+"/calls")
-	g := fakeGH(t, "author")
+	g := forgetest.FakeGH(t, "author")
 	since := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	prs, err := g.ListAuthoredPRs(context.Background(), "bic/aether", "Chiqun-Zhang", since)
 	if err != nil {
@@ -127,7 +128,7 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	gh := fakeGH(t, "author")
+	gh := forgetest.FakeGH(t, "author")
 	gh.Host = "github.com" // the poller's default: the round must retarget it to the critic's host
 	p := &poll.Poller{Store: st, Fig: f, Out: &out, GH: gh}
 	if err := p.Poll(ctx, w.Name); err != nil {

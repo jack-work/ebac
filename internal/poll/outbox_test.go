@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 )
@@ -207,7 +208,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = fakeGH(t, scenario)
+		p.GH = forgetest.FakeGH(t, scenario)
 		acks := p.FlushOutbox(ctx, w, snap)
 		if err := st.Save(ctx, w, snap, acks); err != nil {
 			t.Fatal(err)
@@ -280,7 +281,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = fakeGH(t, scenario)
+		p.GH = forgetest.FakeGH(t, scenario)
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
@@ -348,7 +349,7 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = fakeGH(t, scenario)
+		p.GH = forgetest.FakeGH(t, scenario)
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
@@ -394,7 +395,7 @@ func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = fakeGH(t, scenario)
+		p.GH = forgetest.FakeGH(t, scenario)
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
