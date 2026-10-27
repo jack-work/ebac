@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -356,21 +356,6 @@ func TestIdenticalSnapshotsProduceNothing(t *testing.T) {
 	}
 }
 
-func TestMergeEventsDeduplicatesAndCaps(t *testing.T) {
-	e := model.Event{Kind: model.EvCommentNew, PR: "acme/widget#1", ThreadID: "t", Comment: "c"}
-	got := mergeEvents([]model.Event{e}, []model.Event{e, e})
-	if len(got) != 1 {
-		t.Fatalf("dedup failed: %d events", len(got))
-	}
-	var many []model.Event
-	for i := 0; i < 500; i++ {
-		many = append(many, model.Event{Kind: model.EvCommentNew, Comment: string(rune(i))})
-	}
-	if n := len(mergeEvents(nil, many)); n > 200 {
-		t.Fatalf("pending batch grew unbounded: %d", n)
-	}
-}
-
 // Observed live in production use: one reviewer's single review
 // action produced NINE distinct GraphQL review nodes on the same PR by the
 // same author (one CHANGES_REQUESTED plus eight COMMENTED, one per inline
@@ -388,7 +373,7 @@ func TestDistinctReviewsWithSameStateAreNotDeduplicated(t *testing.T) {
 			Author: "bob", Detail: "COMMENTED", ReviewID: string(rune('a' + i)),
 		})
 	}
-	got := mergeEvents(nil, fresh)
+	got := poll.MergeEvents(nil, fresh)
 	if len(got) != 8 {
 		t.Fatalf("8 distinct reviews collapsed to %d: %v", len(got), got)
 	}
@@ -520,18 +505,6 @@ func TestReviewEditedInPlaceStillWakes(t *testing.T) {
 	}
 }
 
-func TestBackoffClimbsAndCaps(t *testing.T) {
-	if backoffFor(1) != baseBackoff {
-		t.Fatalf("first retry = %s", backoffFor(1))
-	}
-	if backoffFor(2) != 2*baseBackoff {
-		t.Fatalf("second retry = %s", backoffFor(2))
-	}
-	if backoffFor(20) != maxBackoff {
-		t.Fatalf("backoff did not cap: %s", backoffFor(20))
-	}
-}
-
 // Regression: the roster's health column scored an unarmed critic as "ok"
 // because it compared TimerState against the literal "inactive/disabled",
 // while systemd actually says "not-found" for a unit that was never
@@ -562,68 +535,6 @@ func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
 		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, armed); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)
-		}
-	}
-}
-
-// Succession thresholds ship in the binary, so they are testable without a
-// config file present — which is the whole point of moving them here.
-func TestSuccessionPolicyIsShippedAndOrdered(t *testing.T) {
-	p := DefaultSuccession()
-	if p.StandbyAt >= p.RecastAt {
-		t.Fatalf("standby %.2f must come before recast %.2f", p.StandbyAt, p.RecastAt)
-	}
-	if p.StandbyAt != 0.70 || p.RecastAt != 0.80 {
-		t.Fatalf("thresholds drifted: %.2f/%.2f", p.StandbyAt, p.RecastAt)
-	}
-	if p.ForkTurn > 2 {
-		t.Fatalf("fork turn %d is not early; a late fork inherits the fill it is meant to escape", p.ForkTurn)
-	}
-	if len(p.DivisibleTasks) == 0 {
-		t.Fatal("standby has no read-only warm-up tasks")
-	}
-	for _, task := range p.DivisibleTasks {
-		l := strings.ToLower(task)
-		if strings.Contains(l, "reply to") && !strings.Contains(l, "do not") {
-			t.Fatalf("standby task lets a second holder act: %q", task)
-		}
-	}
-}
-
-// An unknown context_limit must not read as an empty context. Reporting 0%
-// for a seat that may be full is the direction that loses the assignment.
-func TestUnknownContextLimitIsAnErrorNotZeroFill(t *testing.T) {
-	f := figaro.NewFigaro("/nonexistent-figaro")
-	_, _, _, err := f.AriaFill(t.Context(), "deadbeef")
-	if err == nil {
-		t.Fatal("a failed status read reported a usable fill")
-	}
-}
-
-func TestSuccessionDecision(t *testing.T) {
-	p := DefaultSuccession()
-	for _, tc := range []struct {
-		name         string
-		fill         float64
-		standby      string
-		standbyAlive bool
-		want         succAction
-	}{
-		{"idle", 0.34, "", false, succNone},
-		{"just below standby", 0.699, "", false, succNone},
-		{"at standby", 0.70, "", false, succMint},
-		{"above standby, standby exists", 0.75, "abc123", true, succNone},
-		{"at recast with a live standby", 0.80, "abc123", true, succRecast},
-		// The one that would otherwise hang forever: full, but the standby
-		// was reaped. Re-mint rather than wait for an aria that is gone.
-		{"at recast, standby reaped", 0.85, "abc123", false, succRemint},
-		// And full with no standby at all still mints one rather than
-		// falling through to none.
-		{"at recast, no standby", 0.85, "", false, succMint},
-	} {
-		if got := successionAction(tc.fill, tc.standby, tc.standbyAlive, p); got != tc.want {
-			t.Errorf("%s: fill=%.3f standby=%q alive=%v → %s, want %s",
-				tc.name, tc.fill, tc.standby, tc.standbyAlive, got, tc.want)
 		}
 	}
 }

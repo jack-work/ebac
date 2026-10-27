@@ -1,4 +1,4 @@
-package main
+package poll
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func Register(s Source) { sources[s.Name()] = s }
 // markGone writes the gone marker for one resource of a critic: what is gone,
 // since when, the last error, and what to do. Every source uses it, so a seat
 // reads the same shape whatever went away.
-func (p *Poller) markGone(ctx context.Context, w *model.Critic, key, resource, since string, cause error, action string) error {
+func (p *Poller) MarkGone(ctx context.Context, w *model.Critic, key, resource, since string, cause error, action string) error {
 	marker := map[string]string{"resource": resource, "since": since, "error": cause.Error(), "action": action}
 	return p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
 		gone := model.ObjectOf(cur["gone"])
@@ -37,8 +37,8 @@ func (p *Poller) markGone(ctx context.Context, w *model.Critic, key, resource, s
 	})
 }
 
-func (p *Poller) wakeOnce(ctx context.Context, w *model.Critic, msg string) {
-	if !p.roleHasHolder(ctx, w.FormID) {
+func (p *Poller) WakeOnce(ctx context.Context, w *model.Critic, msg string) {
+	if !p.RoleHasHolder(ctx, w.FormID) {
 		return
 	}
 	if err := p.Fig.Send(ctx, w.FormID, msg); err != nil {

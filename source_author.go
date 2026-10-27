@@ -12,6 +12,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -25,7 +26,7 @@ type authorWatch struct{}
 
 func (authorWatch) Name() string { return "github-author" }
 
-func (authorWatch) Round(ctx context.Context, p *Poller, w *model.Critic) error {
+func (authorWatch) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	return pollAuthor(ctx, p, w)
 }
 
@@ -87,7 +88,7 @@ func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR) []model.Event {
 	return events
 }
 
-func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
+func pollAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
 		return fmt.Errorf("%s: author watch without a login or repos", w.Name)
@@ -128,7 +129,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 		if len(w.Runtime.PendingEvents) == 0 {
 			w.Runtime.PendingSince = time.Now().UTC()
 		}
-		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, events)
+		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
 	}
 	authored := map[string]forge.AuthoredPR{}
 	for _, pr := range prs {
@@ -154,7 +155,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	return derr
 }
 
-func deliverAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
+func deliverAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
@@ -162,7 +163,7 @@ func deliverAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 		return nil
 	}
 	target := w.AlertTarget()
-	if !p.roleHasHolder(ctx, target) {
+	if !p.RoleHasHolder(ctx, target) {
 		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
 		return nil

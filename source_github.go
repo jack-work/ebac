@@ -11,6 +11,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -20,7 +21,7 @@ type githubPRs struct{}
 
 func (githubPRs) Name() string { return "github-pr" }
 
-func (githubPRs) Round(ctx context.Context, p *Poller, w *model.Critic) error {
+func (githubPRs) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	return pollGitHub(ctx, p, w)
 }
 
@@ -33,7 +34,7 @@ var prGone = regexp.MustCompile(`Could not resolve to a (PullRequest|Repository)
 
 // retireGone marks each gone PR on the form, stops polling it and wakes the
 // seat once; a critic with no PR left stops.
-func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PRRef, errs map[model.PRKey]string) error {
+func retireGone(ctx context.Context, p *poll.Poller, w *model.Critic, gone []model.PRRef, errs map[model.PRKey]string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	keep := w.PRs[:0]
 	isGone := map[model.PRKey]bool{}
@@ -55,7 +56,7 @@ func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PR
 		if len(w.PRs) == 0 {
 			action = "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge); a moved PR needs a NEW critic."
 		}
-		if err := p.markGone(ctx, w, "pr:"+form.PrFormKey(k), "pull request "+string(k), now, errors.New(errs[k]), action); err != nil {
+		if err := p.MarkGone(ctx, w, "pr:"+form.PrFormKey(k), "pull request "+string(k), now, errors.New(errs[k]), action); err != nil {
 			return err
 		}
 	}
@@ -64,12 +65,12 @@ func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PR
 		w.Runtime.StopReason = "every pull request is gone: " + strings.Join(names, ", ")
 		_ = systemd.DisableTimer(w.Name)
 	}
-	p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
+	p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
 		w.Name, strings.Join(names, ", "), prGoneAfter))
 	return p.Store.SaveCritic(ctx, w)
 }
 
-func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
+func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	name := w.Name
 	if w.Host != "" {
 		p.GH.Host = w.Host
@@ -85,11 +86,11 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	}
 
 	// --- hard stops, checked before we spend an API call ---
-	if reason := hardStop(w); reason != "" {
+	if reason := poll.HardStop(w); reason != "" {
 		w.Runtime.Stopped, w.Runtime.StopReason = true, reason
 		_ = p.Store.SaveCritic(ctx, w)
 		fmt.Fprintf(p.Out, "%s: stopping — %s\n", name, reason)
-		return p.maybeArchive(ctx, w, nil)
+		return p.MaybeArchive(ctx, w, nil)
 	}
 
 	// --- discovery: keep the PR set live ---
@@ -215,14 +216,14 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	}
 
 	// --- outbox: what the seat wrote onto the form goes to the forge ---
-	acks := p.flushOutbox(ctx, w, next)
+	acks := p.FlushOutbox(ctx, w, next)
 
 	// --- accumulate the debt BEFORE attempting delivery ---
 	if len(delta.Events) > 0 {
 		if len(w.Runtime.PendingEvents) == 0 {
 			w.Runtime.PendingSince = next.TakenAt
 		}
-		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, delta.Events)
+		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, delta.Events)
 	}
 
 	// One patch: the observed PRs, the debt and the outbox receipts. It lands
@@ -233,11 +234,11 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	}
 	figaro.Renew(ctx, p.Fig, w.FormID)
 
-	derr := p.deliver(ctx, w, next)
+	derr := p.Deliver(ctx, w, next)
 	if derr == nil {
 		// Succession runs on the same heartbeat: the timer already fires
 		// every 5m and already knows the seat.
-		p.superviseSuccession(ctx, w)
+		p.SuperviseSuccession(ctx, w)
 	}
 	// Runtime only, under system.ebac: invisible to the seat.
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
@@ -246,5 +247,5 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	if derr != nil {
 		return derr
 	}
-	return p.maybeArchive(ctx, w, next)
+	return p.MaybeArchive(ctx, w, next)
 }

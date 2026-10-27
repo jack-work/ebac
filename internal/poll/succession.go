@@ -1,4 +1,4 @@
-package main
+package poll
 
 import (
 	"context"
@@ -102,7 +102,7 @@ func successionAction(fill float64, standby string, standbyAlive bool, pol Succe
 // superviseSuccession runs once per poll round. It is deliberately part of
 // the existing heartbeat rather than a second daemon: the timer already runs
 // every 5m and already knows the seat.
-func (p *Poller) superviseSuccession(ctx context.Context, c *model.Critic) {
+func (p *Poller) SuperviseSuccession(ctx context.Context, c *model.Critic) {
 	pol := DefaultSuccession()
 
 	form, err := p.Fig.Form(ctx, c.FormID)

@@ -14,6 +14,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
 )
@@ -25,7 +26,7 @@ type teamsChat struct{}
 
 func (teamsChat) Name() string { return "teams-chat" }
 
-func (teamsChat) Round(ctx context.Context, p *Poller, w *model.Critic) error {
+func (teamsChat) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	return pollTeams(ctx, p, w)
 }
 
@@ -138,7 +139,7 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 	return events, items
 }
 
-func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
+func pollTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	if w.Chat == nil || w.Chat.ID == "" {
 		return fmt.Errorf("%s: teams critic without a chat id", w.Name)
 	}
@@ -195,7 +196,7 @@ func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 		if len(w.Runtime.PendingEvents) == 0 {
 			w.Runtime.PendingSince = time.Now().UTC()
 		}
-		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, events)
+		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
 	}
 	if err := p.Store.SaveRound(ctx, w, nil, nil, items); err != nil {
 		return err
@@ -209,7 +210,7 @@ func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 	return derr
 }
 
-func deliverTeams(ctx context.Context, p *Poller, w *model.Critic) error {
+func deliverTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		if len(w.Runtime.PendingEvents) > 0 {
@@ -220,7 +221,7 @@ func deliverTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 		w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
 		return nil
 	}
-	if !p.roleHasHolder(ctx, w.FormID) {
+	if !p.RoleHasHolder(ctx, w.FormID) {
 		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + w.FormID
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
 		return nil
@@ -266,7 +267,7 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 // longer than teamsBlindAfter: the form's key blind says since when and the
 // last error, refreshed only when the error changes, and is removed by the
 // first good round.
-func teamsBlind(ctx context.Context, p *Poller, w *model.Critic, cause error) {
+func teamsBlind(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) {
 	st := w.Runtime.Teams
 	since, err := time.Parse(time.RFC3339, st.FailSince)
 	if err != nil || time.Since(since) < teamsBlindAfter {
@@ -284,7 +285,7 @@ func teamsBlind(ctx context.Context, p *Poller, w *model.Critic, cause error) {
 		return
 	}
 	if !st.Blind {
-		p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: BLIND since %s: cannot read %q (%v). Messages are unseen until your form's key blind disappears; it clears itself on recovery. If it persists, the Boss may need to sign tomb in again.",
+		p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: BLIND since %s: cannot read %q (%v). Messages are unseen until your form's key blind disappears; it clears itself on recovery. If it persists, the Boss may need to sign tomb in again.",
 			w.Name, st.FailSince, w.Chat.Topic, cause))
 		fmt.Fprintf(p.Out, "%s: blind since %s: %v\n", w.Name, st.FailSince, cause)
 	}
@@ -292,16 +293,16 @@ func teamsBlind(ctx context.Context, p *Poller, w *model.Critic, cause error) {
 }
 
 // teamsGone marks the chat gone on the form, wakes the seat once and stops.
-func teamsGone(ctx context.Context, p *Poller, w *model.Critic, cause error) error {
+func teamsGone(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) error {
 	st := w.Runtime.Teams
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("chat gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)
 	action := "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge). " +
 		"If the chat moved to a new id, make a new critic with ebac add-teams: never repoint this one."
-	if err := p.markGone(ctx, w, "chat", "teams chat "+w.Chat.ID+" ("+w.Chat.Topic+")", st.GoneSince, cause, action); err != nil {
+	if err := p.MarkGone(ctx, w, "chat", "teams chat "+w.Chat.ID+" ("+w.Chat.Topic+")", st.GoneSince, cause, action); err != nil {
 		return err
 	}
-	p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
+	p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
 	_ = systemd.DisableTimer(w.Name)
 	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 	return p.Store.SaveCritic(ctx, w)

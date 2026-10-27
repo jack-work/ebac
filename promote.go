@@ -10,6 +10,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -225,7 +226,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		return "", fmt.Errorf("cast %s into %s: %w", seat, formID, err)
 	}
 
-	poller := &Poller{Store: p.Store, GH: p.GH, Fig: p.Fig, Out: io.Discard}
+	poller := &poll.Poller{Store: p.Store, GH: p.GH, Fig: p.Fig, Out: io.Discard}
 
 	// Adopt current state silently, so the first armed round reports the
 	// delta since promotion rather than one wake per standing thread.

@@ -13,6 +13,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/tomb"
 )
 
@@ -204,7 +205,7 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	}
 	var out strings.Builder
 	round := func(scenario string) error {
-		p := &Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
 		return p.Poll(ctx, w.Name)
 	}
 	load := func() *model.Critic {

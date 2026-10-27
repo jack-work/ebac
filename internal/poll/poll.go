@@ -1,4 +1,4 @@
-package main
+package poll
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	return src.Round(ctx, p, w)
 }
 
-func (p *Poller) deliver(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
+func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
 	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		if len(w.Runtime.PendingEvents) > 0 {
@@ -78,7 +78,7 @@ func (p *Poller) deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 	}
 
 	target := w.FormID
-	if !p.roleHasHolder(ctx, w.FormID) {
+	if !p.RoleHasHolder(ctx, w.FormID) {
 		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + w.FormID
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
 		return nil // not an error exit: an empty seat is an operator condition
@@ -111,7 +111,7 @@ func (p *Poller) deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 	return nil
 }
 
-func (p *Poller) roleHasHolder(ctx context.Context, formID string) bool {
+func (p *Poller) RoleHasHolder(ctx context.Context, formID string) bool {
 	form, err := p.Fig.Form(ctx, formID)
 	if err != nil {
 		return false
@@ -136,7 +136,7 @@ func backoffFor(attempt int) time.Duration {
 
 // mergeEvents appends new events to an undelivered batch, dropping exact
 // repeats so a stuck delivery does not grow without bound.
-func mergeEvents(pending, fresh []model.Event) []model.Event {
+func MergeEvents(pending, fresh []model.Event) []model.Event {
 	seen := map[string]bool{}
 	key := func(e model.Event) string {
 		return string(e.Kind) + "|" + string(e.PR) + "|" + e.ThreadID + "|" + e.Comment + "|" + e.ReviewID + "|" + e.Detail
@@ -161,7 +161,7 @@ func mergeEvents(pending, fresh []model.Event) []model.Event {
 	return out
 }
 
-func hardStop(w *model.Critic) string {
+func HardStop(w *model.Critic) string {
 	if w.Stop.MaxRounds > 0 && w.Runtime.Round > w.Stop.MaxRounds {
 		return fmt.Sprintf("max rounds (%d) reached", w.Stop.MaxRounds)
 	}
@@ -177,7 +177,7 @@ func hardStop(w *model.Critic) string {
 // maybeArchive retires a critic whose PRs are all finished. The grace period
 // exists because the most interesting comment on a PR often arrives just
 // after it merges.
-func (p *Poller) maybeArchive(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
+func (p *Poller) MaybeArchive(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
 	if !w.Stop.UntilAllClosed && !w.Runtime.Stopped {
 		return nil
 	}
@@ -220,7 +220,7 @@ func (p *Poller) maybeArchive(ctx context.Context, w *model.Critic, snap *model.
 	w.Runtime.Stopped = true
 
 	// Tell the seat it is over, once, before the form goes away.
-	if p.roleHasHolder(ctx, w.FormID) {
+	if p.RoleHasHolder(ctx, w.FormID) {
 		msg := fmt.Sprintf("ebac %s is closing: %s.\nFinal state: %s\nNo further heartbeats will arrive for this critic. "+
 			"If you were holding findings for it, report them to the operator now.",
 			w.Name, w.Runtime.StopReason, summariseFinal(snap))

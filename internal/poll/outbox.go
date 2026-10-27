@@ -1,4 +1,4 @@
-package main
+package poll
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func postMarker(critic, id string) string {
 }
 
 // validPostID keeps an id usable as one form path segment.
-func validPostID(id string) error {
+func ValidPostID(id string) error {
 	if id == "" || len(id) > 64 {
 		return fmt.Errorf("post id %q: 1-64 characters", id)
 	}
@@ -32,12 +32,12 @@ func validPostID(id string) error {
 	return nil
 }
 
-func newPostID(now time.Time) string {
+func NewPostID(now time.Time) string {
 	return "p" + strconv.FormatInt(now.UnixNano(), 36)
 }
 
 // authorize says why a post may not go out, or "" if it may.
-func authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) string {
+func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) string {
 	if !w.Write && w.Mode != model.ModeReviewer {
 		return "this critic is read-only: posting needs `ebac set-write --on`"
 	}
@@ -101,7 +101,7 @@ func authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 
 // sendPost takes one post as far as it can go this round.
 func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snapshot, id string, post *model.Post) {
-	if why := authorize(w, snap, p.Me, post); why != "" {
+	if why := Authorize(w, snap, p.Me, post); why != "" {
 		post.Refused = why
 		return
 	}
@@ -175,7 +175,7 @@ func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snap
 // flushOutbox posts what the seat wrote since the watermark and returns the
 // receipts for the round's one patch, and moves the watermark
 // in w. On any read failure it moves nothing.
-func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) form.Receipts {
+func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) form.Receipts {
 	acks := form.Receipts{}
 	c, err := p.Fig.Node(ctx, w.FormID)
 	if err != nil {
@@ -227,7 +227,7 @@ func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 			continue
 		}
 		hadError := post.Error != ""
-		if err := validPostID(id); err != nil {
+		if err := ValidPostID(id); err != nil {
 			post.Refused = err.Error()
 		} else {
 			p.sendPost(ctx, w, snap, id, post)

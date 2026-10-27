@@ -18,6 +18,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
 )
@@ -60,8 +61,8 @@ type globals struct {
 }
 
 func init() {
-	for _, s := range []Source{githubPRs{}, teamsChat{}, authorWatch{}} {
-		Register(s)
+	for _, s := range []poll.Source{githubPRs{}, teamsChat{}, authorWatch{}} {
+		poll.Register(s)
 	}
 }
 
@@ -537,7 +538,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &tomb.Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: tomb.TeamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	p := &poll.Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &tomb.Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: tomb.TeamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {
@@ -753,9 +754,9 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if *id == "" {
-		*id = newPostID(time.Now())
+		*id = poll.NewPostID(time.Now())
 	}
-	if err := validPostID(*id); err != nil {
+	if err := poll.ValidPostID(*id); err != nil {
 		return err
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
@@ -771,7 +772,7 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	post := &model.Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react}
-	if why := authorize(w, snap, "", post); why != "" {
+	if why := poll.Authorize(w, snap, "", post); why != "" {
 		return fmt.Errorf("refused: %s", why)
 	}
 	key := "post." + *id

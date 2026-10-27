@@ -11,6 +11,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 )
 
 func apr(n int, state string, draft bool, head string) forge.AuthoredPR {
@@ -128,7 +129,7 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	var out strings.Builder
 	gh := fakeGH(t, "author")
 	gh.Host = "github.com" // the poller's default: the round must retarget it to the critic's host
-	p := &Poller{Store: st, Fig: f, Out: &out, GH: gh}
+	p := &poll.Poller{Store: st, Fig: f, Out: &out, GH: gh}
 	if err := p.Poll(ctx, w.Name); err != nil {
 		t.Fatalf("round: %v", err)
 	}
