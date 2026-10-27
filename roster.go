@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -49,7 +50,7 @@ type RosterSummary struct {
 
 // RosterForm finds the roster by kind, minting it on first use. Like the
 // queue, it is found by property, never through a pointer on disk.
-func RosterForm(ctx context.Context, fig *Figaro) (string, error) {
+func RosterForm(ctx context.Context, fig *figaro.Figaro) (string, error) {
 	found, err := FindFormsByKind(ctx, fig, "ebac.roster")
 	if err != nil {
 		return "", err
@@ -70,7 +71,7 @@ func RosterForm(ctx context.Context, fig *Figaro) (string, error) {
 	return "", fmt.Errorf("%d forms claim kind ebac.roster (%s): remove the stale ones", len(found), strings.Join(found, ", "))
 }
 
-func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]RosterRow, RosterSummary, error) {
+func BuildRoster(ctx context.Context, st *Store, fig *figaro.Figaro, me string) ([]RosterRow, RosterSummary, error) {
 	critics, err := st.ListCritics(ctx)
 	if err != nil {
 		return nil, RosterSummary{}, err
@@ -156,12 +157,12 @@ func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {
 	return "ok"
 }
 
-func SyncRoster(ctx context.Context, st *Store, fig *Figaro, me string) (string, RosterSummary, error) {
+func SyncRoster(ctx context.Context, st *Store, fig *figaro.Figaro, me string) (string, RosterSummary, error) {
 	id, err := RosterForm(ctx, fig)
 	if err != nil {
 		return "", RosterSummary{}, err
 	}
-	renew(ctx, fig, id)
+	figaro.Renew(ctx, fig, id)
 	rows, sum, err := BuildRoster(ctx, st, fig, me)
 	if err != nil {
 		return "", RosterSummary{}, err
@@ -199,7 +200,7 @@ func dumpJSON(v any) {
 // identical on screen, and an operator reading two-day-old health as current
 // is worse served than one told the index is cold — which is exactly how the
 // roster misreported 0 PRs on a 4-PR fleet for two days.
-func ReadRoster(ctx context.Context, st *Store, fig *Figaro) (rows []RosterRow, sum RosterSummary, age time.Duration, err error) {
+func ReadRoster(ctx context.Context, st *Store, fig *figaro.Figaro) (rows []RosterRow, sum RosterSummary, age time.Duration, err error) {
 	found, err := FindFormsByKind(ctx, fig, "ebac.roster")
 	if err != nil {
 		return nil, sum, 0, err

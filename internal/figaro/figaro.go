@@ -1,4 +1,4 @@
-package main
+package figaro
 
 import (
 	"context"
@@ -78,7 +78,7 @@ func AngelusSocket() string {
 	return filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "figaro", "angelus.sock")
 }
 
-func (f *Figaro) angelus() (*sdk.Angelus, error) {
+func (f *Figaro) Angelus() (*sdk.Angelus, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.ang != nil {
@@ -95,12 +95,12 @@ func (f *Figaro) angelus() (*sdk.Angelus, error) {
 // addr is how figaro >= 0.48 reaches an aria or form: every call goes
 // through the daemon's one door with the id carried in the params. The daemon
 // no longer hands out a per-aria endpoint, so there is nothing to dial but this.
-func (f *Figaro) addr(id string) sdk.Addr {
+func (f *Figaro) Addr(id string) sdk.Addr {
 	return sdk.Addr{Door: transport.UnixEndpoint(f.sock), ID: id}
 }
 
 // node dials one aria or form, caching the connection for the process.
-func (f *Figaro) node(ctx context.Context, id string) (*sdk.Aria, error) {
+func (f *Figaro) Node(ctx context.Context, id string) (*sdk.Aria, error) {
 	f.mu.Lock()
 	if c, ok := f.nodes[id]; ok {
 		f.mu.Unlock()
@@ -108,16 +108,16 @@ func (f *Figaro) node(ctx context.Context, id string) (*sdk.Aria, error) {
 	}
 	f.mu.Unlock()
 
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return nil, err
 	}
 	// Attach still matters: it restores a dormant aria or form so the door
 	// has someone to route to.
-	if _, err := auditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
-		return nil, fmt.Errorf("attach %s: %w", id, gone(err))
+	if _, err := AuditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
+		return nil, fmt.Errorf("attach %s: %w", id, Gone(err))
 	}
-	c, err := sdk.DialAriaWith(f.addr(id), nil, auditTap)
+	c, err := sdk.DialAriaWith(f.Addr(id), nil, auditTap)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", id, err)
 	}
@@ -145,18 +145,18 @@ func (f *Figaro) Close() error {
 // ---------- forms ----------
 
 func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
 	}
 	patch := mintPatch(name)
-	resp, err := auditAng(rpc.MethodFormCreate, "", ang).FormCreate(ctx, "", nil, &patch)
+	resp, err := AuditAng(rpc.MethodFormCreate, "", ang).FormCreate(ctx, "", nil, &patch)
 	if err != nil {
 		return "", fmt.Errorf("form create: %w", err)
 	}
 	// A fresh form is live, so seed the cache and skip an Attach on the
 	// writes that always follow.
-	if c, derr := sdk.DialAriaWith(f.addr(resp.FormID), nil, auditTap); derr == nil {
+	if c, derr := sdk.DialAriaWith(f.Addr(resp.FormID), nil, auditTap); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FormID] = c
 		f.mu.Unlock()
@@ -167,13 +167,13 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 // FormRaw returns the form's keys plus the version they were read at. The
 // version is the whole point: it is the token a conditional write needs.
 func (f *Figaro) FormRaw(ctx context.Context, id string) (map[string]json.RawMessage, uint64, error) {
-	c, err := f.node(ctx, id)
+	c, err := f.Node(ctx, id)
 	if err != nil {
 		return nil, 0, err
 	}
 	resp, err := c.Form(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read %s: %w", id, gone(err))
+		return nil, 0, fmt.Errorf("read %s: %w", id, Gone(err))
 	}
 	b, err := json.Marshal(resp.Snapshot)
 	if err != nil {
@@ -222,7 +222,7 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
-	c, err := f.node(ctx, id)
+	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 		}
 		patch := onePatch(key, json.RawMessage(b))
 		if _, err := c.Set(ctx, patch, cur.Version); err != nil {
-			if isVersionConflict(err) {
+			if IsVersionConflict(err) {
 				// Somebody wrote between our read and our write. Re-read
 				// and reapply: our key is whole, so replaying it on the
 				// newer base is correct, not a merge.
@@ -268,7 +268,7 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 }
 
 func (f *Figaro) Unset(ctx context.Context, id, key string) error {
-	c, err := f.node(ctx, id)
+	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func validFormKey(key string) error {
 
 // isVersionConflict recognises the daemon's refusal of a stale base:
 // "form moved: at version 3, not 2: re-read and retry".
-func isVersionConflict(err error) bool {
+func IsVersionConflict(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -313,7 +313,7 @@ func isVersionConflict(err error) bool {
 }
 
 func (f *Figaro) FormRemove(ctx context.Context, id string) error {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return err
 	}
@@ -323,13 +323,13 @@ func (f *Figaro) FormRemove(ctx context.Context, id string) error {
 		delete(f.nodes, id)
 	}
 	f.mu.Unlock()
-	return auditAng(rpc.MethodKill, id, ang).Kill(ctx, id, false)
+	return AuditAng(rpc.MethodKill, id, ang).Kill(ctx, id, false)
 }
 
 // ---------- arias ----------
 
 func (f *Figaro) NewAria(ctx context.Context, outfits string) (string, error) {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
 	}
@@ -337,11 +337,11 @@ func (f *Figaro) NewAria(ctx context.Context, outfits string) (string, error) {
 	if outfits != "" {
 		names = splitComma(outfits)
 	}
-	resp, err := auditAng(rpc.MethodCreate, "", ang).Create(ctx, names, nil)
+	resp, err := AuditAng(rpc.MethodCreate, "", ang).Create(ctx, names, nil)
 	if err != nil {
 		return "", fmt.Errorf("create aria: %w", err)
 	}
-	if c, derr := sdk.DialAriaWith(f.addr(resp.FigaroID), nil, auditTap); derr == nil {
+	if c, derr := sdk.DialAriaWith(f.Addr(resp.FigaroID), nil, auditTap); derr == nil {
 		f.mu.Lock()
 		f.nodes[resp.FigaroID] = c
 		f.mu.Unlock()
@@ -372,7 +372,7 @@ func (f *Figaro) Send(ctx context.Context, target, prompt string) error {
 }
 
 func (f *Figaro) SendTo(ctx context.Context, ariaID, prompt string) error {
-	c, err := f.node(ctx, ariaID)
+	c, err := f.Node(ctx, ariaID)
 	if err != nil {
 		return err
 	}
@@ -386,7 +386,7 @@ func (f *Figaro) SendTo(ctx context.Context, ariaID, prompt string) error {
 }
 
 func (f *Figaro) Cast(ctx context.Context, aria, formID string) error {
-	c, err := f.node(ctx, aria)
+	c, err := f.Node(ctx, aria)
 	if err != nil {
 		return err
 	}
@@ -403,11 +403,11 @@ func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
 	if id == "" {
 		return false
 	}
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return false
 	}
-	if _, err := auditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
+	if _, err := AuditAng(rpc.MethodAttach, id, ang).Attach(ctx, id); err != nil {
 		return false
 	}
 	return true
@@ -416,11 +416,11 @@ func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
 // AriaFill reports context fill as a fraction, plus the fields it came from.
 // Never take a seat's word for this number.
 func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens, limit int, err error) {
-	ang, e := f.angelus()
+	ang, e := f.Angelus()
 	if e != nil {
 		return 0, 0, 0, e
 	}
-	resp, e := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	resp, e := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if e != nil {
 		return 0, 0, 0, e
 	}
@@ -443,7 +443,7 @@ func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens,
 }
 
 func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, prompt string) (string, error) {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
 	}
@@ -451,7 +451,7 @@ func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, promp
 	if outfits != "" {
 		names = splitComma(outfits)
 	}
-	resp, err := auditAng(rpc.MethodFork, id, ang).Fork(ctx, id, uint64(turn), 0, names, nil)
+	resp, err := AuditAng(rpc.MethodFork, id, ang).Fork(ctx, id, uint64(turn), 0, names, nil)
 	if err != nil {
 		return "", fmt.Errorf("fork %s at turn %d: %w", id, turn, err)
 	}
@@ -473,11 +473,11 @@ func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, promp
 
 // ListFormIDs enumerates every unbound form the daemon knows about.
 func (f *Figaro) ListFormIDs(ctx context.Context) ([]string, error) {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return nil, err
 	}
-	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +533,7 @@ func (f *Figaro) SetJSONIfVersion(ctx context.Context, id, key string, v any, ve
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
-	c, err := f.node(ctx, id)
+	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
 	}

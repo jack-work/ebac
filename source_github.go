@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -229,7 +230,7 @@ func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	if err := p.Store.SaveRound(ctx, w, next, acks, inboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
 		return err
 	}
-	renew(ctx, p.Fig, w.FormID)
+	figaro.Renew(ctx, p.Fig, w.FormID)
 
 	derr := p.deliver(ctx, w, next)
 	if derr == nil {

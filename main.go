@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
@@ -227,7 +228,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if len(prs) == 0 && *repo == "" {
 		return fmt.Errorf("give at least one --pr, or --repo to discover them")
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -356,7 +357,7 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 	asJSON := fs.Bool("j", false, "JSON")
 	live := fs.Bool("live", false, "rebuild from source instead of reading the published index")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -424,7 +425,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -530,7 +531,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	dry := fs.Bool("dry-run", false, "reconcile and persist state, but never invoke figaro")
 	all := fs.Bool("all", false, "poll every live critic in sequence")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -569,7 +570,7 @@ func cmdCast(ctx context.Context, g globals, args []string) error {
 	mint := fs.Bool("mint", false, "mint a fresh aria instead")
 	outfits := fs.String("outfit", "", "outfit names for a minted aria")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -612,7 +613,7 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	name := fs.String("critic", "", "critic name")
 	reason := fs.String("reason", "stopped by operator", "why")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -643,7 +644,7 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	purge := fs.Bool("purge", false, "also remove the role form")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -692,7 +693,7 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	round := fs.Int("round", 0, "the delta.round being acknowledged")
 	note := fs.String("note", "", "one line: what you did or decided")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -755,7 +756,7 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	if err := validPostID(*id); err != nil {
 		return err
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -802,7 +803,7 @@ func cmdRoster(ctx context.Context, g globals, args []string) error {
 	mint := fs.Bool("mint", false, "mint an overseer aria and cast it")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -849,7 +850,7 @@ func cmdSelfcheck(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "restrict to one critic")
 	strict := fs.Bool("strict", false, "exit nonzero if any check WARNs")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -872,7 +873,7 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 	var labels stringList
 	fs.Var(&labels, "label", "label (repeatable)")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -951,7 +952,7 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 	if *on == *off {
 		return fmt.Errorf("give exactly one of --on or --off")
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

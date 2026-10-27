@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/rpc"
@@ -265,13 +266,13 @@ type criticForm struct {
 }
 
 func (s *Store) readForm(ctx context.Context, id string) (*criticForm, error) {
-	c, err := s.Fig.node(ctx, id)
+	c, err := s.Fig.Node(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := c.Form(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", id, gone(err))
+		return nil, fmt.Errorf("read %s: %w", id, figaro.Gone(err))
 	}
 	b, err := json.Marshal(resp.Snapshot)
 	if err != nil {
@@ -327,11 +328,11 @@ func (f *criticForm) snapshot() (*model.Snapshot, error) {
 
 // criticForms reads every form declaring kind ebac.critic.
 func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
-	ang, err := s.Fig.angelus()
+	ang, err := s.Fig.Angelus()
 	if err != nil {
 		return nil, err
 	}
-	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	resp, err := figaro.AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}
@@ -341,7 +342,7 @@ func (s *Store) criticForms(ctx context.Context) ([]*criticForm, error) {
 			continue
 		}
 		f, err := s.readForm(ctx, r.ID)
-		if errors.Is(err, ErrFormGone) {
+		if errors.Is(err, figaro.ErrFormGone) {
 			continue
 		}
 		if err != nil {
@@ -364,7 +365,7 @@ func (s *Store) findCritic(ctx context.Context, name string) (*criticForm, error
 			if w, err := f.critic(); err == nil && w.Name == name {
 				return f, nil
 			}
-		} else if !errors.Is(err, ErrFormGone) {
+		} else if !errors.Is(err, figaro.ErrFormGone) {
 			return nil, err
 		}
 		delete(s.formOf, name)
@@ -606,7 +607,7 @@ func checkBudget(id string, curBytes, nextBytes int) error {
 // (jack-work/figaro#43); on 2026-10-20 that replaced one form's system subtree
 // with null. Subtrees (system, post) are merged here and written whole.
 func (s *Store) commit(ctx context.Context, id string, build func(cur map[string]json.RawMessage, sys ebacState) (map[string]json.RawMessage, []string)) error {
-	c, err := s.Fig.node(ctx, id)
+	c, err := s.Fig.Node(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -639,7 +640,7 @@ func (s *Store) commit(ctx context.Context, id string, build func(cur map[string
 		if _, lastErr = c.Set(ctx, patch, f.Version); lastErr == nil {
 			return nil
 		}
-		if !isVersionConflict(lastErr) {
+		if !figaro.IsVersionConflict(lastErr) {
 			return fmt.Errorf("write %s: %w", id, lastErr)
 		}
 	}

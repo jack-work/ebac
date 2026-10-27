@@ -1,4 +1,4 @@
-package main
+package figaro
 
 import (
 	"context"
@@ -45,7 +45,7 @@ func isNotFound(err error) bool {
 
 // gone marks a daemon not-found as ErrFormGone and passes anything else
 // through unchanged.
-func gone(err error) error {
+func Gone(err error) error {
 	if isNotFound(err) {
 		return fmt.Errorf("%w: %v", ErrFormGone, err)
 	}
@@ -78,11 +78,11 @@ func leaseTTL(now time.Time, ttlMS, expiresAtMS int64) (time.Duration, bool) {
 // RenewLease moves a form's deadline to FormLease from now when it has come
 // within leaseRenewSlack of needing it. ErrFormGone if the form does not exist.
 func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
-	ang, err := f.angelus()
+	ang, err := f.Angelus()
 	if err != nil {
 		return false, err
 	}
-	resp, err := auditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
 	if err != nil {
 		return false, fmt.Errorf("list for lease: %w", err)
 	}
@@ -102,7 +102,7 @@ func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
 // setLease merges ttl into the system subtree and writes it whole: a nested
 // SetPath can land as a flat decoy when system is a leaf (jack-work/figaro#43).
 func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) error {
-	c, err := f.node(ctx, id)
+	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) err
 		system := model.ObjectOf(raw)
 		system["ttl"] = tb
 		patch := cur.Snapshot.SetPath("system", model.MustJSON(system)).Diff(cur.Snapshot)
-		if _, lastErr = c.Set(ctx, patch, cur.Version); lastErr == nil || !isVersionConflict(lastErr) {
+		if _, lastErr = c.Set(ctx, patch, cur.Version); lastErr == nil || !IsVersionConflict(lastErr) {
 			return lastErr
 		}
 	}
@@ -126,7 +126,7 @@ func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) err
 
 // renew keeps a form ebac is using alive. A failure is logged, never fatal:
 // the lease is a week long precisely so that a bad hour costs nothing.
-func renew(ctx context.Context, fig *Figaro, id string) {
+func Renew(ctx context.Context, fig *Figaro, id string) {
 	if _, err := fig.RenewLease(ctx, id); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: lease %s: %v\n", id, err)
 	}

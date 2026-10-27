@@ -1,4 +1,4 @@
-package main
+package figaro
 
 import (
 	"encoding/json"
@@ -73,7 +73,7 @@ func (a *auditConn) Write(p []byte) (int, error) {
 
 // auditAng logs one daemon-level call and hands back the client, so a call
 // site reads auditAng(method, target, ang).Method(...).
-func auditAng(method, target string, ang *sdk.Angelus) *sdk.Angelus {
+func AuditAng(method, target string, ang *sdk.Angelus) *sdk.Angelus {
 	auditRPC(method, target)
 	return ang
 }

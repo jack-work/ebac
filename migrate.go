@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
@@ -23,7 +24,7 @@ func cmdMigrate(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	dry := fs.Bool("dry-run", false, "report only")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -107,7 +108,7 @@ func cmdCompact(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	dry := fs.Bool("dry-run", false, "show the delete patch and stop")
 	_ = fs.Parse(args)
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
@@ -144,7 +145,7 @@ func compactForm(ctx context.Context, st *Store, f *criticForm, dry bool) error 
 		if dry {
 			return nil
 		}
-		c, err := st.Fig.node(ctx, f.ID)
+		c, err := st.Fig.Node(ctx, f.ID)
 		if err != nil {
 			return err
 		}

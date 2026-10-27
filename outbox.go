@@ -176,7 +176,7 @@ func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snap
 // in w. On any read failure it moves nothing.
 func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) Receipts {
 	acks := Receipts{}
-	c, err := p.Fig.node(ctx, w.FormID)
+	c, err := p.Fig.Node(ctx, w.FormID)
 	if err != nil {
 		fmt.Fprintf(p.Out, "%s: outbox unreadable: %v\n", w.Name, err)
 		return acks

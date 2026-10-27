@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
@@ -26,7 +27,7 @@ type Poller struct {
 	Store  *Store
 	GH     *forge.GH
 	Tomb   *tomb.Tomb
-	Fig    *Figaro
+	Fig    *figaro.Figaro
 	Out    io.Writer
 	DryRun bool
 	Me     string

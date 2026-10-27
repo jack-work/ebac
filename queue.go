@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
@@ -98,7 +99,7 @@ func DefaultQueueConfig() QueueConfig {
 // Two queue forms is a real possibility (a lost race at first mint), so this
 // refuses rather than picking one: silently choosing means half the enqueues
 // land in a queue nobody drains.
-func QueueForm(ctx context.Context, fig *Figaro) (string, error) {
+func QueueForm(ctx context.Context, fig *figaro.Figaro) (string, error) {
 	found, err := FindFormsByKind(ctx, fig, "ebac.queue")
 	if err != nil {
 		return "", err
@@ -127,7 +128,7 @@ func QueueForm(ctx context.Context, fig *Figaro) (string, error) {
 // FindFormsByKind returns every form declaring a kind. Detection by property,
 // never by name: a form named "ebac-queue" that we did not write is not ours,
 // and one somebody renamed still is.
-func FindFormsByKind(ctx context.Context, fig *Figaro, kind string) ([]string, error) {
+func FindFormsByKind(ctx context.Context, fig *figaro.Figaro, kind string) ([]string, error) {
 	ids, err := fig.ListFormIDs(ctx)
 	if err != nil {
 		return nil, err
@@ -135,7 +136,7 @@ func FindFormsByKind(ctx context.Context, fig *Figaro, kind string) ([]string, e
 	var out []string
 	for _, id := range ids {
 		f, err := fig.Form(ctx, id)
-		if errors.Is(err, ErrFormGone) {
+		if errors.Is(err, figaro.ErrFormGone) {
 			continue // removed between the list and the read
 		}
 		if err != nil {
@@ -153,7 +154,7 @@ func FindFormsByKind(ctx context.Context, fig *Figaro, kind string) ([]string, e
 
 // ReadQueue returns every item plus the config and the version they were read
 // at. The version is the CAS token: a claim must quote it back.
-func ReadQueue(ctx context.Context, fig *Figaro, formID string) ([]QueueItem, QueueConfig, uint64, error) {
+func ReadQueue(ctx context.Context, fig *figaro.Figaro, formID string) ([]QueueItem, QueueConfig, uint64, error) {
 	raw, version, err := fig.FormRaw(ctx, formID)
 	if err != nil {
 		return nil, QueueConfig{}, 0, err
@@ -200,7 +201,7 @@ func SortQueue(items []QueueItem) {
 // wasteful, it is two reviewers replying to the same human in the same
 // thread. Measured the hard way: promoting #23650 and #23654 gave them
 // critics of their own while the `aether` critic was already watching both.
-func Enqueue(ctx context.Context, st *Store, fig *Figaro, formID, host string, ref model.PRRef, priority int, mode, note string) (QueueItem, error) {
+func Enqueue(ctx context.Context, st *Store, fig *figaro.Figaro, formID, host string, ref model.PRRef, priority int, mode, note string) (QueueItem, error) {
 	// 1. Already watched by a live critic?
 	if critics, err := st.ListCritics(ctx); err == nil {
 		for _, c := range critics {
@@ -262,17 +263,17 @@ func queueID(ref model.PRRef) string {
 // Claim moves one pending item to claimed, CONDITIONALLY on the form version
 // it was read at. Two promoters racing: one wins, the other is refused and
 // re-reads. This is the operation the whole design exists for.
-func Claim(ctx context.Context, fig *Figaro, formID string, it QueueItem, atVersion uint64) error {
+func Claim(ctx context.Context, fig *figaro.Figaro, formID string, it QueueItem, atVersion uint64) error {
 	it.State = QClaimed
 	it.Claimed = time.Now().UTC().Format(time.RFC3339)
 	return fig.SetJSONIfVersion(ctx, formID, it.Key(), it, atVersion)
 }
 
-func UpdateItem(ctx context.Context, fig *Figaro, formID string, it QueueItem) error {
+func UpdateItem(ctx context.Context, fig *figaro.Figaro, formID string, it QueueItem) error {
 	return fig.SetJSON(ctx, formID, it.Key(), it)
 }
 
-func RemoveItem(ctx context.Context, fig *Figaro, formID, id string) error {
+func RemoveItem(ctx context.Context, fig *figaro.Figaro, formID, id string) error {
 	return fig.Unset(ctx, formID, queueItemPfx+id)
 }
 
@@ -283,7 +284,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

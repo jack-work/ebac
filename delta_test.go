@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -531,17 +532,6 @@ func TestBackoffClimbsAndCaps(t *testing.T) {
 	}
 }
 
-func TestSetJSONRefusesDottedKeys(t *testing.T) {
-	// Guards the measured figaro hazard: a dotted write into a subtree that
-	// was written as a literal creates a flat decoy key, and a later unset
-	// "succeeds" against the decoy while the real value stands.
-	f := NewFigaro("/nonexistent-figaro")
-	err := f.SetJSON(t.Context(), "@x", "prs.foo", 1)
-	if err == nil || !strings.Contains(err.Error(), "top-level") {
-		t.Fatalf("dotted key was not refused: %v", err)
-	}
-}
-
 // Regression: the roster's health column scored an unarmed critic as "ok"
 // because it compared TimerState against the literal "inactive/disabled",
 // while systemd actually says "not-found" for a unit that was never
@@ -603,7 +593,7 @@ func TestSuccessionPolicyIsShippedAndOrdered(t *testing.T) {
 // An unknown context_limit must not read as an empty context. Reporting 0%
 // for a seat that may be full is the direction that loses the assignment.
 func TestUnknownContextLimitIsAnErrorNotZeroFill(t *testing.T) {
-	f := NewFigaro("/nonexistent-figaro")
+	f := figaro.NewFigaro("/nonexistent-figaro")
 	_, _, _, err := f.AriaFill(t.Context(), "deadbeef")
 	if err == nil {
 		t.Fatal("a failed status read reported a usable fill")

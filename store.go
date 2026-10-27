@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/gluck/ebac/internal/figaro"
 )
 
 // ---------- paths ----------
@@ -12,12 +14,12 @@ import (
 // Root keeps only what must outlive a form: archive exports and reports.
 type Store struct {
 	Root   string
-	Fig    *Figaro
+	Fig    *figaro.Figaro
 	Me     string            // the forge login, for protocol text
 	formOf map[string]string // critic name -> form id, for this process
 }
 
-func NewStore(fig *Figaro) (*Store, error) {
+func NewStore(fig *figaro.Figaro) (*Store, error) {
 	root := os.Getenv("EBAC_STATE")
 	if root == "" {
 		base := os.Getenv("XDG_STATE_HOME")

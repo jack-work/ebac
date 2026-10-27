@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -167,7 +168,7 @@ func TestReapPromotedClosesItemsOfFinishedCritics(t *testing.T) {
 
 // ---------- live: the form is the state ----------
 
-func liveCritic(t *testing.T, f *Figaro, write bool) (*Store, *model.Critic, *model.Snapshot) {
+func liveCritic(t *testing.T, f *figaro.Figaro, write bool) (*Store, *model.Critic, *model.Snapshot) {
 	t.Helper()
 	ctx := context.Background()
 	st, err := NewStore(f)
@@ -212,7 +213,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 	if err := st.Save(ctx, w, snap, nil); err != nil {
 		t.Fatal(err)
 	}
-	c, _ := f.node(ctx, w.FormID)
+	c, _ := f.Node(ctx, w.FormID)
 	since, err := c.FormSince(ctx, before.Version)
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +236,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 		t.Fatal("positive control: the new comment is not in the patch")
 	}
 
-	st2, _ := NewStore(NewFigaro(""))
+	st2, _ := NewStore(figaro.NewFigaro(""))
 	got, err := st2.LoadCritic(ctx, w.Name)
 	if err != nil {
 		t.Fatalf("discover by name: %v", err)
@@ -268,7 +269,7 @@ func writePost(t *testing.T, st *Store, w *model.Critic, id string, p model.Post
 	}
 }
 
-func readPost(t *testing.T, f *Figaro, w *model.Critic, id string) model.Post {
+func readPost(t *testing.T, f *figaro.Figaro, w *model.Critic, id string) model.Post {
 	t.Helper()
 	form, err := f.Form(context.Background(), w.FormID)
 	if err != nil {

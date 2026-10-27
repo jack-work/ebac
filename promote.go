@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
@@ -25,7 +26,7 @@ import (
 // loop closes without anybody sweeping it.
 type Promoter struct {
 	Store *Store
-	Fig   *Figaro
+	Fig   *figaro.Figaro
 	GH    *forge.GH
 	Out   io.Writer
 	Host  string
@@ -47,7 +48,7 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	renew(ctx, p.Fig, formID)
+	figaro.Renew(ctx, p.Fig, formID)
 
 	critics, err := p.Store.ListCritics(ctx)
 	if err != nil {
@@ -143,7 +144,7 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 		// promoter got there first this is refused, and we re-read rather
 		// than proceeding on a stale decision.
 		if err := Claim(ctx, p.Fig, formID, *next, version); err != nil {
-			if isVersionConflict(err) {
+			if figaro.IsVersionConflict(err) {
 				fmt.Fprintf(p.Out, "queue: lost the race for %s, re-reading\n", next.PRKey())
 				continue
 			}

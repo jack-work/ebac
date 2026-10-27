@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
@@ -144,7 +145,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	}); err != nil {
 		return err
 	}
-	renew(ctx, p.Fig, w.FormID)
+	figaro.Renew(ctx, p.Fig, w.FormID)
 	derr := deliverAuthor(ctx, p, w)
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
@@ -264,7 +265,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if ref.AlertRole != "" && !strings.HasPrefix(ref.AlertRole, "@") {
 		return fmt.Errorf("--alert %q: want a role form (@id)", ref.AlertRole)
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}

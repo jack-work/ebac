@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
@@ -198,7 +199,7 @@ func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 	if err := p.Store.SaveRound(ctx, w, nil, nil, items); err != nil {
 		return err
 	}
-	renew(ctx, p.Fig, w.FormID)
+	figaro.Renew(ctx, p.Fig, w.FormID)
 
 	derr := deliverTeams(ctx, p, w)
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
@@ -321,7 +322,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if *chat == "" {
 		return fmt.Errorf("--chat is required")
 	}
-	st, err := NewStore(NewFigaro(g.figaro))
+	st, err := NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
