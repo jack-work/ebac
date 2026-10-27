@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 const fakeTok = "gho_FAKE0123456789abcdef"
@@ -143,11 +145,11 @@ func TestTombGetsItsTokenOnFd3(t *testing.T) {
 // A shorthand PR (owner/repo#N) took the github.com default, which ebac cannot
 // reach since phase 1: three critics failed every round (2026-10-24).
 func TestShorthandPRResolvesToTheCredentialedForge(t *testing.T) {
-	ref, err := ParsePRRef("bic/aether#64462")
+	ref, err := model.ParsePRRef("bic/aether#64462")
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := forgeHost([]PRRef{ref}, defaultForgeHost())
+	host, err := model.ForgeHost([]model.PRRef{ref}, defaultForgeHost())
 	if err != nil || host != "microsoft.ghe.com" {
 		t.Fatalf("shorthand resolved to %q (%v); want microsoft.ghe.com", host, err)
 	}

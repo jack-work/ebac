@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
@@ -21,9 +23,9 @@ type teamsChat struct{}
 
 func (teamsChat) Name() string { return "teams-chat" }
 
-func (teamsChat) Round(ctx context.Context, p *Poller, w *Critic) error { return pollTeams(ctx, p, w) }
-
-const ModeTeams Mode = "teams"
+func (teamsChat) Round(ctx context.Context, p *Poller, w *model.Critic) error {
+	return pollTeams(ctx, p, w)
+}
 
 const (
 	teamsLimit     = 50
@@ -34,28 +36,6 @@ const (
 )
 
 const teamsTombWait = 60 * time.Second
-
-type ChatRef struct {
-	ID    string `json:"id"`
-	Topic string `json:"topic,omitempty"`
-	// Quiet senders go to the inbox but never wake the seat.
-	Quiet []string `json:"quiet,omitempty"`
-}
-
-// TeamsState lives under system.ebac.runtime: the seat never sees it.
-type TeamsState struct {
-	Seen       map[string]string `json:"seen,omitempty"` // message id -> content digest
-	GoneStreak int               `json:"gone_streak,omitempty"`
-	GoneSince  string            `json:"gone_since,omitempty"`
-	// FailSince is the start of the current run of failed rounds of any kind;
-	// Blind is set once that run passes teamsBlindAfter and the seat was told.
-	// Names maps a sender id (8:orgid:...) to the display name seen on another
-	// row: Teams leaves imdisplayname blank on some rows (all of a self-chat).
-	Names     map[string]string `json:"names,omitempty"`
-	FailSince string            `json:"fail_since,omitempty"`
-	Blind     bool              `json:"blind,omitempty"`
-	BlindErr  string            `json:"blind_err,omitempty"`
-}
 
 // teamsBlindAfter is how long the watcher may fail to read the chat before it
 // tells the seat it is not hearing it. A var so a test can shorten it.
@@ -189,7 +169,7 @@ func teamsText(content string) string {
 
 // teamsDiff compares a fetch with what was seen. The first round only
 // records: a watcher that starts by announcing fifty old messages is noise.
-func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, items map[string]InboxItem) {
+func teamsDiff(st *model.TeamsState, msgs []TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]InboxItem) {
 	items = map[string]InboxItem{}
 	first := st.Seen == nil
 	if first {
@@ -218,7 +198,7 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 		if !m.isMessage() || m.ID == "" {
 			continue
 		}
-		d := bodyDigest(m.Content)
+		d := model.BodyDigest(m.Content)
 		if m.deleted() {
 			d = "deleted"
 		}
@@ -236,14 +216,14 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 		case d == "deleted":
 			continue // created and deleted between two rounds
 		}
-		tier := TierWake
+		tier := model.TierWake
 		who := m.sender(st.Names)
 		if kind == "teams_deleted" || isQuiet(m, who) {
-			tier = TierRecord
+			tier = model.TierRecord
 		}
-		body, cut := cutBody(teamsText(m.Content), teamsBodyBytes)
-		events = append(events, Event{Kind: EventKind(kind), Tier: tier, PR: PRKey(chat.Topic), Comment: m.ID, Author: who,
-			Detail: firstLine(body)})
+		body, cut := model.CutBody(teamsText(m.Content), teamsBodyBytes)
+		events = append(events, model.Event{Kind: model.EventKind(kind), Tier: tier, PR: model.PRKey(chat.Topic), Comment: m.ID, Author: who,
+			Detail: model.FirstLine(body)})
 		it := InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.senderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.hasImage(),
 			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
 		if it.HasImage {
@@ -270,12 +250,12 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 	return events, items
 }
 
-func pollTeams(ctx context.Context, p *Poller, w *Critic) error {
+func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 	if w.Chat == nil || w.Chat.ID == "" {
 		return fmt.Errorf("%s: teams critic without a chat id", w.Name)
 	}
 	if w.Runtime.Teams == nil {
-		w.Runtime.Teams = &TeamsState{}
+		w.Runtime.Teams = &model.TeamsState{}
 	}
 	st := w.Runtime.Teams
 	w.Runtime.Round++
@@ -341,8 +321,8 @@ func pollTeams(ctx context.Context, p *Poller, w *Critic) error {
 	return derr
 }
 
-func deliverTeams(ctx context.Context, p *Poller, w *Critic) error {
-	pending := &Delta{Events: w.Runtime.PendingEvents}
+func deliverTeams(ctx context.Context, p *Poller, w *model.Critic) error {
+	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		if len(w.Runtime.PendingEvents) > 0 {
 			fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
@@ -370,13 +350,13 @@ func deliverTeams(ctx context.Context, p *Poller, w *Critic) error {
 	return nil
 }
 
-func teamsBrief(w *Critic, events []Event) string {
+func teamsBrief(w *model.Critic, events []model.Event) string {
 	counts := map[string]int{}
 	var from []string
 	seenFrom := map[string]bool{}
 	for _, e := range events {
 		counts[strings.TrimPrefix(string(e.Kind), "teams_")]++
-		if e.Tier == TierWake && !seenFrom[e.Author] {
+		if e.Tier == model.TierWake && !seenFrom[e.Author] {
 			seenFrom[e.Author] = true
 			from = append(from, e.Author)
 		}
@@ -398,7 +378,7 @@ func teamsBrief(w *Critic, events []Event) string {
 // longer than teamsBlindAfter: the form's key blind says since when and the
 // last error, refreshed only when the error changes, and is removed by the
 // first good round.
-func teamsBlind(ctx context.Context, p *Poller, w *Critic, cause error) {
+func teamsBlind(ctx context.Context, p *Poller, w *model.Critic, cause error) {
 	st := w.Runtime.Teams
 	since, err := time.Parse(time.RFC3339, st.FailSince)
 	if err != nil || time.Since(since) < teamsBlindAfter {
@@ -410,7 +390,7 @@ func teamsBlind(ctx context.Context, p *Poller, w *Critic, cause error) {
 	marker := map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
 		"meaning": "ebac cannot read the chat " + w.Chat.Topic + ": messages since then are unseen until this key disappears"}
 	if err := p.Store.commit(ctx, w.FormID, func(map[string]json.RawMessage, ebacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{"blind": mustJSON(marker)}, nil
+		return map[string]json.RawMessage{"blind": model.MustJSON(marker)}, nil
 	}); err != nil {
 		fmt.Fprintf(p.Out, "%s: could not write blind marker: %v\n", w.Name, err)
 		return
@@ -424,7 +404,7 @@ func teamsBlind(ctx context.Context, p *Poller, w *Critic, cause error) {
 }
 
 // teamsGone marks the chat gone on the form, wakes the seat once and stops.
-func teamsGone(ctx context.Context, p *Poller, w *Critic, cause error) error {
+func teamsGone(ctx context.Context, p *Poller, w *model.Critic, cause error) error {
 	st := w.Runtime.Teams
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("chat gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)
@@ -449,7 +429,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	quiet := fs.String("quiet", "", "comma-separated senders that never wake the seat: display names or sender ids (8:orgid:<guid> or the bare guid)")
 	every := fs.Duration("every", 60*time.Second, "poll interval")
 	_ = fs.Parse(args)
-	if err := ValidName(*name); err != nil {
+	if err := model.ValidName(*name); err != nil {
 		return err
 	}
 	if *chat == "" {
@@ -462,8 +442,8 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	w := &Critic{Name: *name, Mode: ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
-		Chat: &ChatRef{ID: *chat, Topic: *topic}, Stop: StopConditions{}}
+	w := &model.Critic{Name: *name, Mode: model.ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
+		Chat: &model.ChatRef{ID: *chat, Topic: *topic}, Stop: model.StopConditions{}}
 	for _, q := range strings.Split(*quiet, ",") {
 		if q = strings.TrimSpace(q); q != "" {
 			w.Chat.Quiet = append(w.Chat.Quiet, q)
@@ -478,7 +458,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if *aria != "" {
-		if err := ValidAriaID(*aria); err != nil {
+		if err := model.ValidAriaID(*aria); err != nil {
 			return fmt.Errorf("critic created (role %s), but --aria is bad: %w", formID, err)
 		}
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {

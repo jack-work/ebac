@@ -4,22 +4,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
-func cmt(id, author, body string, bot bool) *Comment {
-	c := &Comment{ID: id, Author: author, Body: body, IsBot: bot}
-	c.computeDigest()
+func cmt(id, author, body string, bot bool) *model.Comment {
+	c := &model.Comment{ID: id, Author: author, Body: body, IsBot: bot}
+	c.ComputeDigest()
 	return c
 }
 
-func snapWith(prs ...*PRState) *Snapshot {
-	s := &Snapshot{PRs: map[PRKey]*PRState{}, Complete: true, TakenAt: time.Now()}
+func snapWith(prs ...*model.PRState) *model.Snapshot {
+	s := &model.Snapshot{PRs: map[model.PRKey]*model.PRState{}, Complete: true, TakenAt: time.Now()}
 	for _, p := range prs {
 		if p.Threads == nil {
-			p.Threads = map[string]*Thread{}
+			p.Threads = map[string]*model.Thread{}
 		}
 		if p.Reviews == nil {
-			p.Reviews = map[string]*Review{}
+			p.Reviews = map[string]*model.Review{}
 		}
 		p.Complete = true
 		s.PRs[p.Key] = p
@@ -27,15 +29,15 @@ func snapWith(prs ...*PRState) *Snapshot {
 	return s
 }
 
-func basePR() *PRState {
-	return &PRState{
+func basePR() *model.PRState {
+	return &model.PRState{
 		Key: "acme/widget#1", Owner: "acme", Repo: "widget", Number: 1,
 		State: "OPEN", HeadSHA: "aaaaaaaaaaaa", URL: "https://x/pull/1",
-		Threads: map[string]*Thread{}, Reviews: map[string]*Review{}, Comments: map[string]*Comment{}, Complete: true,
+		Threads: map[string]*model.Thread{}, Reviews: map[string]*model.Review{}, Comments: map[string]*model.Comment{}, Complete: true,
 	}
 }
 
-func kinds(d *Delta) []string {
+func kinds(d *model.Delta) []string {
 	var out []string
 	for _, e := range d.Events {
 		out = append(out, string(e.Kind))
@@ -43,7 +45,7 @@ func kinds(d *Delta) []string {
 	return out
 }
 
-func tierOf(d *Delta, kind EventKind) Tier {
+func tierOf(d *model.Delta, kind model.EventKind) model.Tier {
 	for _, e := range d.Events {
 		if e.Kind == kind {
 			return e.Tier
@@ -56,7 +58,7 @@ func TestFirstRoundAdoptsWithoutAvalanche(t *testing.T) {
 	pr := basePR()
 	for i := 0; i < 30; i++ {
 		id := string(rune('a' + i))
-		pr.Threads[id] = &Thread{ID: id, Comments: []*Comment{cmt(id+"c", "someone", "hi", false)}}
+		pr.Threads[id] = &model.Thread{ID: id, Comments: []*model.Comment{cmt(id+"c", "someone", "hi", false)}}
 	}
 	d := Diff(nil, snapWith(pr), "me")
 
@@ -65,7 +67,7 @@ func TestFirstRoundAdoptsWithoutAvalanche(t *testing.T) {
 	if got := len(d.Tier1()); got != 1 {
 		t.Fatalf("adoption produced %d wake events, want 1: %v", got, kinds(d))
 	}
-	if d.Tier1()[0].Kind != EvPRAdded {
+	if d.Tier1()[0].Kind != model.EvPRAdded {
 		t.Fatalf("wake event is %s, want pr_added", d.Tier1()[0].Kind)
 	}
 	if len(d.Events) != 2 {
@@ -75,9 +77,9 @@ func TestFirstRoundAdoptsWithoutAvalanche(t *testing.T) {
 
 func TestNewHumanCommentWakes(t *testing.T) {
 	prev := basePR()
-	prev.Threads["t1"] = &Thread{ID: "t1", Path: "a.go", Comments: []*Comment{cmt("c1", "alice", "first", false)}}
+	prev.Threads["t1"] = &model.Thread{ID: "t1", Path: "a.go", Comments: []*model.Comment{cmt("c1", "alice", "first", false)}}
 	next := basePR()
-	next.Threads["t1"] = &Thread{ID: "t1", Path: "a.go", Comments: []*Comment{
+	next.Threads["t1"] = &model.Thread{ID: "t1", Path: "a.go", Comments: []*model.Comment{
 		cmt("c1", "alice", "first", false),
 		cmt("c2", "alice", "second", false),
 	}}
@@ -85,8 +87,8 @@ func TestNewHumanCommentWakes(t *testing.T) {
 	if !d.WakeWorthy() {
 		t.Fatalf("a new human comment must wake; got %v", kinds(d))
 	}
-	if tierOf(d, EvCommentNew) != TierWake {
-		t.Fatalf("comment_new tier = %d, want %d", tierOf(d, EvCommentNew), TierWake)
+	if tierOf(d, model.EvCommentNew) != model.TierWake {
+		t.Fatalf("comment_new tier = %d, want %d", tierOf(d, model.EvCommentNew), model.TierWake)
 	}
 }
 
@@ -105,8 +107,8 @@ func TestNewTopLevelPRCommentWakes(t *testing.T) {
 	if !d.WakeWorthy() {
 		t.Fatalf("a new top-level PR comment must wake; got %v", kinds(d))
 	}
-	if tierOf(d, EvPRCommentNew) != TierWake {
-		t.Fatalf("pr_comment_new tier = %d, want %d", tierOf(d, EvPRCommentNew), TierWake)
+	if tierOf(d, model.EvPRCommentNew) != model.TierWake {
+		t.Fatalf("pr_comment_new tier = %d, want %d", tierOf(d, model.EvPRCommentNew), model.TierWake)
 	}
 }
 
@@ -169,9 +171,9 @@ func TestBotAndSelfCommentsDoNotWake(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := basePR()
-			prev.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "x", false)}}
+			prev.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
 			next := basePR()
-			next.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{
+			next.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{
 				cmt("c1", "alice", "x", false),
 				cmt("c2", tc.author, "y", tc.bot),
 			}}
@@ -190,24 +192,24 @@ func TestBotAndSelfCommentsDoNotWake(t *testing.T) {
 
 func TestEditIsDetectedByDigestNotTimestamp(t *testing.T) {
 	prev := basePR()
-	prev.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{
+	prev.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{
 		{ID: "c1", Author: "alice", Body: "before", UpdatedAt: "2026-01-01T00:00:00Z", Digest: digestOf("before")},
 	}}
 	next := basePR()
 	// Same UpdatedAt on purpose: some edits do not move it. The digest must
 	// still catch the change.
-	next.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{
+	next.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{
 		{ID: "c1", Author: "alice", Body: "after", UpdatedAt: "2026-01-01T00:00:00Z", Digest: digestOf("after")},
 	}}
 	d := Diff(snapWith(prev), snapWith(next), "me")
-	if tierOf(d, EvCommentEdited) != TierWake {
+	if tierOf(d, model.EvCommentEdited) != model.TierWake {
 		t.Fatalf("edit not detected as a wake event: %v", kinds(d))
 	}
 }
 
 func digestOf(s string) string {
-	c := &Comment{Body: s}
-	c.computeDigest()
+	c := &model.Comment{Body: s}
+	c.ComputeDigest()
 	return c.Digest
 }
 
@@ -216,12 +218,12 @@ func digestOf(s string) string {
 // thread as removed is worse than no monitor at all.
 func TestPartialScanNeverInfersDeletion(t *testing.T) {
 	prev := basePR()
-	prev.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "x", false)}}
-	prev.Threads["t2"] = &Thread{ID: "t2", Comments: []*Comment{cmt("c2", "bob", "y", false)}}
+	prev.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
+	prev.Threads["t2"] = &model.Thread{ID: "t2", Comments: []*model.Comment{cmt("c2", "bob", "y", false)}}
 
 	next := basePR()
 	next.Complete = false // pagination did not finish
-	next.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "x", false)}}
+	next.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
 
 	ns := snapWith(next)
 	ns.PRs[next.Key].Complete = false
@@ -229,7 +231,7 @@ func TestPartialScanNeverInfersDeletion(t *testing.T) {
 
 	d := Diff(snapWith(prev), ns, "me")
 	for _, e := range d.Events {
-		if e.Kind == EvThreadGone {
+		if e.Kind == model.EvThreadGone {
 			t.Fatalf("partial scan inferred a deletion: %v", e.Line())
 		}
 	}
@@ -242,15 +244,15 @@ func TestCompleteScanDoesInferDeletion(t *testing.T) {
 	// The negative control for the test above: without it, a differ that
 	// never emits thread_deleted at all would pass.
 	prev := basePR()
-	prev.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "a", "x", false)}}
-	prev.Threads["t2"] = &Thread{ID: "t2", Comments: []*Comment{cmt("c2", "b", "y", false)}}
+	prev.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "a", "x", false)}}
+	prev.Threads["t2"] = &model.Thread{ID: "t2", Comments: []*model.Comment{cmt("c2", "b", "y", false)}}
 	next := basePR()
-	next.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "a", "x", false)}}
+	next.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "a", "x", false)}}
 
 	d := Diff(snapWith(prev), snapWith(next), "me")
 	found := false
 	for _, e := range d.Events {
-		if e.Kind == EvThreadGone {
+		if e.Kind == model.EvThreadGone {
 			found = true
 		}
 	}
@@ -272,21 +274,21 @@ func TestHeadMoveWakesOnlyWithOutstandingFeedback(t *testing.T) {
 	}
 
 	prev2 := basePR()
-	prev2.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "fix this", false)}}
+	prev2.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "fix this", false)}}
 	next2 := basePR()
 	next2.HeadSHA = "bbbbbbbbbbbb"
-	next2.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "fix this", false)}}
+	next2.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "fix this", false)}}
 	d2 := Diff(snapWith(prev2), snapWith(next2), "me")
-	if tierOf(d2, EvHeadMoved) != TierWake {
+	if tierOf(d2, model.EvHeadMoved) != model.TierWake {
 		t.Fatalf("push with unresolved feedback did not wake: %v", kinds(d2))
 	}
 }
 
 func TestThreadReopenWakesResolveDoesNot(t *testing.T) {
-	mk := func(resolved bool) *PRState {
+	mk := func(resolved bool) *model.PRState {
 		p := basePR()
-		p.Threads["t1"] = &Thread{ID: "t1", IsResolved: resolved,
-			Comments: []*Comment{cmt("c1", "alice", "x", false)}}
+		p.Threads["t1"] = &model.Thread{ID: "t1", IsResolved: resolved,
+			Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
 		return p
 	}
 	d := Diff(snapWith(mk(false)), snapWith(mk(true)), "me")
@@ -307,14 +309,14 @@ func TestThreadReopenWakesResolveDoesNot(t *testing.T) {
 func TestThreadNewCreditsWhoeverOpenedItNotWhoeverRepliedLast(t *testing.T) {
 	prev := basePR()
 	next := basePR()
-	next.Threads["t1"] = &Thread{ID: "t1", Path: "a.rs", Comments: []*Comment{
+	next.Threads["t1"] = &model.Thread{ID: "t1", Path: "a.rs", Comments: []*model.Comment{
 		cmt("c1", "bob", "the cancel_all caveat misses a third caller", false),
 		cmt("c2", "alice", "both halves verified and taken", false),
 	}}
 
 	d := Diff(snapWith(prev), snapWith(next), "me")
 	ev := d.Events[0]
-	if ev.Kind != EvThreadNew {
+	if ev.Kind != model.EvThreadNew {
 		t.Fatalf("want thread_new, got %v", kinds(d))
 	}
 	if ev.Author != "bob" {
@@ -330,7 +332,7 @@ func TestMergedAndClosedWake(t *testing.T) {
 	next := basePR()
 	next.State = "MERGED"
 	d := Diff(snapWith(prev), snapWith(next), "me")
-	if tierOf(d, EvPRMerged) != TierWake {
+	if tierOf(d, model.EvPRMerged) != model.TierWake {
 		t.Fatalf("merge did not wake: %v", kinds(d))
 	}
 }
@@ -340,9 +342,9 @@ func TestIdenticalSnapshotsProduceNothing(t *testing.T) {
 	// recomputed digest makes an unchanged PR look changed and burns a turn
 	// on every single poll, forever.
 	pr := basePR()
-	pr.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "x", false)}}
+	pr.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
 	pr2 := basePR()
-	pr2.Threads["t1"] = &Thread{ID: "t1", Comments: []*Comment{cmt("c1", "alice", "x", false)}}
+	pr2.Threads["t1"] = &model.Thread{ID: "t1", Comments: []*model.Comment{cmt("c1", "alice", "x", false)}}
 	d := Diff(snapWith(pr), snapWith(pr2), "me")
 	if !d.Empty() {
 		t.Fatalf("identical snapshots produced %d events: %v", len(d.Events), kinds(d))
@@ -353,14 +355,14 @@ func TestIdenticalSnapshotsProduceNothing(t *testing.T) {
 }
 
 func TestMergeEventsDeduplicatesAndCaps(t *testing.T) {
-	e := Event{Kind: EvCommentNew, PR: "acme/widget#1", ThreadID: "t", Comment: "c"}
-	got := mergeEvents([]Event{e}, []Event{e, e})
+	e := model.Event{Kind: model.EvCommentNew, PR: "acme/widget#1", ThreadID: "t", Comment: "c"}
+	got := mergeEvents([]model.Event{e}, []model.Event{e, e})
 	if len(got) != 1 {
 		t.Fatalf("dedup failed: %d events", len(got))
 	}
-	var many []Event
+	var many []model.Event
 	for i := 0; i < 500; i++ {
-		many = append(many, Event{Kind: EvCommentNew, Comment: string(rune(i))})
+		many = append(many, model.Event{Kind: model.EvCommentNew, Comment: string(rune(i))})
 	}
 	if n := len(mergeEvents(nil, many)); n > 200 {
 		t.Fatalf("pending batch grew unbounded: %d", n)
@@ -377,10 +379,10 @@ func TestMergeEventsDeduplicatesAndCaps(t *testing.T) {
 // (the elide counter only fires past the 12-event projection cap), not
 // suppressed, just gone before the delta was even built.
 func TestDistinctReviewsWithSameStateAreNotDeduplicated(t *testing.T) {
-	var fresh []Event
+	var fresh []model.Event
 	for i := 0; i < 8; i++ {
-		fresh = append(fresh, Event{
-			Kind: EvReviewSubmitted, Tier: TierRecord, PR: "acme/widget#23654",
+		fresh = append(fresh, model.Event{
+			Kind: model.EvReviewSubmitted, Tier: model.TierRecord, PR: "acme/widget#23654",
 			Author: "bob", Detail: "COMMENTED", ReviewID: string(rune('a' + i)),
 		})
 	}
@@ -400,16 +402,16 @@ func TestDistinctReviewsWithSameStateAreNotDeduplicated(t *testing.T) {
 // zero events, forever: the false absence a quiet monitor is built to have.
 func TestPendingReviewSubmittedLaterWakes(t *testing.T) {
 	prev := basePR()
-	prev.Reviews["r1"] = &Review{ID: "r1", Author: "alice", State: "PENDING"}
+	prev.Reviews["r1"] = &model.Review{ID: "r1", Author: "alice", State: "PENDING"}
 	next := basePR()
-	next.Reviews["r1"] = &Review{ID: "r1", Author: "alice", State: "CHANGES_REQUESTED", SubmittedAt: "later"}
+	next.Reviews["r1"] = &model.Review{ID: "r1", Author: "alice", State: "CHANGES_REQUESTED", SubmittedAt: "later"}
 
 	d := Diff(snapWith(prev), snapWith(next), "me")
 	if !d.WakeWorthy() {
 		t.Fatalf("a PENDING review submitted for real must wake; got %v", kinds(d))
 	}
-	if tierOf(d, EvReviewSubmitted) != TierWake {
-		t.Fatalf("review_submitted tier = %d, want %d", tierOf(d, EvReviewSubmitted), TierWake)
+	if tierOf(d, model.EvReviewSubmitted) != model.TierWake {
+		t.Fatalf("review_submitted tier = %d, want %d", tierOf(d, model.EvReviewSubmitted), model.TierWake)
 	}
 	// A truly identical review (same ID, same state) on the next round must
 	// not re-fire: this is the negative control for the fix above.
@@ -433,15 +435,15 @@ func TestPendingReviewSubmittedLaterWakes(t *testing.T) {
 func TestReviewBornDismissedFlagsTheCollapse(t *testing.T) {
 	prev := basePR()
 	next := basePR()
-	next.Reviews["r1"] = &Review{ID: "r1", Author: "dangau", State: "DISMISSED", SubmittedAt: "t1"}
+	next.Reviews["r1"] = &model.Review{ID: "r1", Author: "dangau", State: "DISMISSED", SubmittedAt: "t1"}
 
 	d := Diff(snapWith(prev), snapWith(next), "me")
 	if !d.WakeWorthy() {
 		t.Fatalf("a collapsed approve-then-dismiss must still wake: %v", kinds(d))
 	}
-	var ev *Event
+	var ev *model.Event
 	for i := range d.Events {
-		if d.Events[i].Kind == EvReviewSubmitted {
+		if d.Events[i].Kind == model.EvReviewSubmitted {
 			ev = &d.Events[i]
 		}
 	}
@@ -458,9 +460,9 @@ func TestReviewBornDismissedFlagsTheCollapse(t *testing.T) {
 	// A review that really is new and non-terminal (e.g. a first-ever
 	// COMMENTED) must NOT be relabeled: this is the negative control.
 	next2 := basePR()
-	next2.Reviews["r2"] = &Review{ID: "r2", Author: "dangau", State: "COMMENTED", SubmittedAt: "t1", Body: "looks fine"}
+	next2.Reviews["r2"] = &model.Review{ID: "r2", Author: "dangau", State: "COMMENTED", SubmittedAt: "t1", Body: "looks fine"}
 	d2 := Diff(snapWith(prev), snapWith(next2), "me")
-	if kinds(d2)[0] != string(EvReviewSubmitted) {
+	if kinds(d2)[0] != string(model.EvReviewSubmitted) {
 		t.Fatalf("want review_submitted, got %v", kinds(d2))
 	}
 	if d2.Events[0].Detail != "COMMENTED" {
@@ -482,12 +484,12 @@ func TestReviewBornDismissedFlagsTheCollapse(t *testing.T) {
 // objection changed underneath that label.
 func TestReviewEditedInPlaceStillWakes(t *testing.T) {
 	prev := basePR()
-	prev.Reviews["r1"] = &Review{
+	prev.Reviews["r1"] = &model.Review{
 		ID: "r1", Author: "dangau", State: "CHANGES_REQUESTED", SubmittedAt: "t1",
 		Body: "Blocking: identifiers logged without scrubbing.",
 	}
 	next := basePR()
-	next.Reviews["r1"] = &Review{
+	next.Reviews["r1"] = &model.Review{
 		ID: "r1", Author: "dangau", State: "CHANGES_REQUESTED", SubmittedAt: "t1",
 		Body: "Blocking: tests assert against struct Debug format instead of emitted telemetry.",
 	}
@@ -507,9 +509,9 @@ func TestReviewEditedInPlaceStillWakes(t *testing.T) {
 	// Negative control: our own review being edited (e.g. alice revising
 	// a reply) must not wake -- same rule as every other self-authored path.
 	prevMe := basePR()
-	prevMe.Reviews["r2"] = &Review{ID: "r2", Author: "me", State: "COMMENTED", SubmittedAt: "t1", Body: "first take"}
+	prevMe.Reviews["r2"] = &model.Review{ID: "r2", Author: "me", State: "COMMENTED", SubmittedAt: "t1", Body: "first take"}
 	nextMe := basePR()
-	nextMe.Reviews["r2"] = &Review{ID: "r2", Author: "me", State: "COMMENTED", SubmittedAt: "t1", Body: "revised take"}
+	nextMe.Reviews["r2"] = &model.Review{ID: "r2", Author: "me", State: "COMMENTED", SubmittedAt: "t1", Body: "revised take"}
 	dMe := Diff(snapWith(prevMe), snapWith(nextMe), "me")
 	if dMe.WakeWorthy() {
 		t.Fatalf("our own edited review woke us: %v", kinds(dMe))
@@ -525,37 +527,6 @@ func TestBackoffClimbsAndCaps(t *testing.T) {
 	}
 	if backoffFor(20) != maxBackoff {
 		t.Fatalf("backoff did not cap: %s", backoffFor(20))
-	}
-}
-
-func TestParsePRRef(t *testing.T) {
-	for _, tc := range []struct {
-		in    string
-		owner string
-		repo  string
-		num   int
-		bad   bool
-	}{
-		{in: "https://github.com/acme/widget/pull/6622", owner: "acme", repo: "widget", num: 6622},
-		{in: "acme/widget#42", owner: "acme", repo: "widget", num: 42},
-		{in: "https://github.com/acme/widget/issues/12", bad: true},
-		{in: "widget#1", bad: true},
-		{in: "", bad: true},
-	} {
-		got, err := ParsePRRef(tc.in)
-		if tc.bad {
-			if err == nil {
-				t.Errorf("%q should not parse, got %+v", tc.in, got)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%q: %v", tc.in, err)
-			continue
-		}
-		if got.Owner != tc.owner || got.Repo != tc.repo || got.Number != tc.num {
-			t.Errorf("%q -> %+v", tc.in, got)
-		}
 	}
 }
 
@@ -575,17 +546,6 @@ func TestIsBot(t *testing.T) {
 	}
 }
 
-func TestFirstLineTrimsOnRuneBoundary(t *testing.T) {
-	in := strings.Repeat("é", 400)
-	got := firstLine(in)
-	if !strings.HasSuffix(got, "…") {
-		t.Fatalf("no ellipsis: %q", got[len(got)-8:])
-	}
-	if strings.Contains(got, "\ufffd") {
-		t.Fatal("trimmed mid-rune: replacement character in output")
-	}
-}
-
 func TestSetJSONRefusesDottedKeys(t *testing.T) {
 	// Guards the measured figaro hazard: a dotted write into a subtree that
 	// was written as a literal creates a flat decoy key, and a later unset
@@ -597,19 +557,6 @@ func TestSetJSONRefusesDottedKeys(t *testing.T) {
 	}
 }
 
-func TestValidNameRejectsSystemdHostileNames(t *testing.T) {
-	for _, bad := range []string{"", "a b", "a/b", "a.b", strings.Repeat("x", 65)} {
-		if err := ValidName(bad); err == nil {
-			t.Errorf("ValidName(%q) accepted", bad)
-		}
-	}
-	for _, good := range []string{"widget", "aether-prs", "pr_6622"} {
-		if err := ValidName(good); err != nil {
-			t.Errorf("ValidName(%q): %v", good, err)
-		}
-	}
-}
-
 // Regression: the roster's health column scored an unarmed critic as "ok"
 // because it compared TimerState against the literal "inactive/disabled",
 // while systemd actually says "not-found" for a unit that was never
@@ -617,7 +564,7 @@ func TestValidNameRejectsSystemdHostileNames(t *testing.T) {
 // must be derived from the PROPERTY, so no unrecognised display string can
 // ever read as healthy.
 func TestUnarmedTimerIsNeverHealthy(t *testing.T) {
-	w := &Critic{Name: "x"}
+	w := &model.Critic{Name: "x"}
 	row := RosterRow{Seat: "abc123"}
 	for _, ts := range []TimerStatus{
 		{Display: "absent"},
@@ -638,24 +585,8 @@ func TestUnarmedTimerIsNeverHealthy(t *testing.T) {
 func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
 	armed := TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
-		if got := health(&Critic{Name: "x"}, RosterRow{Seat: seat}, armed); got == "ok" {
+		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, armed); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)
-		}
-	}
-}
-
-func TestValidAriaID(t *testing.T) {
-	// `figaro bind -j` returns figaro_id, `figaro new -j` returns aria_id.
-	// A script that reads the wrong field yields the literal "null", and
-	// casting that produced an opaque xwal error. Refuse it up front.
-	for _, bad := range []string{"", "null", "@1cb8a917", "not an id", "<nil>"} {
-		if err := ValidAriaID(bad); err == nil {
-			t.Errorf("ValidAriaID(%q) accepted", bad)
-		}
-	}
-	for _, good := range []string{"0a0db7ec", "f37a50e5"} {
-		if err := ValidAriaID(good); err != nil {
-			t.Errorf("ValidAriaID(%q): %v", good, err)
 		}
 	}
 }

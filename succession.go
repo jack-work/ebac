@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // Succession lives HERE, in the binary, not in ~/.config/figaro/outfits.
@@ -99,7 +101,7 @@ func successionAction(fill float64, standby string, standbyAlive bool, pol Succe
 // superviseSuccession runs once per poll round. It is deliberately part of
 // the existing heartbeat rather than a second daemon: the timer already runs
 // every 5m and already knows the seat.
-func (p *Poller) superviseSuccession(ctx context.Context, c *Critic) {
+func (p *Poller) superviseSuccession(ctx context.Context, c *model.Critic) {
 	pol := DefaultSuccession()
 
 	form, err := p.Fig.Form(ctx, c.FormID)
@@ -196,7 +198,7 @@ func (p *Poller) superviseSuccession(ctx context.Context, c *Critic) {
 	_ = p.Fig.SetJSON(ctx, c.FormID, "succession_state", state)
 }
 
-func standbyBrief(c *Critic, pol SuccessionPolicy, holder string, fill float64) string {
+func standbyBrief(c *model.Critic, pol SuccessionPolicy, holder string, fill float64) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are the STANDBY successor for ebac critic %q.\n\n", c.Name)
 	fmt.Fprintf(&b, "The current holder (%s) is at %.0f%% of its context. At %.0f%% the role %s "+

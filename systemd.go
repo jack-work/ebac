@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // One TEMPLATE unit plus a per-instance drop-in, not a daemon that manages
@@ -231,7 +233,7 @@ func EnableTimer(name string, interval time.Duration) error {
 // drop-ins): a removed critic left them behind, and they piled up in
 // ~/.config/systemd/user for every critic that ever ran.
 func removeTimerDropIns(name string) error {
-	if err := ValidName(name); err != nil {
+	if err := model.ValidName(name); err != nil {
 		return err
 	}
 	dir, err := unitDir()

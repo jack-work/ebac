@@ -7,14 +7,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 func apr(n int, state string, draft bool, head string) AuthoredPR {
 	return AuthoredPR{Repo: "bic/aether", Number: n, URL: "https://x/pull/" + head, Title: "t", State: state, Draft: draft, Head: head}
 }
 
-func authorKinds(ev []Event) map[string]Tier {
-	m := map[string]Tier{}
+func authorKinds(ev []model.Event) map[string]model.Tier {
+	m := map[string]model.Tier{}
 	for _, e := range ev {
 		m[string(e.PR)+" "+string(e.Kind)] = e.Tier
 	}
@@ -22,7 +24,7 @@ func authorKinds(ev []Event) map[string]Tier {
 }
 
 func TestAuthorDiff(t *testing.T) {
-	st := &AuthorState{}
+	st := &model.AuthorState{}
 	if ev := authorDiff(st, []AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}); len(ev) != 0 {
 		t.Fatalf("first round must only record: %+v", ev)
 	}
@@ -35,12 +37,12 @@ func TestAuthorDiff(t *testing.T) {
 		apr(6, "MERGED", false, "f"), // opened and merged between rounds -> wake merged
 	})
 	got := authorKinds(ev)
-	want := map[string]Tier{
-		"bic/aether#1 author_pr_merged": TierWake,
-		"bic/aether#2 author_pr_new":    TierWake,
-		"bic/aether#4 author_pr_new":    TierWake,
-		"bic/aether#5 author_pr_draft":  TierRecord,
-		"bic/aether#6 author_pr_merged": TierWake,
+	want := map[string]model.Tier{
+		"bic/aether#1 author_pr_merged": model.TierWake,
+		"bic/aether#2 author_pr_new":    model.TierWake,
+		"bic/aether#4 author_pr_new":    model.TierWake,
+		"bic/aether#5 author_pr_draft":  model.TierRecord,
+		"bic/aether#6 author_pr_merged": model.TierWake,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("events %v; want %v", got, want)
@@ -55,14 +57,14 @@ func TestAuthorDiff(t *testing.T) {
 		apr(4, "CLOSED", false, "d"), apr(5, "OPEN", true, "e"), apr(6, "MERGED", false, "f"),
 	})
 	got = authorKinds(ev)
-	if got["bic/aether#2 author_pr_head_moved"] != TierRecord || got["bic/aether#4 author_pr_closed"] != TierRecord || len(got) != 2 {
+	if got["bic/aether#2 author_pr_head_moved"] != model.TierRecord || got["bic/aether#4 author_pr_closed"] != model.TierRecord || len(got) != 2 {
 		t.Fatalf("head move + close must be recorded only: %v", got)
 	}
-	if (&Delta{Events: ev}).WakeWorthy() {
+	if (&model.Delta{Events: ev}).WakeWorthy() {
 		t.Fatal("a round of closes and head moves woke the seat")
 	}
 	ev = authorDiff(st, []AuthoredPR{apr(4, "OPEN", false, "d")})
-	if authorKinds(ev)["bic/aether#4 author_pr_reopened"] != TierRecord {
+	if authorKinds(ev)["bic/aether#4 author_pr_reopened"] != model.TierRecord {
 		t.Fatalf("reopen: %v", authorKinds(ev))
 	}
 }
@@ -88,12 +90,12 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 }
 
 func TestAuthorBrief(t *testing.T) {
-	w := &Critic{Name: "author-x", FormID: "@f", Author: &AuthorRef{Login: "Chiqun-Zhang"}}
+	w := &model.Critic{Name: "author-x", FormID: "@f", Author: &model.AuthorRef{Login: "Chiqun-Zhang"}}
 	w.Runtime.Round = 7
-	b := authorBrief(w, []Event{
-		{Kind: EvAuthorNew, Tier: TierWake, PR: "bic/aether#4", URL: "u4", Detail: "new one"},
-		{Kind: EvAuthorMerged, Tier: TierWake, PR: "bic/aether#1", URL: "u1", Detail: "merged one"},
-		{Kind: EvAuthorHead, Tier: TierRecord, PR: "bic/aether#2"},
+	b := authorBrief(w, []model.Event{
+		{Kind: EvAuthorNew, Tier: model.TierWake, PR: "bic/aether#4", URL: "u4", Detail: "new one"},
+		{Kind: EvAuthorMerged, Tier: model.TierWake, PR: "bic/aether#1", URL: "u1", Detail: "merged one"},
+		{Kind: EvAuthorHead, Tier: model.TierRecord, PR: "bic/aether#2"},
 	})
 	for _, want := range []string{"- NEW bic/aether#4 u4 new one", "- MERGED bic/aether#1 u1 merged one", "(1 background change(s)", "ebac ack --critic author-x --round 7"} {
 		if !strings.Contains(b, want) {
@@ -115,9 +117,9 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
-	w := &Critic{Name: "livetest-author-" + strings.TrimPrefix(id, "@")[:8], Mode: ModeAuthor, Source: "github-author",
+	w := &model.Critic{Name: "livetest-author-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeAuthor, Source: "github-author",
 		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), FormID: id,
-		Author: &AuthorRef{Login: "Chiqun-Zhang", Since: time.Now().Add(-time.Hour), Repos: []string{"bic/aether"}}}
+		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Now().Add(-time.Hour), Repos: []string{"bic/aether"}}}
 	if err := st.SaveCritic(ctx, w); err != nil {
 		t.Fatal(err)
 	}

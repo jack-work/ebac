@@ -8,63 +8,65 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
-func outboxCritic() (*Critic, *Snapshot) {
-	pr := &PRState{
-		Key: MakePRKey("acme", "widget", 1), Owner: "acme", Repo: "widget", Number: 1, URL: "https://x/pull/1",
+func outboxCritic() (*model.Critic, *model.Snapshot) {
+	pr := &model.PRState{
+		Key: model.MakePRKey("acme", "widget", 1), Owner: "acme", Repo: "widget", Number: 1, URL: "https://x/pull/1",
 		State: "OPEN", Author: "friend", HeadSHA: "abc123",
-		Threads:  map[string]*Thread{"PRRT_1": {ID: "PRRT_1", Path: "a.go", Line: 3}},
-		Reviews:  map[string]*Review{},
-		Comments: map[string]*Comment{},
+		Threads:  map[string]*model.Thread{"PRRT_1": {ID: "PRRT_1", Path: "a.go", Line: 3}},
+		Reviews:  map[string]*model.Review{},
+		Comments: map[string]*model.Comment{},
 	}
-	w := &Critic{Name: "rw", Mode: ModeReview, Write: true, FormID: "@f"}
-	return w, &Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}}
+	w := &model.Critic{Name: "rw", Mode: model.ModeReview, Write: true, FormID: "@f"}
+	return w, &model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}}
 }
 
 func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 	w, snap := outboxCritic()
 	ro := *w
 	ro.Write = false
-	rev := Critic{Name: "rev", Mode: ModeReviewer, Approve: true}
+	rev := model.Critic{Name: "rev", Mode: model.ModeReviewer, Approve: true}
 	pw := w
 	_, pendingSnap := outboxCritic()
-	pendingSnap.PRs["acme/widget#1"].Pending = []PendingReview{{ID: "PRR_p", DatabaseID: 213120916, Author: "jack", Comments: 344}}
-	revNoApprove := Critic{Name: "rev", Mode: ModeReviewer}
+	pendingSnap.PRs["acme/widget#1"].Pending = []model.PendingReview{{ID: "PRR_p", DatabaseID: 213120916, Author: "jack", Comments: 344}}
+	revNoApprove := model.Critic{Name: "rev", Mode: model.ModeReviewer}
 	for _, tc := range []struct {
 		name string
-		w    *Critic
+		w    *model.Critic
 		me   string
-		post Post
+		post model.Post
 		want string // substring of the refusal; "" means allowed
 	}{
-		{"pr comment", w, "jack", Post{PR: "acme/widget#1", Body: "x"}, ""},
-		{"thread reply", w, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1"}, ""},
-		{"inline", w, "jack", Post{PR: "acme/widget#1", Body: "x", Path: "a.go", Line: 3}, ""},
-		{"read-only critic", &ro, "jack", Post{PR: "acme/widget#1", Body: "x"}, "read-only"},
-		{"foreign pr", w, "jack", Post{PR: "acme/other#9", Body: "x"}, "not a pull request of this critic"},
-		{"empty", w, "jack", Post{PR: "acme/widget#1", Body: "  "}, "empty body"},
-		{"unknown thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_9"}, "not on"},
-		{"path without line", w, "jack", Post{PR: "acme/widget#1", Body: "x", Path: "a.go"}, "both path and line"},
-		{"request changes", w, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "REQUEST_CHANGES"}, "never allowed"},
-		{"approve without grant", w, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "not granted"},
-		{"reviewer approves", &rev, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, ""},
-		{"reviewer without approve", &revNoApprove, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "not granted"},
-		{"approve own operator's pr", &rev, "friend", Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "own operator"},
-		{"reply and resolve", w, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1", Resolve: true}, ""},
-		{"resolve alone", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, ""},
-		{"resolve without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", Resolve: true}, "needs reply_to"},
-		{"reviewer resolves", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "never resolves"},
-		{"read-only resolves", &ro, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "read-only"},
-		{"react alone", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
-		{"reviewer reacts", &rev, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
-		{"react without a thread", w, "jack", Post{PR: "acme/widget#1", Body: "x", React: "+1"}, "needs reply_to"},
-		{"unknown reaction", w, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "thumbsup"}, "use one of"},
-		{"pending: reply", pw, "jack", Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1"}, "pending review 213120916"},
-		{"pending: inline", pw, "jack", Post{PR: "acme/widget#1", Body: "x", Path: "a.go", Line: 3}, "pending review"},
-		{"pending: review", pw, "jack", Post{PR: "acme/widget#1", Body: "x", Event: "COMMENT"}, "pending review"},
-		{"pending: top-level comment", pw, "jack", Post{PR: "acme/widget#1", Body: "x"}, ""},
-		{"pending: react and resolve", pw, "jack", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true}, ""},
+		{"pr comment", w, "jack", model.Post{PR: "acme/widget#1", Body: "x"}, ""},
+		{"thread reply", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1"}, ""},
+		{"inline", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Path: "a.go", Line: 3}, ""},
+		{"read-only critic", &ro, "jack", model.Post{PR: "acme/widget#1", Body: "x"}, "read-only"},
+		{"foreign pr", w, "jack", model.Post{PR: "acme/other#9", Body: "x"}, "not a pull request of this critic"},
+		{"empty", w, "jack", model.Post{PR: "acme/widget#1", Body: "  "}, "empty body"},
+		{"unknown thread", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_9"}, "not on"},
+		{"path without line", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Path: "a.go"}, "both path and line"},
+		{"request changes", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Event: "REQUEST_CHANGES"}, "never allowed"},
+		{"approve without grant", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "not granted"},
+		{"reviewer approves", &rev, "jack", model.Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, ""},
+		{"reviewer without approve", &revNoApprove, "jack", model.Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "not granted"},
+		{"approve own operator's pr", &rev, "friend", model.Post{PR: "acme/widget#1", Body: "x", Event: "APPROVE"}, "own operator"},
+		{"reply and resolve", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1", Resolve: true}, ""},
+		{"resolve alone", w, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, ""},
+		{"resolve without a thread", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Resolve: true}, "needs reply_to"},
+		{"reviewer resolves", &rev, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "never resolves"},
+		{"read-only resolves", &ro, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "read-only"},
+		{"react alone", w, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
+		{"reviewer reacts", &rev, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
+		{"react without a thread", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", React: "+1"}, "needs reply_to"},
+		{"unknown reaction", w, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "thumbsup"}, "use one of"},
+		{"pending: reply", pw, "jack", model.Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1"}, "pending review 213120916"},
+		{"pending: inline", pw, "jack", model.Post{PR: "acme/widget#1", Body: "x", Path: "a.go", Line: 3}, "pending review"},
+		{"pending: review", pw, "jack", model.Post{PR: "acme/widget#1", Body: "x", Event: "COMMENT"}, "pending review"},
+		{"pending: top-level comment", pw, "jack", model.Post{PR: "acme/widget#1", Body: "x"}, ""},
+		{"pending: react and resolve", pw, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true}, ""},
 	} {
 		s := snap
 		if strings.HasPrefix(tc.name, "pending:") {
@@ -83,7 +85,7 @@ func TestGHPostChoosesTheEndpoint(t *testing.T) {
 	gh := fakeGH(t, "post-ok")
 	_, snap := outboxCritic()
 	pr := snap.PRs["acme/widget#1"]
-	for _, p := range []*Post{
+	for _, p := range []*model.Post{
 		{Body: "c"},
 		{Body: "r", ReplyTo: "PRRT_1"},
 		{Body: "i", Path: "a.go", Line: 3},
@@ -116,17 +118,17 @@ func TestGHPostChoosesTheEndpoint(t *testing.T) {
 func TestPrsTreeKeepsOrderAndDigestsButNoBodies(t *testing.T) {
 	_, snap := outboxCritic()
 	pr := snap.PRs["acme/widget#1"]
-	c1 := &Comment{ID: "C1", Author: "a", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}
-	c2 := &Comment{ID: "C2", Author: "b", Body: "second", CreatedAt: "2026-10-20T02:00:00Z", State: "PENDING"}
-	c1.computeDigest()
-	c2.computeDigest()
-	pr.Threads["PRRT_1"].Comments = []*Comment{c1, c2}
+	c1 := &model.Comment{ID: "C1", Author: "a", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}
+	c2 := &model.Comment{ID: "C2", Author: "b", Body: "second", CreatedAt: "2026-10-20T02:00:00Z", State: "PENDING"}
+	c1.ComputeDigest()
+	c2.ComputeDigest()
+	pr.Threads["PRRT_1"].Comments = []*model.Comment{c1, c2}
 	pr.Threads["PRRT_1"].IsResolved = true
-	pr.Comments["IC1"] = &Comment{ID: "IC1", Author: "c", Body: "top"}
-	pr.Reviews["R1"] = &Review{ID: "R1", Author: "d", State: "APPROVED", Body: "lgtm"}
-	snap.PRs["acme/web.site#2"] = &PRState{Key: "acme/web.site#2", Owner: "acme", Repo: "web.site", Number: 2}
+	pr.Comments["IC1"] = &model.Comment{ID: "IC1", Author: "c", Body: "top"}
+	pr.Reviews["R1"] = &model.Review{ID: "R1", Author: "d", State: "APPROVED", Body: "lgtm"}
+	snap.PRs["acme/web.site#2"] = &model.PRState{Key: "acme/web.site#2", Owner: "acme", Repo: "web.site", Number: 2}
 
-	raw := mustJSON(prsTree(snap))
+	raw := model.MustJSON(prsTree(snap))
 	for _, body := range []string{"first", "second", "top", "lgtm"} {
 		if strings.Contains(string(raw), `"`+body+`"`) {
 			t.Fatalf("body %q reached the form: %s", body, raw)
@@ -153,7 +155,7 @@ func TestPrsTreeKeepsOrderAndDigestsButNoBodies(t *testing.T) {
 	if th.Comments[0].Digest != c1.Digest || th.Comments[1].State != "PENDING" || th.Comments[0].Author != "a" {
 		t.Fatalf("comment identity lost: %+v %+v", th.Comments[0], th.Comments[1])
 	}
-	if r := got["acme/widget#1"].Reviews["R1"]; r == nil || r.digest() != bodyDigest("lgtm") || r.State != "APPROVED" {
+	if r := got["acme/widget#1"].Reviews["R1"]; r == nil || r.BodyDigest() != model.BodyDigest("lgtm") || r.State != "APPROVED" {
 		t.Fatalf("review: %+v", r)
 	}
 
@@ -170,13 +172,13 @@ func TestPrsTreeKeepsOrderAndDigestsButNoBodies(t *testing.T) {
 	if len(ot.Comments) != 2 || ot.Comments[0].ID != "A" || ot.Comments[0].State != "PENDING" || !ot.IsResolved || ot.Comments[1].Digest != "bbbb" {
 		t.Fatalf("old thread: %+v", ot)
 	}
-	if r := o["acme/widget#1"].Reviews["R"]; r.digest() != bodyDigest("hm") {
-		t.Fatalf("old review digest %q", r.digest())
+	if r := o["acme/widget#1"].Reviews["R"]; r.BodyDigest() != model.BodyDigest("hm") {
+		t.Fatalf("old review digest %q", r.BodyDigest())
 	}
 }
 
 func TestReapPromotedClosesItemsOfFinishedCritics(t *testing.T) {
-	critics := []*Critic{{Name: "live"}, {Name: "gone-soon", Runtime: Runtime{Archived: true}}, {Name: "paused", Runtime: Runtime{Stopped: true}}}
+	critics := []*model.Critic{{Name: "live"}, {Name: "gone-soon", Runtime: model.Runtime{Archived: true}}, {Name: "paused", Runtime: model.Runtime{Stopped: true}}}
 	items := []QueueItem{
 		{ID: "a", State: QPromoted, Critic: "live"},
 		{ID: "b", State: QPromoted, Critic: "gone-soon"},
@@ -192,8 +194,8 @@ func TestReapPromotedClosesItemsOfFinishedCritics(t *testing.T) {
 		t.Fatalf("active = %d; a stopped or archived critic must not hold a slot", n)
 	}
 	// A Teams chat or author watch is not a PR review: it holds no queue slot.
-	critics = append(critics, &Critic{Name: "chat", Mode: ModeTeams, Source: "teams-chat"},
-		&Critic{Name: "author", Mode: ModeAuthor, Source: "github-author"}, &Critic{Name: "pr2", Mode: ModeReview})
+	critics = append(critics, &model.Critic{Name: "chat", Mode: model.ModeTeams, Source: "teams-chat"},
+		&model.Critic{Name: "author", Mode: model.ModeAuthor, Source: "github-author"}, &model.Critic{Name: "pr2", Mode: model.ModeReview})
 	if n := activeCritics(critics); n != 2 {
 		t.Fatalf("active = %d; want 2 (live + pr2): non-PR sources must not hold a slot", n)
 	}
@@ -201,7 +203,7 @@ func TestReapPromotedClosesItemsOfFinishedCritics(t *testing.T) {
 
 // ---------- live: the form is the state ----------
 
-func liveCritic(t *testing.T, f *Figaro, write bool) (*Store, *Critic, *Snapshot) {
+func liveCritic(t *testing.T, f *Figaro, write bool) (*Store, *model.Critic, *model.Snapshot) {
 	t.Helper()
 	ctx := context.Background()
 	st, err := NewStore(f)
@@ -221,7 +223,7 @@ func liveCritic(t *testing.T, f *Figaro, write bool) (*Store, *Critic, *Snapshot
 	w.FormID = id
 	w.Runtime.Round = 7
 	snap.Critic, snap.Round, snap.TakenAt, snap.Complete = w.Name, 7, time.Now().UTC().Truncate(time.Second), true
-	snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments = []*Comment{{ID: "C1", Author: "friend", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}}
+	snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments = []*model.Comment{{ID: "C1", Author: "friend", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}}
 	if err := st.Save(ctx, w, snap, nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -241,7 +243,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments = append(snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments,
-		&Comment{ID: "C2", Author: "amy", Body: "second", CreatedAt: "2026-10-20T02:00:00Z"})
+		&model.Comment{ID: "C2", Author: "amy", Body: "second", CreatedAt: "2026-10-20T02:00:00Z"})
 	w.Runtime.Round = 8
 	if err := st.Save(ctx, w, snap, nil); err != nil {
 		t.Fatal(err)
@@ -290,26 +292,26 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 	}
 }
 
-func writePost(t *testing.T, st *Store, w *Critic, id string, p Post) {
+func writePost(t *testing.T, st *Store, w *model.Critic, id string, p model.Post) {
 	t.Helper()
 	err := st.commit(context.Background(), w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
-		posts := objectOf(cur["post"])
-		posts[id] = mustJSON(p)
-		return map[string]json.RawMessage{"post": mustJSON(posts)}, nil
+		posts := model.ObjectOf(cur["post"])
+		posts[id] = model.MustJSON(p)
+		return map[string]json.RawMessage{"post": model.MustJSON(posts)}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func readPost(t *testing.T, f *Figaro, w *Critic, id string) Post {
+func readPost(t *testing.T, f *Figaro, w *model.Critic, id string) model.Post {
 	t.Helper()
 	form, err := f.Form(context.Background(), w.FormID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var posts map[string]Post
-	_ = json.Unmarshal(mustJSON(form["post"]), &posts)
+	var posts map[string]model.Post
+	_ = json.Unmarshal(model.MustJSON(form["post"]), &posts)
 	return posts[id]
 }
 
@@ -332,7 +334,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 		}
 	}
 
-	writePost(t, st, w, "p1", Post{PR: "acme/widget#1", Body: "hello", ReplyTo: "PRRT_1"})
+	writePost(t, st, w, "p1", model.Post{PR: "acme/widget#1", Body: "hello", ReplyTo: "PRRT_1"})
 	round("post-fail")
 	if got := readPost(t, f, w, "p1"); got.Sent != nil || got.Error == "" || got.Attempts != 1 {
 		t.Fatalf("after a failed send: %+v", got)
@@ -357,8 +359,8 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	}
 
 	// A post that reached the forge but was never acked is found by its marker.
-	writePost(t, st, w, "p2", Post{PR: "acme/widget#1", Body: "again"})
-	snap.PRs["acme/widget#1"].Comments["IC9"] = &Comment{ID: "IC9", Author: "jack", URL: "https://x/pull/1#ic9",
+	writePost(t, st, w, "p2", model.Post{PR: "acme/widget#1", Body: "again"})
+	snap.PRs["acme/widget#1"].Comments["IC9"] = &model.Comment{ID: "IC9", Author: "jack", URL: "https://x/pull/1#ic9",
 		Body: "again\n\n" + postMarker(w.Name, "p2")}
 	round("post-ok")
 	if got := readPost(t, f, w, "p2"); got.Sent == nil || !got.Sent.Recovered || got.Sent.URL != "https://x/pull/1#ic9" {
@@ -370,7 +372,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 
 	// Authority is checked at send time too.
 	w.Write = false
-	writePost(t, st, w, "p3", Post{PR: "acme/widget#1", Body: "nope"})
+	writePost(t, st, w, "p3", model.Post{PR: "acme/widget#1", Body: "nope"})
 	round("post-ok")
 	if got := readPost(t, f, w, "p3"); got.Refused == "" || got.Sent != nil {
 		t.Fatalf("a read-only critic's post was not refused: %+v", got)
@@ -434,7 +436,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 		}
 	}
 
-	writePost(t, st, w, "r1", Post{PR: "acme/widget#1", Body: "Fixed at abc.", ReplyTo: "PRRT_1", Resolve: true})
+	writePost(t, st, w, "r1", model.Post{PR: "acme/widget#1", Body: "Fixed at abc.", ReplyTo: "PRRT_1", Resolve: true})
 	round("post-ok")
 	if got := readPost(t, f, w, "r1"); got.Sent == nil || got.Resolved == "" || got.Error != "" {
 		t.Fatalf("reply+resolve: %+v", got)
@@ -443,7 +445,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 		t.Fatalf("reply+resolve made %d replies, %d resolves", calls("addPullRequestReviewThreadReply"), calls("resolveReviewThread"))
 	}
 
-	writePost(t, st, w, "r2", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
+	writePost(t, st, w, "r2", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
 	round("post-ok")
 	if got := readPost(t, f, w, "r2"); got.Sent != nil || got.Resolved == "" {
 		t.Fatalf("resolve alone: %+v", got)
@@ -453,7 +455,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 	}
 
 	// The reply lands, the resolve fails: next round resolves without replying again.
-	writePost(t, st, w, "r3", Post{PR: "acme/widget#1", Body: "Declined: out of scope.", ReplyTo: "PRRT_1", Resolve: true})
+	writePost(t, st, w, "r3", model.Post{PR: "acme/widget#1", Body: "Declined: out of scope.", ReplyTo: "PRRT_1", Resolve: true})
 	round("resolve-fail")
 	if got := readPost(t, f, w, "r3"); got.Sent == nil || got.Resolved != "" || got.Error == "" {
 		t.Fatalf("after a failed resolve: %+v", got)
@@ -468,7 +470,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 
 	// Already resolved on the forge: acked without a call.
 	snap.PRs["acme/widget#1"].Threads["PRRT_1"].IsResolved = true
-	writePost(t, st, w, "r4", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
+	writePost(t, st, w, "r4", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true})
 	round("post-ok")
 	if got := readPost(t, f, w, "r4"); got.Resolved == "" {
 		t.Fatalf("already-resolved thread not acked: %+v", got)
@@ -503,8 +505,8 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	}
 
 	th := snap.PRs["acme/widget#1"].Threads["PRRT_1"]
-	th.Comments = append(th.Comments, &Comment{ID: "C2", Author: "jack", Body: "reply", CreatedAt: "2026-10-20T03:00:00Z"})
-	writePost(t, st, w, "k1", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true})
+	th.Comments = append(th.Comments, &model.Comment{ID: "C2", Author: "jack", Body: "reply", CreatedAt: "2026-10-20T03:00:00Z"})
+	writePost(t, st, w, "k1", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1", Resolve: true})
 	round("post-ok")
 	got := readPost(t, f, w, "k1")
 	if got.Reacted == "" || got.Resolved == "" || got.Sent != nil || got.Error != "" {
@@ -519,7 +521,7 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	}
 
 	// A failed reaction is retried; the resolve that follows waits for it.
-	writePost(t, st, w, "k2", Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "heart", Resolve: true})
+	writePost(t, st, w, "k2", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "heart", Resolve: true})
 	round("post-fail")
 	if got := readPost(t, f, w, "k2"); got.Reacted != "" || got.Resolved != "" || got.Error == "" {
 		t.Fatalf("after a failed reaction: %+v", got)
@@ -548,7 +550,7 @@ func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
 		}
 	}
 
-	writePost(t, st, w, "q1", Post{PR: "acme/widget#1", Body: "Fixed.", ReplyTo: "PRRT_1"})
+	writePost(t, st, w, "q1", model.Post{PR: "acme/widget#1", Body: "Fixed.", ReplyTo: "PRRT_1"})
 	round("reply-pending")
 	got := readPost(t, f, w, "q1")
 	if got.Sent != nil || !strings.Contains(got.Refused, "landed in pending review 213120916") {
@@ -559,7 +561,7 @@ func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
 		t.Fatalf("a reply that landed pending was retried: %d calls", calls())
 	}
 
-	writePost(t, st, w, "q2", Post{PR: "acme/widget#1", Body: "Review.", Event: "COMMENT"})
+	writePost(t, st, w, "q2", model.Post{PR: "acme/widget#1", Body: "Review.", Event: "COMMENT"})
 	round("post-422")
 	if got := readPost(t, f, w, "q2"); got.Attempts != 1 || !strings.Contains(got.Refused, "HTTP 422") {
 		t.Fatalf("a 422 was not refused at once: %+v", got)

@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // The selfcheck is the instrument a develop-mode seat runs every heartbeat.
@@ -31,7 +33,7 @@ func Selfcheck(ctx context.Context, st *Store, fig *Figaro, out io.Writer, only 
 		return 0, err
 	}
 	if only != "" {
-		var f []*Critic
+		var f []*model.Critic
 		for _, w := range critics {
 			if w.Name == only {
 				f = append(f, w)

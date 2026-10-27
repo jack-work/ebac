@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // Promote is the queue's heartbeat: take pending PRs while under budget, turn
@@ -180,25 +182,25 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 // createCritic is the queue's entrance to the same path `ebac add` uses.
 func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueItem) (string, error) {
 	name := criticNameFor(it)
-	if err := ValidName(name); err != nil {
+	if err := model.ValidName(name); err != nil {
 		return "", err
 	}
 	if _, err := p.Store.LoadCritic(ctx, name); err == nil {
 		return "", fmt.Errorf("critic %q already exists", name)
 	}
 
-	mode := Mode(cfg.Mode)
+	mode := model.Mode(cfg.Mode)
 	if it.Mode != "" {
-		mode = Mode(it.Mode)
+		mode = model.Mode(it.Mode)
 	}
 	interval, err := time.ParseDuration(cfg.Interval)
 	if err != nil {
 		interval = 5 * time.Minute
 	}
 
-	c := &Critic{
+	c := &model.Critic{
 		Name: name, Mode: mode, Host: it.Ref().HostOf(p.Host), CreatedAt: time.Now().UTC(),
-		IssueRepo: cfg.IssueRepo, Stop: DefaultStop(), EverySec: int(interval.Seconds()),
+		IssueRepo: cfg.IssueRepo, Stop: model.DefaultStop(), EverySec: int(interval.Seconds()),
 	}
 	c.AddPR(it.Ref())
 
@@ -234,7 +236,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 	return name, nil
 }
 
-func (p *Promoter) coveredBy(critics []*Critic, key PRKey) string {
+func (p *Promoter) coveredBy(critics []*model.Critic, key model.PRKey) string {
 	for _, c := range critics {
 		if c.Runtime.Archived {
 			continue
@@ -257,7 +259,7 @@ func criticNameFor(it QueueItem) string {
 // activeCritics counts live PR review critics: the queue's budget is for
 // them. A Teams chat or author watch is not a PR review and holds no slot
 // (both did until 2026-10-22, so the budget of 3 quietly shrank).
-func activeCritics(critics []*Critic) int {
+func activeCritics(critics []*model.Critic) int {
 	n := 0
 	for _, c := range critics {
 		if !c.Runtime.Archived && !c.Runtime.Stopped && c.SourceName() == "github-pr" {
@@ -268,7 +270,7 @@ func activeCritics(critics []*Critic) int {
 }
 
 // reapPromoted closes out promoted items whose critic is archived or gone.
-func reapPromoted(items []QueueItem, critics []*Critic) []QueueItem {
+func reapPromoted(items []QueueItem, critics []*model.Critic) []QueueItem {
 	live := map[string]bool{}
 	for _, c := range critics {
 		if !c.Runtime.Archived {

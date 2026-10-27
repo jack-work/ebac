@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // GitHub access goes through the authenticated `gh` CLI rather than a token
@@ -290,10 +291,10 @@ type gqlResp struct {
 // FetchPR returns one PR's state. The returned PRState carries Complete=false
 // if any page was left unread, which forbids the differ from inferring
 // deletions for it.
-func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRState, error) {
-	st := &PRState{
-		Key: MakePRKey(owner, repo, number), Owner: owner, Repo: repo, Number: number,
-		Threads: map[string]*Thread{}, Reviews: map[string]*Review{}, Comments: map[string]*Comment{}, Complete: true,
+func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*model.PRState, error) {
+	st := &model.PRState{
+		Key: model.MakePRKey(owner, repo, number), Owner: owner, Repo: repo, Number: number,
+		Threads: map[string]*model.Thread{}, Reviews: map[string]*model.Review{}, Comments: map[string]*model.Comment{}, Complete: true,
 	}
 
 	cursor := ""
@@ -335,13 +336,13 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 		// Pending is asked for on every page and is the same each time.
 		st.Pending = st.Pending[:0]
 		for _, pn := range pr.Pending.Nodes {
-			st.Pending = append(st.Pending, PendingReview{ID: pn.ID, DatabaseID: pn.DatabaseID,
+			st.Pending = append(st.Pending, model.PendingReview{ID: pn.ID, DatabaseID: pn.DatabaseID,
 				Author: pn.Author.Login, CreatedAt: pn.CreatedAt, Comments: pn.Comments.TotalCount})
 		}
 		for _, rv := range pr.Reviews.Nodes {
-			st.Reviews[rv.ID] = &Review{
+			st.Reviews[rv.ID] = &model.Review{
 				ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
-				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body, Digest: bodyDigest(rv.Body),
+				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body, Digest: model.BodyDigest(rv.Body),
 			}
 		}
 
@@ -362,18 +363,18 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 				st.Complete = false
 			}
 			for _, cn := range pr.Comments.Nodes {
-				c := &Comment{
+				c := &model.Comment{
 					ID: cn.ID, URL: cn.URL, Body: cn.Body,
 					CreatedAt: cn.CreatedAt, UpdatedAt: cn.UpdatedAt,
 					Author: cn.Author.Login, IsBot: isBot(cn.Author),
 				}
-				c.computeDigest()
+				c.ComputeDigest()
 				st.Comments[c.ID] = c
 			}
 		}
 
 		for _, tn := range pr.ReviewThreads.Nodes {
-			t := &Thread{ID: tn.ID, Path: tn.Path, Line: tn.Line, IsResolved: tn.IsResolved, IsOutdated: tn.IsOutdated}
+			t := &model.Thread{ID: tn.ID, Path: tn.Path, Line: tn.Line, IsResolved: tn.IsResolved, IsOutdated: tn.IsOutdated}
 			if tn.Comments.PageInfo.HasNextPage {
 				// More than 100 comments on one thread. Rather than
 				// silently truncate — which would make every unread
@@ -381,7 +382,7 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 				st.Complete = false
 			}
 			for _, cn := range tn.Comments.Nodes {
-				c := &Comment{
+				c := &model.Comment{
 					ID: cn.ID, URL: cn.URL, Body: cn.Body,
 					CreatedAt: cn.CreatedAt, UpdatedAt: cn.UpdatedAt,
 					Author: cn.Author.Login, IsBot: isBot(cn.Author),
@@ -389,7 +390,7 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*PRSt
 				if cn.State == "PENDING" {
 					c.State = "PENDING"
 				}
-				c.computeDigest()
+				c.ComputeDigest()
 				t.Comments = append(t.Comments, c)
 			}
 			st.Threads[t.ID] = t
@@ -418,7 +419,7 @@ const (
 
 // markStamped flags person-login reviews that a bot produced: either the body
 // says so, or a bot submitted the same state on the same PR just before.
-func markStamped(reviews map[string]*Review) {
+func markStamped(reviews map[string]*model.Review) {
 	for _, r := range reviews {
 		if r.IsBot {
 			continue
@@ -442,7 +443,7 @@ func markStamped(reviews map[string]*Review) {
 }
 
 // ListPRs finds pull requests matching a filter, for `ebac discover`.
-func (g *GH) ListPRs(ctx context.Context, repo, author, state string, limit int) ([]PRRef, error) {
+func (g *GH) ListPRs(ctx context.Context, repo, author, state string, limit int) ([]model.PRRef, error) {
 	args := []string{"pr", "list", "--repo", repo, "--state", state,
 		"--limit", strconv.Itoa(limit), "--json", "number,url,title,isDraft,author,updatedAt"}
 	if author != "" {
@@ -466,9 +467,9 @@ func (g *GH) ListPRs(ctx context.Context, repo, author, state string, limit int)
 		return nil, fmt.Errorf("decode pr list: %w", err)
 	}
 	owner, name, _ := strings.Cut(repo, "/")
-	refs := make([]PRRef, 0, len(rows))
+	refs := make([]model.PRRef, 0, len(rows))
 	for _, r := range rows {
-		refs = append(refs, PRRef{
+		refs = append(refs, model.PRRef{
 			Owner: owner, Repo: name, Number: r.Number, URL: r.URL,
 			Title: r.Title, Author: r.Author.Login, IsDraft: r.IsDraft,
 		})
@@ -507,81 +508,4 @@ func isBot(a gqlAuthor) bool {
 		return true
 	}
 	return false
-}
-
-type PRRef struct {
-	Owner   string `json:"owner"`
-	Repo    string `json:"repo"`
-	Number  int    `json:"number"`
-	URL     string `json:"url"`
-	Title   string `json:"title,omitempty"`
-	Author  string `json:"author,omitempty"`
-	IsDraft bool   `json:"is_draft,omitempty"`
-}
-
-func (r PRRef) Key() PRKey { return MakePRKey(r.Owner, r.Repo, r.Number) }
-
-// HostOf is the forge named by the ref's URL, or fallback when it carries none.
-func (r PRRef) HostOf(fallback string) string {
-	if u, err := url.Parse(r.URL); err == nil && u.Host != "" {
-		return u.Host
-	}
-	return fallback
-}
-
-// forgeHost is the single forge a set of refs lives on. A critic polls one host.
-func forgeHost(refs []PRRef, fallback string) (string, error) {
-	host := ""
-	for _, r := range refs {
-		h := r.HostOf(fallback)
-		if host != "" && h != host {
-			return "", fmt.Errorf("PRs span two forges (%s, %s): use one critic per forge", host, h)
-		}
-		host = h
-	}
-	if host == "" {
-		return fallback, nil
-	}
-	return host, nil
-}
-
-func (r PRRef) Slug() string { return fmt.Sprintf("%s/%s", r.Owner, r.Repo) }
-
-// ParsePRRef accepts a browser URL or owner/repo#number.
-func ParsePRRef(s string) (PRRef, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return PRRef{}, fmt.Errorf("empty PR reference")
-	}
-	if strings.Contains(s, "://") {
-		u := strings.TrimSuffix(s, "/")
-		parts := strings.Split(u, "/")
-		// .../<owner>/<repo>/pull/<n>
-		for i := 0; i+1 < len(parts); i++ {
-			if parts[i] == "pull" || parts[i] == "pulls" {
-				if i < 2 {
-					break
-				}
-				n, err := strconv.Atoi(parts[i+1])
-				if err != nil {
-					return PRRef{}, fmt.Errorf("bad PR number in %q", s)
-				}
-				return PRRef{Owner: parts[i-2], Repo: parts[i-1], Number: n, URL: s}, nil
-			}
-		}
-		return PRRef{}, fmt.Errorf("not a pull request URL: %q", s)
-	}
-	slug, num, ok := strings.Cut(s, "#")
-	if !ok {
-		return PRRef{}, fmt.Errorf("expected owner/repo#number or a URL, got %q", s)
-	}
-	owner, repo, ok := strings.Cut(slug, "/")
-	if !ok {
-		return PRRef{}, fmt.Errorf("expected owner/repo#number, got %q", s)
-	}
-	n, err := strconv.Atoi(num)
-	if err != nil {
-		return PRRef{}, fmt.Errorf("bad PR number in %q", s)
-	}
-	return PRRef{Owner: owner, Repo: repo, Number: n}, nil
 }

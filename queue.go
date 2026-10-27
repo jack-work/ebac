@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // The queue is a FORM, not a file.
@@ -65,10 +67,10 @@ type QueueItem struct {
 }
 
 func (q QueueItem) Key() string { return queueItemPfx + q.ID }
-func (q QueueItem) Ref() PRRef {
-	return PRRef{Owner: q.Owner, Repo: q.Repo, Number: q.Number, URL: q.URL}
+func (q QueueItem) Ref() model.PRRef {
+	return model.PRRef{Owner: q.Owner, Repo: q.Repo, Number: q.Number, URL: q.URL}
 }
-func (q QueueItem) PRKey() PRKey { return MakePRKey(q.Owner, q.Repo, q.Number) }
+func (q QueueItem) PRKey() model.PRKey { return model.MakePRKey(q.Owner, q.Repo, q.Number) }
 
 type QueueConfig struct {
 	MaxActive int    `json:"max_active"`
@@ -79,7 +81,7 @@ type QueueConfig struct {
 }
 
 func DefaultQueueConfig() QueueConfig {
-	return QueueConfig{MaxActive: 3, Mode: string(ModeReview), Outfit: "sonnet", Interval: "5m"}
+	return QueueConfig{MaxActive: 3, Mode: string(model.ModeReview), Outfit: "sonnet", Interval: "5m"}
 }
 
 // ---------- the form ----------
@@ -197,7 +199,7 @@ func SortQueue(items []QueueItem) {
 // wasteful, it is two reviewers replying to the same human in the same
 // thread. Measured the hard way: promoting #23650 and #23654 gave them
 // critics of their own while the `aether` critic was already watching both.
-func Enqueue(ctx context.Context, st *Store, fig *Figaro, formID, host string, ref PRRef, priority int, mode, note string) (QueueItem, error) {
+func Enqueue(ctx context.Context, st *Store, fig *Figaro, formID, host string, ref model.PRRef, priority int, mode, note string) (QueueItem, error) {
 	// 1. Already watched by a live critic?
 	if critics, err := st.ListCritics(ctx); err == nil {
 		for _, c := range critics {
@@ -242,7 +244,7 @@ func Enqueue(ctx context.Context, st *Store, fig *Figaro, formID, host string, r
 	return it, fig.SetJSON(ctx, formID, it.Key(), it)
 }
 
-func queueID(ref PRRef) string {
+func queueID(ref model.PRRef) string {
 	s := fmt.Sprintf("%s_%s_%d", ref.Owner, ref.Repo, ref.Number)
 	var b strings.Builder
 	for _, r := range s {
@@ -304,7 +306,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("give at least one --pr")
 		}
 		for _, raw := range prs {
-			ref, err := ParsePRRef(raw)
+			ref, err := model.ParsePRRef(raw)
 			if err != nil {
 				return err
 			}
@@ -401,7 +403,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		fmt.Fprintln(tw, "ID\tPR\tPRIO\tSEQ\tSTATE\tCRITIC\tNOTE")
 		for _, it := range items {
 			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
-				it.ID, it.PRKey(), it.Priority, it.Seq, it.State, it.Critic, firstLine(it.Note))
+				it.ID, it.PRKey(), it.Priority, it.Seq, it.State, it.Critic, model.FirstLine(it.Note))
 		}
 		tw.Flush()
 		return nil

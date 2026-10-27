@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // authorWatch follows one GitHub user's pull requests in a list of repos:
@@ -19,28 +21,14 @@ type authorWatch struct{}
 
 func (authorWatch) Name() string { return "github-author" }
 
-func (authorWatch) Round(ctx context.Context, p *Poller, w *Critic) error {
+func (authorWatch) Round(ctx context.Context, p *Poller, w *model.Critic) error {
 	return pollAuthor(ctx, p, w)
 }
-
-const ModeAuthor Mode = "author"
 
 const (
 	authorTitleBytes = 120
 	authorListLimit  = 200
 )
-
-// AuthorRef is an author watch's configuration.
-type AuthorRef struct {
-	Login string     `json:"login"`
-	Since time.Time  `json:"since"`
-	Until *time.Time `json:"until,omitempty"`
-	Repos []string   `json:"repos"`
-	// AlertRole, when set, is the role (@form) woken instead of the critic's
-	// own role form; its target-aria is resolved at every send, so the
-	// alert follows that role's succession without a recast.
-	AlertRole string `json:"alert_role,omitempty"`
-}
 
 // AuthoredPR is one PR on the form: short fields only.
 type AuthoredPR struct {
@@ -58,70 +46,59 @@ type AuthoredPR struct {
 
 func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number) }
 
-// AuthorState lives under system.ebac.runtime: what each PR looked like last round.
-type AuthorState struct {
-	Seen map[string]authorSeen `json:"seen,omitempty"`
-}
-
-type authorSeen struct {
-	State string `json:"s"`
-	Draft bool   `json:"d,omitempty"`
-	Head  string `json:"h"`
-}
-
 const (
-	EvAuthorNew      EventKind = "author_pr_new"
-	EvAuthorMerged   EventKind = "author_pr_merged"
-	EvAuthorDraft    EventKind = "author_pr_draft"
-	EvAuthorClosed   EventKind = "author_pr_closed"
-	EvAuthorReopened EventKind = "author_pr_reopened"
-	EvAuthorHead     EventKind = "author_pr_head_moved"
+	EvAuthorNew      model.EventKind = "author_pr_new"
+	EvAuthorMerged   model.EventKind = "author_pr_merged"
+	EvAuthorDraft    model.EventKind = "author_pr_draft"
+	EvAuthorClosed   model.EventKind = "author_pr_closed"
+	EvAuthorReopened model.EventKind = "author_pr_reopened"
+	EvAuthorHead     model.EventKind = "author_pr_head_moved"
 )
 
 // authorDiff compares this round's PRs with what was seen. The first round
 // only records: a watch that starts by announcing a week of PRs is noise.
-func authorDiff(st *AuthorState, prs []AuthoredPR) []Event {
+func authorDiff(st *model.AuthorState, prs []AuthoredPR) []model.Event {
 	first := st.Seen == nil
 	if first {
-		st.Seen = map[string]authorSeen{}
+		st.Seen = map[string]model.AuthorSeen{}
 	}
-	var events []Event
-	ev := func(kind EventKind, tier Tier, pr AuthoredPR) {
-		events = append(events, Event{Kind: kind, Tier: tier, PR: PRKey(pr.Key()), URL: pr.URL, Detail: pr.Title})
+	var events []model.Event
+	ev := func(kind model.EventKind, tier model.Tier, pr AuthoredPR) {
+		events = append(events, model.Event{Kind: kind, Tier: tier, PR: model.PRKey(pr.Key()), URL: pr.URL, Detail: pr.Title})
 	}
 	for _, pr := range prs {
 		k := pr.Key()
 		prev, seen := st.Seen[k]
-		st.Seen[k] = authorSeen{State: pr.State, Draft: pr.Draft, Head: pr.Head}
+		st.Seen[k] = model.AuthorSeen{State: pr.State, Draft: pr.Draft, Head: pr.Head}
 		if first {
 			continue
 		}
 		if !seen {
 			switch {
 			case pr.State == "MERGED":
-				ev(EvAuthorMerged, TierWake, pr) // opened and merged between two rounds
+				ev(EvAuthorMerged, model.TierWake, pr) // opened and merged between two rounds
 			case pr.Draft:
-				ev(EvAuthorDraft, TierRecord, pr)
+				ev(EvAuthorDraft, model.TierRecord, pr)
 			case pr.State == "OPEN":
-				ev(EvAuthorNew, TierWake, pr)
+				ev(EvAuthorNew, model.TierWake, pr)
 			default:
-				ev(EvAuthorClosed, TierRecord, pr)
+				ev(EvAuthorClosed, model.TierRecord, pr)
 			}
 			continue
 		}
 		switch {
 		case prev.State != "MERGED" && pr.State == "MERGED":
-			ev(EvAuthorMerged, TierWake, pr)
+			ev(EvAuthorMerged, model.TierWake, pr)
 		case prev.State != "CLOSED" && pr.State == "CLOSED":
-			ev(EvAuthorClosed, TierRecord, pr)
+			ev(EvAuthorClosed, model.TierRecord, pr)
 		case prev.State != "OPEN" && pr.State == "OPEN":
-			ev(EvAuthorReopened, TierRecord, pr)
+			ev(EvAuthorReopened, model.TierRecord, pr)
 		}
 		if pr.State == "OPEN" && prev.Draft && !pr.Draft {
-			ev(EvAuthorNew, TierWake, pr) // a draft turning ready counts as new
+			ev(EvAuthorNew, model.TierWake, pr) // a draft turning ready counts as new
 		}
 		if prev.Head != "" && pr.Head != prev.Head && pr.State == "OPEN" {
-			ev(EvAuthorHead, TierRecord, pr)
+			ev(EvAuthorHead, model.TierRecord, pr)
 		}
 	}
 	return events
@@ -156,7 +133,7 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 	}
 	prs := make([]AuthoredPR, 0, len(rows))
 	for _, r := range rows {
-		title, _ := cutBody(r.Title, authorTitleBytes)
+		title, _ := model.CutBody(r.Title, authorTitleBytes)
 		head := r.Head
 		if len(head) > 12 {
 			head = head[:12]
@@ -171,7 +148,7 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 	return prs, nil
 }
 
-func pollAuthor(ctx context.Context, p *Poller, w *Critic) error {
+func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
 		return fmt.Errorf("%s: author watch without a login or repos", w.Name)
@@ -187,7 +164,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *Critic) error {
 		p.GH.Host = w.Host // the poller's client starts on its default host; the token follows the host
 	}
 	if w.Runtime.Author == nil {
-		w.Runtime.Author = &AuthorState{}
+		w.Runtime.Author = &model.AuthorState{}
 	}
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
@@ -222,7 +199,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *Critic) error {
 		return err
 	}
 	if err := p.Store.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
-		next := mustJSON(authored)
+		next := model.MustJSON(authored)
 		if string(cur["authored"]) == string(next) {
 			return nil, nil
 		}
@@ -238,23 +215,14 @@ func pollAuthor(ctx context.Context, p *Poller, w *Critic) error {
 	return derr
 }
 
-// alertTarget is who an author watch wakes: the configured role, else the
-// critic's own role form.
-func (w *Critic) alertTarget() string {
-	if w.Author != nil && w.Author.AlertRole != "" {
-		return w.Author.AlertRole
-	}
-	return w.FormID
-}
-
-func deliverAuthor(ctx context.Context, p *Poller, w *Critic) error {
-	pending := &Delta{Events: w.Runtime.PendingEvents}
+func deliverAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
+	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
 		w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
 		return nil
 	}
-	target := w.alertTarget()
+	target := w.AlertTarget()
 	if !p.roleHasHolder(ctx, target) {
 		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
@@ -273,18 +241,18 @@ func deliverAuthor(ctx context.Context, p *Poller, w *Critic) error {
 	return nil
 }
 
-func authorBrief(w *Critic, events []Event) string {
+func authorBrief(w *model.Critic, events []model.Event) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ebac %s round %d: PRs by %s.\n", w.Name, w.Runtime.Round, w.Author.Login)
 	for _, e := range events {
-		if e.Tier != TierWake {
+		if e.Tier != model.TierWake {
 			continue
 		}
 		what := "NEW"
 		if e.Kind == EvAuthorMerged {
 			what = "MERGED"
 		}
-		fmt.Fprintf(&b, "- %s %s %s %s\n", what, e.PR, e.URL, firstLine(e.Detail))
+		fmt.Fprintf(&b, "- %s %s %s %s\n", what, e.PR, e.URL, model.FirstLine(e.Detail))
 	}
 	if n := len(events) - countWake(events); n > 0 {
 		fmt.Fprintf(&b, "(%d background change(s): closed, reopened, head moved or new draft.)\n", n)
@@ -294,17 +262,17 @@ func authorBrief(w *Critic, events []Event) string {
 	return b.String()
 }
 
-func countWake(events []Event) int {
+func countWake(events []model.Event) int {
 	n := 0
 	for _, e := range events {
-		if e.Tier == TierWake {
+		if e.Tier == model.TierWake {
 			n++
 		}
 	}
 	return n
 }
 
-func authorCharge(w *Critic) string {
+func authorCharge(w *model.Critic) string {
 	a := w.Author
 	return "YOUR JOB — AUTHOR WATCH\n" +
 		fmt.Sprintf("  You are told when %s publishes a NEW pull request (a draft turning ready counts) or one is MERGED,\n", a.Login) +
@@ -327,13 +295,13 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 5*time.Minute, "poll interval")
 	_ = fs.Parse(args)
-	if err := ValidName(*name); err != nil {
+	if err := model.ValidName(*name); err != nil {
 		return err
 	}
 	if *login == "" || *repos == "" || *since == "" {
 		return fmt.Errorf("--login, --repo and --since are required")
 	}
-	ref := &AuthorRef{Login: *login, AlertRole: *alert}
+	ref := &model.AuthorRef{Login: *login, AlertRole: *alert}
 	var err error
 	if ref.Since, err = time.Parse(time.RFC3339, *since); err != nil {
 		return fmt.Errorf("--since: %w", err)
@@ -366,8 +334,8 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	w := &Critic{Name: *name, Mode: ModeAuthor, Source: "github-author", Host: *host, CreatedAt: time.Now().UTC(),
-		FigaroSock: g.figaro, EverySec: int(every.Seconds()), Author: ref, Stop: StopConditions{}}
+	w := &model.Critic{Name: *name, Mode: model.ModeAuthor, Source: "github-author", Host: *host, CreatedAt: time.Now().UTC(),
+		FigaroSock: g.figaro, EverySec: int(every.Seconds()), Author: ref, Stop: model.StopConditions{}}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
 		return fmt.Errorf("mint role form: %w", err)
@@ -377,7 +345,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if *aria != "" {
-		if err := ValidAriaID(*aria); err != nil {
+		if err := model.ValidAriaID(*aria); err != nil {
 			return fmt.Errorf("critic created (role %s), but --aria is bad: %w", formID, err)
 		}
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
@@ -388,6 +356,6 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("author watch %q: role %s, %s in %s since %s, alert %s, every %s\n", *name, formID, ref.Login,
-		strings.Join(ref.Repos, ","), ref.Since.UTC().Format(time.RFC3339), w.alertTarget(), *every)
+		strings.Join(ref.Repos, ","), ref.Since.UTC().Format(time.RFC3339), w.AlertTarget(), *every)
 	return nil
 }

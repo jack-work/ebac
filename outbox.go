@@ -10,61 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
-
-// The outbox: the review interface, through the form.
-//
-// A seat (or `ebac post`) writes post.<id> onto the critic's form. Each round
-// the poller reads every patch since its watermark, posts what is new to the
-// forge, and writes the receipt back onto the same post, in the same patch as
-// the new watermark. A post that did not reach an end gets a receipt
-// (attempts, error) too, and that receipt is itself a patch past the
-// watermark, so the next round sees the post again: retry needs no other
-// bookkeeping. If the round's patch is lost, neither moves. A hidden marker in
-// every body makes a post that landed but was never acked (a crash, a second
-// ebac) recognisable instead of posted twice.
-
-const maxPostAttempts = 5
-
-type Post struct {
-	PR      string `json:"pr"`
-	Body    string `json:"body"`
-	ReplyTo string `json:"reply_to,omitempty"` // review thread id: reply in that thread
-	Path    string `json:"path,omitempty"`     // with Line: a new inline comment
-	Line    int    `json:"line,omitempty"`
-	Event   string `json:"event,omitempty"` // COMMENT | APPROVE: submit as a review
-	// Resolve, with ReplyTo, resolves that thread after the reply (or
-	// alone, when Body is empty).
-	Resolve bool `json:"resolve,omitempty"`
-	// React, with ReplyTo, reacts to the comment that opened that thread.
-	React string `json:"react,omitempty"`
-
-	Sent     *PostReceipt `json:"sent,omitempty"`
-	Resolved string       `json:"resolved,omitempty"` // when the thread was resolved
-	Reacted  string       `json:"reacted,omitempty"`  // when the reaction landed
-	Refused  string       `json:"refused,omitempty"`
-	Error    string       `json:"error,omitempty"`
-	Attempts int          `json:"attempts,omitempty"`
-}
-
-type PostReceipt struct {
-	URL string `json:"url"`
-	At  string `json:"at"`
-	// Recovered: the marker was already on the forge, so nothing was posted.
-	Recovered bool `json:"recovered,omitempty"`
-}
-
-func (p *Post) hasBody() bool { return strings.TrimSpace(p.Body) != "" }
-
-func (p *Post) terminal() bool {
-	if p.Refused != "" || p.Attempts >= maxPostAttempts {
-		return true
-	}
-	replied := !p.hasBody() || p.Sent != nil
-	resolved := !p.Resolve || p.Resolved != ""
-	reacted := p.React == "" || p.Reacted != ""
-	return replied && resolved && reacted
-}
 
 func postMarker(critic, id string) string {
 	return fmt.Sprintf("<!-- ebac:post:%s:%s -->", critic, id)
@@ -88,8 +36,8 @@ func newPostID(now time.Time) string {
 }
 
 // authorize says why a post may not go out, or "" if it may.
-func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
-	if !w.Write && w.Mode != ModeReviewer {
+func authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) string {
+	if !w.Write && w.Mode != model.ModeReviewer {
 		return "this critic is read-only: posting needs `ebac set-write --on`"
 	}
 	if p.React != "" {
@@ -104,21 +52,21 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 		if p.ReplyTo == "" {
 			return "resolve needs reply_to: the thread to resolve"
 		}
-		if w.Mode == ModeReviewer {
+		if w.Mode == model.ModeReviewer {
 			return "a reviewer seat never resolves threads: the author does"
 		}
 	}
-	if !p.Resolve && p.React == "" && !p.hasBody() {
+	if !p.Resolve && p.React == "" && !p.HasBody() {
 		return "empty body"
 	}
-	var pr *PRState
+	var pr *model.PRState
 	if snap != nil {
-		pr = snap.PRs[PRKey(p.PR)]
+		pr = snap.PRs[model.PRKey(p.PR)]
 	}
 	if pr == nil {
 		return fmt.Sprintf("%q is not a pull request of this critic", p.PR)
 	}
-	if len(pr.Pending) > 0 && (p.Event != "" || p.Path != "" || (p.ReplyTo != "" && p.hasBody())) {
+	if len(pr.Pending) > 0 && (p.Event != "" || p.Path != "" || (p.ReplyTo != "" && p.HasBody())) {
 		r := pr.Pending[0]
 		return fmt.Sprintf("pending review %d by %s on %s (opened %s, %d comments only its author can see) would swallow a reply and refuses new reviews: "+
 			"the operator must submit or delete it; a top-level comment (no --reply-to, --path or --event), --react and --resolve still work",
@@ -127,7 +75,7 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 	switch p.Event {
 	case "", "COMMENT":
 	case "APPROVE":
-		if !w.Approve || w.Mode != ModeReviewer {
+		if !w.Approve || w.Mode != model.ModeReviewer {
 			return "approval is not granted on this critic"
 		}
 		if strings.EqualFold(pr.Author, me) {
@@ -150,41 +98,13 @@ func authorize(w *Critic, snap *Snapshot, me string, p *Post) string {
 	return ""
 }
 
-// findMarker returns the URL of a comment of ours already carrying marker.
-func findMarker(pr *PRState, me, marker string) (string, bool) {
-	mine := func(author, body string) bool {
-		return strings.EqualFold(author, me) && strings.Contains(body, marker)
-	}
-	for _, t := range pr.Threads {
-		for _, c := range t.Comments {
-			if c.State == "PENDING" {
-				continue // in an unsubmitted review: nobody else can see it
-			}
-			if mine(c.Author, c.Body) {
-				return c.URL, true
-			}
-		}
-	}
-	for _, c := range pr.Comments {
-		if mine(c.Author, c.Body) {
-			return c.URL, true
-		}
-	}
-	for _, r := range pr.Reviews {
-		if mine(r.Author, r.Body) {
-			return pr.URL, true
-		}
-	}
-	return "", false
-}
-
 // sendPost takes one post as far as it can go this round.
-func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id string, post *Post) {
+func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snapshot, id string, post *model.Post) {
 	if why := authorize(w, snap, p.Me, post); why != "" {
 		post.Refused = why
 		return
 	}
-	pr := snap.PRs[PRKey(post.PR)]
+	pr := snap.PRs[model.PRKey(post.PR)]
 	now := time.Now().UTC().Format(time.RFC3339)
 	tried := false
 	defer func() {
@@ -192,10 +112,10 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 			post.Attempts++
 		}
 	}()
-	if post.hasBody() && post.Sent == nil {
+	if post.HasBody() && post.Sent == nil {
 		marker := postMarker(w.Name, id)
-		if url, ok := findMarker(pr, p.Me, marker); ok {
-			post.Sent, post.Error = &PostReceipt{URL: url, At: now, Recovered: true}, ""
+		if url, ok := model.FindMarker(pr, p.Me, marker); ok {
+			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now, Recovered: true}, ""
 		} else {
 			tried = true
 			url, err := p.GH.Post(ctx, pr, post, post.Body+"\n\n"+marker)
@@ -212,7 +132,7 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 				post.Error = err.Error()
 				return
 			}
-			post.Sent, post.Error = &PostReceipt{URL: url, At: now}, ""
+			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now}, ""
 		}
 	}
 	if post.React != "" && post.Reacted == "" {
@@ -254,7 +174,7 @@ func (p *Poller) sendPost(ctx context.Context, w *Critic, snap *Snapshot, id str
 // flushOutbox posts what the seat wrote since the watermark and returns the
 // receipts for the round's one patch, and moves the watermark
 // in w. On any read failure it moves nothing.
-func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Receipts {
+func (p *Poller) flushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) Receipts {
 	acks := Receipts{}
 	c, err := p.Fig.node(ctx, w.FormID)
 	if err != nil {
@@ -271,8 +191,8 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		fmt.Fprintf(p.Out, "%s: outbox unreadable: %v\n", w.Name, err)
 		return acks
 	}
-	var posts map[string]*Post
-	if err := json.Unmarshal(mustJSON(cur["post"]), &posts); err != nil {
+	var posts map[string]*model.Post
+	if err := json.Unmarshal(model.MustJSON(cur["post"]), &posts); err != nil {
 		fmt.Fprintf(p.Out, "%s: outbox unparseable: %v\n", w.Name, err)
 		return acks
 	}
@@ -302,7 +222,7 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 
 	for _, id := range sorted {
 		post := posts[id]
-		if post == nil || post.terminal() {
+		if post == nil || post.Terminal() {
 			continue
 		}
 		hadError := post.Error != ""
@@ -313,25 +233,25 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 		}
 		r := map[string]json.RawMessage{}
 		if post.Sent != nil {
-			r["sent"] = mustJSON(post.Sent)
+			r["sent"] = model.MustJSON(post.Sent)
 		}
 		if post.Resolved != "" {
-			r["resolved"] = mustJSON(post.Resolved)
+			r["resolved"] = model.MustJSON(post.Resolved)
 		}
 		if post.Reacted != "" {
-			r["reacted"] = mustJSON(post.Reacted)
+			r["reacted"] = model.MustJSON(post.Reacted)
 		}
 		if post.Refused != "" {
-			r["refused"] = mustJSON(post.Refused)
+			r["refused"] = model.MustJSON(post.Refused)
 		}
 		if post.Error != "" || hadError {
-			r["error"] = mustJSON(post.Error)
+			r["error"] = model.MustJSON(post.Error)
 		}
 		if post.Attempts > 0 {
-			r["attempts"] = mustJSON(post.Attempts)
+			r["attempts"] = model.MustJSON(post.Attempts)
 		}
-		if post.terminal() {
-			r["done_at"] = mustJSON(time.Now().UTC().Format(time.RFC3339))
+		if post.Terminal() {
+			r["done_at"] = model.MustJSON(time.Now().UTC().Format(time.RFC3339))
 		}
 		acks[id] = r
 		switch {
@@ -356,7 +276,7 @@ func (p *Poller) flushOutbox(ctx context.Context, w *Critic, snap *Snapshot) Rec
 }
 
 // Post sends one post to the forge and returns where it landed.
-func (g *GH) Post(ctx context.Context, pr *PRState, p *Post, body string) (string, error) {
+func (g *GH) Post(ctx context.Context, pr *model.PRState, p *model.Post, body string) (string, error) {
 	g.pace()
 	switch {
 	case p.ReplyTo != "":
@@ -383,18 +303,18 @@ func (g *GH) Post(ctx context.Context, pr *PRState, p *Post, body string) (strin
 		}
 		return c.URL, nil
 	case p.Path != "" || p.Event != "":
-		review := map[string]any{"commit_id": pr.HeadSHA, "event": firstNonEmpty(p.Event, "COMMENT")}
+		review := map[string]any{"commit_id": pr.HeadSHA, "event": model.FirstNonEmpty(p.Event, "COMMENT")}
 		if p.Path != "" {
 			review["comments"] = []map[string]any{{"path": p.Path, "line": p.Line, "side": "RIGHT", "body": body}}
 		} else {
 			review["body"] = body
 		}
-		in := literalJSON(review)
+		in := model.LiteralJSON(review)
 		out, err := g.run(ctx, []string{"api", fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", pr.Owner, pr.Repo, pr.Number),
 			"-X", "POST", "--input", "-", "-q", ".html_url"}, in)
 		return strings.TrimSpace(string(out)), err
 	default:
-		in := literalJSON(map[string]string{"body": body})
+		in := model.LiteralJSON(map[string]string{"body": body})
 		out, err := g.run(ctx, []string{"api", fmt.Sprintf("repos/%s/%s/issues/%d/comments", pr.Owner, pr.Repo, pr.Number),
 			"-X", "POST", "--input", "-", "-q", ".html_url"}, in)
 		return strings.TrimSpace(string(out)), err
@@ -437,23 +357,6 @@ func (g *GH) ResolveThread(ctx context.Context, thread string) error {
 		return fmt.Errorf("resolve %s: forge answered %q", thread, got)
 	}
 	return nil
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-// literalJSON encodes without HTML escaping, so a body's <!-- marker --> is
-// sent as written.
-func literalJSON(v any) []byte {
-	var b strings.Builder
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
-	return []byte(strings.TrimSpace(b.String()))
 }
 
 // errPendingReply: the forge took the reply but did not publish it.

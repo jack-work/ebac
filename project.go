@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // What a seat sees of its form (figaro 0.48, measured 2026-10-20): each
@@ -14,7 +16,7 @@ import (
 // The harness contract tells the seat to read the form directly when it sees
 // a cut.
 
-func describeStop(s StopConditions) string {
+func describeStop(s model.StopConditions) string {
 	var parts []string
 	if s.UntilAllClosed {
 		g := time.Duration(s.ArchiveGraceSec) * time.Second
@@ -35,10 +37,10 @@ func describeStop(s StopConditions) string {
 	return strings.Join(parts, " | ")
 }
 
-func tier2(events []Event) []Event {
-	var out []Event
+func tier2(events []model.Event) []model.Event {
+	var out []model.Event
 	for _, e := range events {
-		if e.Tier != TierWake {
+		if e.Tier != model.TierWake {
 			out = append(out, e)
 		}
 	}
@@ -63,7 +65,7 @@ type HarnessContract struct {
 	Protocol   string `json:"protocol"`
 }
 
-func harnessContract(w *Critic) HarnessContract {
+func harnessContract(w *model.Critic) HarnessContract {
 	c := HarnessContract{
 		Truncation: fmt.Sprintf("Values here are cut at %d chars with a trailing … (a cut object also has unbalanced braces). Expected, not a bug. On either sign read the real value with `figaro form %s -j` before drawing a conclusion, and never report on an elided value.", formValueElisionLimit, w.FormID),
 		Rule:       "write ONLY ack_round, ack_note and post.<id>. ebac owns kind, critic, prs, harness and harness_protocol_*: anything written there is overwritten next round.",
@@ -74,9 +76,9 @@ func harnessContract(w *Critic) HarnessContract {
 		Protocol:   "Your standing protocol is keys " + protocolKeyPrefix + "1, 2, ... read in order. Deliveries carry only the delta and the ack command.",
 	}
 	switch {
-	case w.Mode == ModeReviewer && w.Approve:
+	case w.Mode == model.ModeReviewer && w.Approve:
 		c.Authority = "REVIEWER: comment, reply, and approve PRs you did not author. Never request changes, push, label, merge or close."
-	case w.Mode == ModeReviewer:
+	case w.Mode == model.ModeReviewer:
 		c.Authority = "REVIEWER: comment and reply. Never approve, request changes, push, label, merge or close."
 	case w.Write:
 		c.Authority = "WRITE granted on this critic's pull requests: reply, comment and push to the head branch are allowed. Approve, merge and close are NOT. Any PR not named on this critic stays read-only."

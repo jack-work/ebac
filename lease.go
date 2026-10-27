@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
 	"github.com/jack-work/figaro/api/rpc"
@@ -55,7 +56,7 @@ func gone(err error) error {
 // form ebac creates is ever without one.
 func mintPatch(name string) message.Patch {
 	nb, _ := json.Marshal(name)
-	sys := mustJSON(map[string]string{"ttl": FormLease.String()})
+	sys := model.MustJSON(map[string]string{"ttl": FormLease.String()})
 	return form.Build(form.Snapshot{}, map[string]json.RawMessage{"name": nb, "system": sys}, nil)
 }
 
@@ -113,9 +114,9 @@ func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) err
 			return fmt.Errorf("read %s: %w", id, err)
 		}
 		raw, _ := cur.Snapshot.Get("system")
-		system := objectOf(raw)
+		system := model.ObjectOf(raw)
 		system["ttl"] = tb
-		patch := cur.Snapshot.SetPath("system", mustJSON(system)).Diff(cur.Snapshot)
+		patch := cur.Snapshot.SetPath("system", model.MustJSON(system)).Diff(cur.Snapshot)
 		if _, lastErr = c.Set(ctx, patch, cur.Version); lastErr == nil || !isVersionConflict(lastErr) {
 			return lastErr
 		}

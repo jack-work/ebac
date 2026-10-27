@@ -6,20 +6,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 	_, snap := outboxCritic()
 	pr := snap.PRs["acme/widget#1"]
-	pr.Comments["IC1"] = &Comment{ID: "IC1", Author: "amy", URL: "u1", Body: strings.Repeat("é", 1500)}
-	pr.Comments["IC2"] = &Comment{ID: "IC2", Author: "jack", URL: "u2", Body: "mine"}
-	ev := []Event{{Kind: EvPRCommentNew, PR: pr.Key, Comment: "IC1"}, {Kind: EvPRCommentNew, PR: pr.Key, Comment: "IC2"}}
+	pr.Comments["IC1"] = &model.Comment{ID: "IC1", Author: "amy", URL: "u1", Body: strings.Repeat("é", 1500)}
+	pr.Comments["IC2"] = &model.Comment{ID: "IC2", Author: "jack", URL: "u2", Body: "mine"}
+	ev := []model.Event{{Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC1"}, {Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC2"}}
 	got := inboxItems(snap, ev, "jack", time.Unix(0, 0))
 	if _, mine := got["IC2"]; mine || len(got) != 1 {
 		t.Fatalf("inbox %v; want only amy's comment", got)
 	}
 	it := got["IC1"]
-	if !it.Cut || len(it.Body) > inboxItemBytes+len("…") || !strings.HasSuffix(it.Body, "…") || !json.Valid(mustJSON(it.Body)) {
+	if !it.Cut || len(it.Body) > inboxItemBytes+len("…") || !strings.HasSuffix(it.Body, "…") || !json.Valid(model.MustJSON(it.Body)) {
 		t.Fatalf("cut: %v, %d bytes", it.Cut, len(it.Body))
 	}
 
@@ -29,7 +31,7 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 		fresh[id] = InboxItem{PR: "p", By: "amy", At: time.Unix(int64(i), 0).UTC().Format(time.RFC3339), Body: strings.Repeat("x", 1900)}
 	}
 	box := mergeInbox(nil, fresh)
-	if n := len(mustJSON(box)); n > inboxBytes {
+	if n := len(model.MustJSON(box)); n > inboxBytes {
 		t.Fatalf("inbox is %d B, over %d", n, inboxBytes)
 	}
 	if _, ok := box["Aa"]; ok {
@@ -43,10 +45,10 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 func TestPrunePostsKeepsUnfinishedAndRecent(t *testing.T) {
 	now := time.Date(2026, 10, 21, 2, 0, 0, 0, time.UTC)
 	posts := map[string]json.RawMessage{
-		"open":   mustJSON(map[string]any{"pr": "a/b#1", "body": "x"}),
-		"recent": mustJSON(map[string]any{"pr": "a/b#1", "body": "x", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}),
-		"old":    mustJSON(map[string]any{"pr": "a/b#1", "body": "x", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-2 * time.Hour).Format(time.RFC3339)}),
-		"legacy": mustJSON(map[string]any{"pr": "a/b#1", "body": "x", "refused": "no"}),
+		"open":   model.MustJSON(map[string]any{"pr": "a/b#1", "body": "x"}),
+		"recent": model.MustJSON(map[string]any{"pr": "a/b#1", "body": "x", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}),
+		"old":    model.MustJSON(map[string]any{"pr": "a/b#1", "body": "x", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-2 * time.Hour).Format(time.RFC3339)}),
+		"legacy": model.MustJSON(map[string]any{"pr": "a/b#1", "body": "x", "refused": "no"}),
 	}
 	if !prunePosts(posts, now) {
 		t.Fatal("nothing pruned")
@@ -78,7 +80,7 @@ func TestLiveBudgetGuardControl(t *testing.T) {
 				}
 			}
 			n := total - base - len(`"filler":""`) - 2
-			return map[string]json.RawMessage{"filler": mustJSON(strings.Repeat("x", n))}, nil
+			return map[string]json.RawMessage{"filler": model.MustJSON(strings.Repeat("x", n))}, nil
 		})
 	}
 	size := func() int {

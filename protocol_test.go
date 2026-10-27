@@ -4,22 +4,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
-func protocolCritics() []Critic {
-	return []Critic{
-		{Name: "ro", Mode: ModeReview, FormID: "@f"},
-		{Name: "rw", Mode: ModeReview, Write: true, FormID: "@f"},
-		{Name: "dev", Mode: ModeDevelop, IssueRepo: "acme/ebac", FormID: "@f"},
-		{Name: "rev", Mode: ModeReviewer, Host: "ghe.example", Approve: true, FormID: "@f",
-			Worktree: &Worktree{Clone: "/src/widget", Root: "/wt"}},
+func protocolCritics() []model.Critic {
+	return []model.Critic{
+		{Name: "ro", Mode: model.ModeReview, FormID: "@f"},
+		{Name: "rw", Mode: model.ModeReview, Write: true, FormID: "@f"},
+		{Name: "dev", Mode: model.ModeDevelop, IssueRepo: "acme/ebac", FormID: "@f"},
+		{Name: "rev", Mode: model.ModeReviewer, Host: "ghe.example", Approve: true, FormID: "@f",
+			Worktree: &model.Worktree{Clone: "/src/widget", Root: "/wt"}},
 	}
 }
 
 func TestBriefCarriesTheDeltaNotTheProtocol(t *testing.T) {
 	t.Setenv("EBAC_SIGNATURE", filepath.Join(t.TempDir(), "absent"))
-	pr := &PRState{Key: MakePRKey("acme", "widget", 7), Number: 7, State: "OPEN", Author: "friend", HeadSHA: "abcdef1234567"}
-	events := []Event{{Kind: EvHeadMoved, Tier: TierWake, PR: pr.Key}}
+	pr := &model.PRState{Key: model.MakePRKey("acme", "widget", 7), Number: 7, State: "OPEN", Author: "friend", HeadSHA: "abcdef1234567"}
+	events := []model.Event{{Kind: model.EvHeadMoved, Tier: model.TierWake, PR: pr.Key}}
 	for _, w := range protocolCritics() {
 		w.Runtime.Round = 42
 		brief := buildBrief(&w, snapWith(pr), events, "jack", 0)
@@ -44,7 +46,7 @@ func TestBriefCarriesTheDeltaNotTheProtocol(t *testing.T) {
 
 func TestProtocolChunksFitTheStudyCut(t *testing.T) {
 	t.Setenv("EBAC_SIGNATURE", filepath.Join(t.TempDir(), "absent"))
-	pr := &PRState{Key: MakePRKey("acme", "widget", 7), Number: 7, State: "OPEN", Author: "friend"}
+	pr := &model.PRState{Key: model.MakePRKey("acme", "widget", 7), Number: 7, State: "OPEN", Author: "friend"}
 	texts := map[string]string{
 		"one line longer than the cut, quoted and multibyte": strings.Repeat(`"—" `, 900) + "\nend\n",
 	}

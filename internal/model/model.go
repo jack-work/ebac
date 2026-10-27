@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"crypto/sha256"
@@ -146,9 +146,9 @@ type Comment struct {
 	Digest string `json:"digest"`
 }
 
-func (c *Comment) computeDigest() { c.Digest = bodyDigest(c.Body) }
+func (c *Comment) ComputeDigest() { c.Digest = BodyDigest(c.Body) }
 
-func bodyDigest(body string) string {
+func BodyDigest(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:8])
 }
@@ -168,11 +168,11 @@ type Review struct {
 }
 
 // digest is the body's fingerprint, whichever of the two the review carries.
-func (r *Review) digest() string {
+func (r *Review) BodyDigest() string {
 	if r.Digest != "" {
 		return r.Digest
 	}
-	return bodyDigest(r.Body)
+	return BodyDigest(r.Body)
 }
 
 // SortedPRKeys gives deterministic iteration. Every projection and every

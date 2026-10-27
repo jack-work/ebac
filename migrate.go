@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
 )
@@ -41,14 +42,14 @@ func cmdMigrate(ctx context.Context, g globals, args []string) error {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".json")
-		var w Critic
+		var w model.Critic
 		if err := readJSON(filepath.Join(dir, e.Name()), &w); err != nil {
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
-		var snap *Snapshot
+		var snap *model.Snapshot
 		snapPath := filepath.Join(st.Root, "snapshots", name+".json")
 		if _, err := os.Stat(snapPath); err == nil {
-			snap = &Snapshot{}
+			snap = &model.Snapshot{}
 			if err := readJSON(snapPath, snap); err != nil {
 				return fmt.Errorf("%s: %w", snapPath, err)
 			}

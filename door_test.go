@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 // figaro 0.48 stopped returning a per-aria endpoint from Attach/Create; an
 // empty endpoint dialed as "unsupported transport scheme \"\"" and every form

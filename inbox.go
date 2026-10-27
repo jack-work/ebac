@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // The inbox is how comment text reaches a seat now that the form keeps no
@@ -35,7 +36,7 @@ type InboxItem struct {
 
 // inboxItems turns a round's events into inbox entries, keyed by comment or
 // review id. The operator's own posts are skipped: the seat wrote them.
-func inboxItems(next *Snapshot, events []Event, me string, now time.Time) map[string]InboxItem {
+func inboxItems(next *model.Snapshot, events []model.Event, me string, now time.Time) map[string]InboxItem {
 	out := map[string]InboxItem{}
 	if next == nil {
 		return out
@@ -46,7 +47,7 @@ func inboxItems(next *Snapshot, events []Event, me string, now time.Time) map[st
 			return
 		}
 		it.At = at
-		it.Body, it.Cut = cutBody(body, inboxItemBytes)
+		it.Body, it.Cut = model.CutBody(body, inboxItemBytes)
 		out[id] = it
 	}
 	for _, e := range events {
@@ -55,13 +56,13 @@ func inboxItems(next *Snapshot, events []Event, me string, now time.Time) map[st
 			continue
 		}
 		switch e.Kind {
-		case EvThreadNew:
+		case model.EvThreadNew:
 			if th := pr.Threads[e.ThreadID]; th != nil {
 				for _, c := range th.Comments {
 					add(c.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: c.Author, URL: c.URL, Thread: e.ThreadID}, c.Body)
 				}
 			}
-		case EvCommentNew, EvCommentEdited:
+		case model.EvCommentNew, model.EvCommentEdited:
 			if th := pr.Threads[e.ThreadID]; th != nil {
 				for _, c := range th.Comments {
 					if c.ID == e.Comment {
@@ -69,11 +70,11 @@ func inboxItems(next *Snapshot, events []Event, me string, now time.Time) map[st
 					}
 				}
 			}
-		case EvPRCommentNew, EvPRCommentEdited:
+		case model.EvPRCommentNew, model.EvPRCommentEdited:
 			if c := pr.Comments[e.Comment]; c != nil {
 				add(c.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: c.Author, URL: c.URL}, c.Body)
 			}
-		case EvReviewSubmitted, EvReviewEdited:
+		case model.EvReviewSubmitted, model.EvReviewEdited:
 			if r := pr.Reviews[e.ReviewID]; r != nil && strings.TrimSpace(r.Body) != "" {
 				add(r.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: r.Author, URL: pr.URL}, r.Body)
 			}
@@ -95,7 +96,7 @@ func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]Inbo
 	for id, it := range fresh {
 		box[id] = it
 	}
-	for len(mustJSON(box)) > inboxBytes {
+	for len(model.MustJSON(box)) > inboxBytes {
 		oldest := ""
 		for id, it := range box {
 			if oldest == "" || it.At < box[oldest].At || (it.At == box[oldest].At && id < oldest) {
@@ -105,15 +106,4 @@ func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]Inbo
 		delete(box, oldest)
 	}
 	return box
-}
-
-// cutBody keeps at most n bytes of s, on a rune boundary.
-func cutBody(s string, n int) (string, bool) {
-	if len(s) <= n {
-		return s, false
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…", true
 }

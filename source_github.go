@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // githubPRs translates GitHub pull requests: threads, reviews and PR comments
@@ -15,7 +17,7 @@ type githubPRs struct{}
 
 func (githubPRs) Name() string { return "github-pr" }
 
-func (githubPRs) Round(ctx context.Context, p *Poller, w *Critic) error {
+func (githubPRs) Round(ctx context.Context, p *Poller, w *model.Critic) error {
 	return pollGitHub(ctx, p, w)
 }
 
@@ -28,10 +30,10 @@ var prGone = regexp.MustCompile(`Could not resolve to a (PullRequest|Repository)
 
 // retireGone marks each gone PR on the form, stops polling it and wakes the
 // seat once; a critic with no PR left stops.
-func retireGone(ctx context.Context, p *Poller, w *Critic, gone []PRRef, errs map[PRKey]string) error {
+func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PRRef, errs map[model.PRKey]string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	keep := w.PRs[:0]
-	isGone := map[PRKey]bool{}
+	isGone := map[model.PRKey]bool{}
 	for _, r := range gone {
 		isGone[r.Key()] = true
 	}
@@ -64,7 +66,7 @@ func retireGone(ctx context.Context, p *Poller, w *Critic, gone []PRRef, errs ma
 	return p.Store.SaveCritic(ctx, w)
 }
 
-func pollGitHub(ctx context.Context, p *Poller, w *Critic) error {
+func pollGitHub(ctx context.Context, p *Poller, w *model.Critic) error {
 	name := w.Name
 	if w.Host != "" {
 		p.GH.Host = w.Host
@@ -114,12 +116,12 @@ func pollGitHub(ctx context.Context, p *Poller, w *Critic) error {
 	}
 
 	// --- fetch ---
-	next := &Snapshot{
+	next := &model.Snapshot{
 		Critic: name, Round: w.Runtime.Round, TakenAt: time.Now().UTC(),
-		PRs: map[PRKey]*PRState{}, Complete: true,
+		PRs: map[model.PRKey]*model.PRState{}, Complete: true,
 	}
 	var fetchErrs []string
-	var gone []PRRef
+	var gone []model.PRRef
 	for _, ref := range w.PRs {
 		st, ferr := p.GH.FetchPR(ctx, ref.Owner, ref.Repo, ref.Number)
 		if ferr != nil && prGone.MatchString(ferr.Error()) {
@@ -155,10 +157,10 @@ func pollGitHub(ctx context.Context, p *Poller, w *Critic) error {
 		next.PRs[st.Key] = st
 	}
 	if len(gone) > 0 {
-		errs := map[PRKey]string{}
+		errs := map[model.PRKey]string{}
 		for _, fe := range fetchErrs {
 			if k, msg, ok := strings.Cut(fe, ": "); ok {
-				errs[PRKey(k)] = msg
+				errs[model.PRKey(k)] = msg
 			}
 		}
 		if err := retireGone(ctx, p, w, gone, errs); err != nil {
@@ -191,7 +193,7 @@ func pollGitHub(ctx context.Context, p *Poller, w *Critic) error {
 	}
 
 	delta := Diff(prev, next, p.Me)
-	if w.Mode == ModeReviewer {
+	if w.Mode == model.ModeReviewer {
 		asReviewer(delta, p.Me)
 	}
 

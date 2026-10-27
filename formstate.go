@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/rpc"
 )
@@ -34,11 +35,11 @@ const (
 
 // ebacState is what ebac keeps under system.ebac.
 type ebacState struct {
-	Runtime  Runtime   `json:"runtime"`
-	Round    int       `json:"snapshot_round,omitempty"`
-	TakenAt  time.Time `json:"snapshot_taken_at,omitempty"`
-	Complete bool      `json:"snapshot_complete,omitempty"`
-	Note     string    `json:"snapshot_note,omitempty"`
+	Runtime  model.Runtime `json:"runtime"`
+	Round    int           `json:"snapshot_round,omitempty"`
+	TakenAt  time.Time     `json:"snapshot_taken_at,omitempty"`
+	Complete bool          `json:"snapshot_complete,omitempty"`
+	Note     string        `json:"snapshot_note,omitempty"`
 }
 
 // The form keeps what the next round compares against, never the text:
@@ -63,7 +64,7 @@ type formThread struct {
 }
 
 type formPR struct {
-	Key            PRKey                  `json:"key"`
+	Key            model.PRKey            `json:"key"`
 	Owner          string                 `json:"owner"`
 	Repo           string                 `json:"repo"`
 	Number         int                    `json:"number"`
@@ -75,16 +76,16 @@ type formPR struct {
 	HeadSHA        string                 `json:"head_sha"`
 	ReviewDecision string                 `json:"review_decision,omitempty"`
 	Complete       bool                   `json:"complete"`
-	Pending        []PendingReview        `json:"pending_reviews,omitempty"`
+	Pending        []model.PendingReview  `json:"pending_reviews,omitempty"`
 	Threads        map[string]*formThread `json:"threads"`
 	Reviews        map[string]*formItem   `json:"reviews"`
 	Comments       map[string]*formItem   `json:"comments"`
 }
 
 // prFormKey makes a PR key safe as one path segment.
-func prFormKey(k PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
+func prFormKey(k model.PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
 
-func prsTree(s *Snapshot) map[string]*formPR {
+func prsTree(s *model.Snapshot) map[string]*formPR {
 	out := map[string]*formPR{}
 	if s == nil {
 		return out
@@ -102,7 +103,7 @@ func prsTree(s *Snapshot) map[string]*formPR {
 			f.Threads[id] = t
 		}
 		for id, r := range p.Reviews {
-			f.Reviews[id] = &formItem{By: r.Author, D: r.digest(), S: r.State, Bot: r.IsBot, St: r.Stamped}
+			f.Reviews[id] = &formItem{By: r.Author, D: r.BodyDigest(), S: r.State, Bot: r.IsBot, St: r.Stamped}
 		}
 		for id, c := range p.Comments {
 			f.Comments[id] = &formItem{By: c.Author, D: c.Digest, Bot: c.IsBot}
@@ -141,10 +142,10 @@ func (r *readItem) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return err
 	}
-	*r = readItem{By: firstNonEmpty(m.By, m.Author), D: firstNonEmpty(m.D, m.Digest), S: firstNonEmpty(m.S, m.State),
+	*r = readItem{By: model.FirstNonEmpty(m.By, m.Author), D: model.FirstNonEmpty(m.D, m.Digest), S: model.FirstNonEmpty(m.S, m.State),
 		I: m.I, P: m.P || m.State == "PENDING", Bot: m.Bot || m.IsBot, St: m.St || m.Stamped, Body: m.Body, CreatedAt: m.Created}
 	if r.D == "" && m.Body != "" {
-		r.D = bodyDigest(m.Body)
+		r.D = model.BodyDigest(m.Body)
 	}
 	return nil
 }
@@ -176,8 +177,8 @@ func (t *readThread) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
-	out := map[PRKey]*PRState{}
+func prsFromTree(raw json.RawMessage) (map[model.PRKey]*model.PRState, error) {
+	out := map[model.PRKey]*model.PRState{}
 	if len(raw) == 0 || string(raw) == "null" {
 		return out, nil
 	}
@@ -196,17 +197,17 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 		if f == nil || f.Key == "" {
 			continue
 		}
-		p := &PRState{Key: f.Key, Owner: f.Owner, Repo: f.Repo, Number: f.Number, URL: f.URL, Title: f.Title,
+		p := &model.PRState{Key: f.Key, Owner: f.Owner, Repo: f.Repo, Number: f.Number, URL: f.URL, Title: f.Title,
 			Author: f.Author, State: f.State, IsDraft: f.IsDraft, HeadSHA: f.HeadSHA, ReviewDecision: f.ReviewDecision,
 			Complete: f.Complete, Pending: f.formPR.Pending,
-			Threads: map[string]*Thread{}, Reviews: map[string]*Review{}, Comments: map[string]*Comment{}}
+			Threads: map[string]*model.Thread{}, Reviews: map[string]*model.Review{}, Comments: map[string]*model.Comment{}}
 		for id, t := range f.Threads {
 			if t == nil {
 				continue
 			}
-			th := &Thread{ID: id, IsResolved: t.R, IsOutdated: t.O}
+			th := &model.Thread{ID: id, IsResolved: t.R, IsOutdated: t.O}
 			type ordered struct {
-				c   *Comment
+				c   *model.Comment
 				pos int
 				at  string
 			}
@@ -215,7 +216,7 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 				if it == nil {
 					continue
 				}
-				c := &Comment{ID: cid, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
+				c := &model.Comment{ID: cid, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
 				if it.P {
 					c.State = "PENDING"
 				}
@@ -242,12 +243,12 @@ func prsFromTree(raw json.RawMessage) (map[PRKey]*PRState, error) {
 		}
 		for id, it := range f.Reviews {
 			if it != nil {
-				p.Reviews[id] = &Review{ID: id, Author: it.By, State: it.S, Digest: it.D, IsBot: it.Bot, Stamped: it.St}
+				p.Reviews[id] = &model.Review{ID: id, Author: it.By, State: it.S, Digest: it.D, IsBot: it.Bot, Stamped: it.St}
 			}
 		}
 		for id, it := range f.Comments {
 			if it != nil {
-				p.Comments[id] = &Comment{ID: id, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
+				p.Comments[id] = &model.Comment{ID: id, Author: it.By, Digest: it.D, IsBot: it.Bot, CreatedAt: it.CreatedAt}
 			}
 		}
 		out[p.Key] = p
@@ -291,12 +292,12 @@ func (f *criticForm) ebac() ebacState {
 	return sys.Ebac
 }
 
-func (f *criticForm) critic() (*Critic, error) {
+func (f *criticForm) critic() (*model.Critic, error) {
 	raw, ok := f.Keys["critic"]
 	if !ok {
 		return nil, fmt.Errorf("form %s has no critic", f.ID)
 	}
-	var w Critic
+	var w model.Critic
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return nil, fmt.Errorf("form %s critic: %w", f.ID, err)
 	}
@@ -308,7 +309,7 @@ func (f *criticForm) critic() (*Critic, error) {
 	return &w, nil
 }
 
-func (f *criticForm) snapshot() (*Snapshot, error) {
+func (f *criticForm) snapshot() (*model.Snapshot, error) {
 	e := f.ebac()
 	prs, err := prsFromTree(f.Keys["prs"])
 	if err != nil {
@@ -321,7 +322,7 @@ func (f *criticForm) snapshot() (*Snapshot, error) {
 	if w, err := f.critic(); err == nil {
 		name = w.Name
 	}
-	return &Snapshot{Critic: name, Round: e.Round, TakenAt: e.TakenAt, PRs: prs, Complete: e.Complete, Note: e.Note}, nil
+	return &model.Snapshot{Critic: name, Round: e.Round, TakenAt: e.TakenAt, PRs: prs, Complete: e.Complete, Note: e.Note}, nil
 }
 
 // criticForms reads every form declaring kind ebac.critic.
@@ -392,7 +393,7 @@ func (s *Store) findCritic(ctx context.Context, name string) (*criticForm, error
 	return nil, fmt.Errorf("%d forms claim critic %q (%s): remove the stale ones", len(hits), name, strings.Join(ids, ", "))
 }
 
-func (s *Store) LoadCritic(ctx context.Context, name string) (*Critic, error) {
+func (s *Store) LoadCritic(ctx context.Context, name string) (*model.Critic, error) {
 	f, err := s.findCritic(ctx, name)
 	if err != nil {
 		return nil, err
@@ -400,7 +401,7 @@ func (s *Store) LoadCritic(ctx context.Context, name string) (*Critic, error) {
 	return f.critic()
 }
 
-func (s *Store) LoadSnapshot(ctx context.Context, name string) (*Snapshot, error) {
+func (s *Store) LoadSnapshot(ctx context.Context, name string) (*model.Snapshot, error) {
 	f, err := s.findCritic(ctx, name)
 	if err != nil {
 		return nil, err
@@ -408,12 +409,12 @@ func (s *Store) LoadSnapshot(ctx context.Context, name string) (*Snapshot, error
 	return f.snapshot()
 }
 
-func (s *Store) ListCritics(ctx context.Context) ([]*Critic, error) {
+func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
 	forms, err := s.criticForms(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out []*Critic
+	var out []*model.Critic
 	seen := map[string]string{}
 	for _, f := range forms {
 		w, err := f.critic()
@@ -434,7 +435,7 @@ func (s *Store) ListCritics(ctx context.Context) ([]*Critic, error) {
 }
 
 // SaveCritic writes config and runtime.
-func (s *Store) SaveCritic(ctx context.Context, w *Critic) error {
+func (s *Store) SaveCritic(ctx context.Context, w *model.Critic) error {
 	return s.Save(ctx, w, nil, nil)
 }
 
@@ -443,23 +444,23 @@ type Receipts map[string]map[string]json.RawMessage
 
 // Save writes the critic, and the snapshot when one is given, as ONE patch,
 // with any outbox receipts merged into the posts they answer.
-func (s *Store) Save(ctx context.Context, w *Critic, snap *Snapshot, receipts Receipts) error {
+func (s *Store) Save(ctx context.Context, w *model.Critic, snap *model.Snapshot, receipts Receipts) error {
 	return s.SaveRound(ctx, w, snap, receipts, nil)
 }
 
 // SaveRound is Save plus the round's fresh inbox items (nil leaves the inbox).
-func (s *Store) SaveRound(ctx context.Context, w *Critic, snap *Snapshot, receipts Receipts, fresh map[string]InboxItem) error {
+func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snapshot, receipts Receipts, fresh map[string]InboxItem) error {
 	if w.FormID == "" {
 		return fmt.Errorf("critic %s has no form", w.Name)
 	}
 	cfg := *w
-	cfg.Runtime = Runtime{}
+	cfg.Runtime = model.Runtime{}
 	cfgRaw, err := json.Marshal(criticConfig(&cfg))
 	if err != nil {
 		return err
 	}
 	set := map[string]json.RawMessage{
-		"kind":   mustJSON(criticKind),
+		"kind":   model.MustJSON(criticKind),
 		"critic": cfgRaw,
 	}
 	harness, err := json.Marshal(harnessContract(w))
@@ -472,10 +473,10 @@ func (s *Store) SaveRound(ctx context.Context, w *Critic, snap *Snapshot, receip
 		sys.Runtime = w.Runtime
 		view := snap
 		if snap != nil {
-			set["prs"] = mustJSON(prsTree(snap))
+			set["prs"] = model.MustJSON(prsTree(snap))
 			sys.Round, sys.TakenAt, sys.Complete, sys.Note = snap.Round, snap.TakenAt, snap.Complete, snap.Note
 		} else if prs, err := prsFromTree(cur["prs"]); err == nil {
-			view = &Snapshot{PRs: prs}
+			view = &model.Snapshot{PRs: prs}
 		}
 		for k := range set {
 			if strings.HasPrefix(k, protocolKeyPrefix) {
@@ -483,32 +484,32 @@ func (s *Store) SaveRound(ctx context.Context, w *Critic, snap *Snapshot, receip
 			}
 		}
 		for i, c := range protocolChunks(protocolText(w, view, s.Me)) {
-			set[fmt.Sprintf("%s%d", protocolKeyPrefix, i+1)] = mustJSON(c)
+			set[fmt.Sprintf("%s%d", protocolKeyPrefix, i+1)] = model.MustJSON(c)
 		}
-		system := objectOf(cur["system"])
-		system["ebac"] = mustJSON(sys)
-		set["system"] = mustJSON(system)
+		system := model.ObjectOf(cur["system"])
+		system["ebac"] = model.MustJSON(sys)
+		set["system"] = model.MustJSON(system)
 		if fresh != nil {
-			set["inbox"] = mustJSON(mergeInbox(cur["inbox"], fresh))
+			set["inbox"] = model.MustJSON(mergeInbox(cur["inbox"], fresh))
 		}
-		posts := objectOf(cur["post"])
+		posts := model.ObjectOf(cur["post"])
 		changed := false
 		for id, fields := range receipts {
 			if _, ok := posts[id]; !ok {
 				continue // removed since it was read
 			}
-			p := objectOf(posts[id])
+			p := model.ObjectOf(posts[id])
 			for k, v := range fields {
 				p[k] = v
 			}
-			posts[id] = mustJSON(p)
+			posts[id] = model.MustJSON(p)
 			changed = true
 		}
 		if prunePosts(posts, time.Now()) {
 			changed = true
 		}
 		if changed {
-			set["post"] = mustJSON(posts)
+			set["post"] = model.MustJSON(posts)
 		}
 		var remove []string
 		for k := range cur {
@@ -526,21 +527,13 @@ func (s *Store) SaveRound(ctx context.Context, w *Critic, snap *Snapshot, receip
 }
 
 // criticConfig is a critic without the fields that live elsewhere.
-func criticConfig(w *Critic) map[string]any {
+func criticConfig(w *model.Critic) map[string]any {
 	b, _ := json.Marshal(w)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
 	delete(m, "runtime")
 	delete(m, "form_id")
 	return m
-}
-
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return b
 }
 
 // nextBoard applies whole top-level values and removals to a board.
@@ -574,10 +567,10 @@ func prunePosts(posts map[string]json.RawMessage, now time.Time) bool {
 	pruned := false
 	for id, raw := range posts {
 		var p struct {
-			Post
+			model.Post
 			DoneAt string `json:"done_at"`
 		}
-		if json.Unmarshal(raw, &p) != nil || !p.Post.terminal() {
+		if json.Unmarshal(raw, &p) != nil || !p.Post.Terminal() {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, p.DoneAt); err == nil && now.Sub(t) < postKeep {
@@ -602,15 +595,6 @@ func checkBudget(id string, curBytes, nextBytes int) error {
 			"(figaro writes the whole state at every log segment head; jack-work/figaro#44)", id, nextBytes, FormStateBudget)
 	}
 	return nil
-}
-
-// objectOf reads a JSON object's members; anything else reads as empty.
-func objectOf(raw json.RawMessage) map[string]json.RawMessage {
-	m := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
-		return map[string]json.RawMessage{}
-	}
-	return m
 }
 
 // commit diffs the top-level keys build returns against the live form and
@@ -664,7 +648,7 @@ func (s *Store) commit(ctx context.Context, id string, build func(cur map[string
 
 // Archive exports the critic and its PR state to disk, so the audit survives
 // the form's lease, and marks it archived.
-func (s *Store) Archive(ctx context.Context, w *Critic, snap *Snapshot) (string, error) {
+func (s *Store) Archive(ctx context.Context, w *model.Critic, snap *model.Snapshot) (string, error) {
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	dir := filepath.Join(s.Root, "archive", w.Name+"-"+stamp)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

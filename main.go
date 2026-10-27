@@ -12,6 +12,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta
@@ -216,7 +218,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	notes := fs.String("notes", "", "reviewer mode: repo-specific guidance the seat reads first (path or skill)")
 	_ = fs.Parse(args)
 
-	if err := ValidName(*name); err != nil {
+	if err := model.ValidName(*name); err != nil {
 		return err
 	}
 	if len(prs) == 0 && *repo == "" {
@@ -229,17 +231,17 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists (ebac show --critic %s)", *name, *name)
 	}
-	m := Mode(*mode)
-	if m != ModeReview && m != ModeDevelop && m != ModeReviewer {
+	m := model.Mode(*mode)
+	if m != model.ModeReview && m != model.ModeDevelop && m != model.ModeReviewer {
 		return fmt.Errorf("--mode must be review, develop or reviewer, got %q", *mode)
 	}
-	if m != ModeReviewer && (*approve || *clone != "" || *wtRoot != "" || *notes != "") {
+	if m != model.ModeReviewer && (*approve || *clone != "" || *wtRoot != "" || *notes != "") {
 		return fmt.Errorf("--approve, --clone, --worktree-root and --notes need --mode reviewer")
 	}
 	if (*clone == "") != (*wtRoot == "") {
 		return fmt.Errorf("--clone and --worktree-root go together")
 	}
-	if m == ModeReviewer {
+	if m == model.ModeReviewer {
 		if _, err := readSignature(); err != nil {
 			return err
 		}
@@ -249,14 +251,14 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if _, err := resolveBin(g.gh); err != nil {
 		return fmt.Errorf("gh: %w", err)
 	}
-	w := &Critic{
+	w := &model.Critic{
 		Name: *name, Mode: m, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		DiscoverRepo: *repo, DiscoverAuthor: *author, IssueRepo: *issueRepo,
 		Write: *write, Approve: *approve, Notes: *notes,
-		Stop: DefaultStop(), EverySec: int(interval.Seconds()),
+		Stop: model.DefaultStop(), EverySec: int(interval.Seconds()),
 	}
 	if *clone != "" {
-		w.Worktree = &Worktree{Clone: *clone, Root: *wtRoot}
+		w.Worktree = &model.Worktree{Clone: *clone, Root: *wtRoot}
 	}
 	w.Stop.UntilAllClosed = !*noArchive
 	w.Stop.ArchiveGraceSec = int(grace.Seconds())
@@ -268,13 +270,13 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	}
 
 	for _, s := range prs {
-		ref, err := ParsePRRef(s)
+		ref, err := model.ParsePRRef(s)
 		if err != nil {
 			return err
 		}
 		w.AddPR(ref)
 	}
-	if w.Host, err = forgeHost(w.PRs, g.host); err != nil {
+	if w.Host, err = model.ForgeHost(w.PRs, g.host); err != nil {
 		return err
 	}
 	if err := checkForgeHost(w.Host); err != nil {
@@ -313,7 +315,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("minted aria %s\n", seat)
 	}
 	if seat != "" {
-		if err := ValidAriaID(seat); err != nil {
+		if err := model.ValidAriaID(seat); err != nil {
 			return fmt.Errorf("critic created (role %s), but --aria is bad: %w", formID, err)
 		}
 		if err := fig.Cast(ctx, seat, formID); err != nil {
@@ -461,7 +463,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 			n, w.Runtime.RetryCount, stamp(w.Runtime.NextRetryAt))
 	}
 	if a := w.Author; a != nil {
-		fmt.Printf("author    %s in %s since %s, alert %s\n", a.Login, strings.Join(a.Repos, ","), a.Since.UTC().Format(time.RFC3339), w.alertTarget())
+		fmt.Printf("author    %s in %s since %s, alert %s\n", a.Login, strings.Join(a.Repos, ","), a.Since.UTC().Format(time.RFC3339), w.AlertTarget())
 		if s := w.Runtime.Author; s != nil {
 			fmt.Printf("seen      %d PR(s)\n", len(s.Seen))
 		}
@@ -480,7 +482,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	fmt.Fprintln(tw, "PR\tSTATE\tHEAD\tTHREADS\tUNRES\tAWAITING\tTITLE")
 	for _, row := range prTableRows(w.PRs, snap, me) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%s\n",
-			row.Key, row.State, row.Head, row.Threads, row.Unresolved, row.Awaiting, firstLine(row.Title))
+			row.Key, row.State, row.Head, row.Threads, row.Unresolved, row.Awaiting, model.FirstLine(row.Title))
 	}
 	tw.Flush()
 	return nil
@@ -494,14 +496,14 @@ type prTableRow struct {
 	Threads, Unresolved, Awaiting int
 }
 
-func prTableRows(refs []PRRef, snap *Snapshot, me string) []prTableRow {
+func prTableRows(refs []model.PRRef, snap *model.Snapshot, me string) []prTableRow {
 	rows := make([]prTableRow, 0, len(refs))
 	for _, r := range refs {
 		row := prTableRow{Key: string(r.Key()), State: "?", Head: "-", Title: r.Title}
 		if snap != nil {
 			if p, ok := snap.PRs[r.Key()]; ok {
 				c := p.Counts(me)
-				row.State, row.Head, row.Title = p.State, short(p.HeadSHA), p.Title
+				row.State, row.Head, row.Title = p.State, model.Short(p.HeadSHA), p.Title
 				row.Threads, row.Unresolved, row.Awaiting = c.Threads, c.Unresolved, c.AwaitingUs
 			}
 		}
@@ -584,7 +586,7 @@ func cmdCast(ctx context.Context, g globals, args []string) error {
 		}
 		fmt.Printf("minted aria %s\n", seat)
 	}
-	if err := ValidAriaID(seat); err != nil {
+	if err := model.ValidAriaID(seat); err != nil {
 		return err
 	}
 	if !fig.AriaExists(ctx, seat) {
@@ -705,7 +707,7 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if *note != "" {
-		if err := fig.SetJSON(ctx, w.FormID, "ack_note", firstLine(*note)); err != nil {
+		if err := fig.SetJSON(ctx, w.FormID, "ack_note", model.FirstLine(*note)); err != nil {
 			return err
 		}
 	}
@@ -762,7 +764,7 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	post := &Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react}
+	post := &model.Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react}
 	if why := authorize(w, snap, "", post); why != "" {
 		return fmt.Errorf("refused: %s", why)
 	}
@@ -777,9 +779,9 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 		}
 	}
 	err = st.commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ ebacState) (map[string]json.RawMessage, []string) {
-		posts := objectOf(cur["post"])
-		posts[*id] = mustJSON(post)
-		return map[string]json.RawMessage{"post": mustJSON(posts)}, nil
+		posts := model.ObjectOf(cur["post"])
+		posts[*id] = model.MustJSON(post)
+		return map[string]json.RawMessage{"post": model.MustJSON(posts)}, nil
 	})
 	if err != nil {
 		return err

@@ -6,6 +6,8 @@ import (
 	"io"
 	"sort"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -50,8 +52,8 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	return src.Round(ctx, p, w)
 }
 
-func (p *Poller) deliver(ctx context.Context, w *Critic, snap *Snapshot) error {
-	pending := &Delta{Events: w.Runtime.PendingEvents}
+func (p *Poller) deliver(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
+	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		if len(w.Runtime.PendingEvents) > 0 {
 			// Background-only news is recorded on the form and then
@@ -128,12 +130,12 @@ func backoffFor(attempt int) time.Duration {
 
 // mergeEvents appends new events to an undelivered batch, dropping exact
 // repeats so a stuck delivery does not grow without bound.
-func mergeEvents(pending, fresh []Event) []Event {
+func mergeEvents(pending, fresh []model.Event) []model.Event {
 	seen := map[string]bool{}
-	key := func(e Event) string {
+	key := func(e model.Event) string {
 		return string(e.Kind) + "|" + string(e.PR) + "|" + e.ThreadID + "|" + e.Comment + "|" + e.ReviewID + "|" + e.Detail
 	}
-	out := make([]Event, 0, len(pending)+len(fresh))
+	out := make([]model.Event, 0, len(pending)+len(fresh))
 	for _, e := range pending {
 		if !seen[key(e)] {
 			seen[key(e)] = true
@@ -153,7 +155,7 @@ func mergeEvents(pending, fresh []Event) []Event {
 	return out
 }
 
-func hardStop(w *Critic) string {
+func hardStop(w *model.Critic) string {
 	if w.Stop.MaxRounds > 0 && w.Runtime.Round > w.Stop.MaxRounds {
 		return fmt.Sprintf("max rounds (%d) reached", w.Stop.MaxRounds)
 	}
@@ -169,7 +171,7 @@ func hardStop(w *Critic) string {
 // maybeArchive retires a critic whose PRs are all finished. The grace period
 // exists because the most interesting comment on a PR often arrives just
 // after it merges.
-func (p *Poller) maybeArchive(ctx context.Context, w *Critic, snap *Snapshot) error {
+func (p *Poller) maybeArchive(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
 	if !w.Stop.UntilAllClosed && !w.Runtime.Stopped {
 		return nil
 	}
@@ -237,7 +239,7 @@ func (p *Poller) maybeArchive(ctx context.Context, w *Critic, snap *Snapshot) er
 	return nil
 }
 
-func summariseFinal(snap *Snapshot) string {
+func summariseFinal(snap *model.Snapshot) string {
 	if snap == nil || len(snap.PRs) == 0 {
 		return "no PR state recorded"
 	}

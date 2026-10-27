@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // fakeGH points GH.run at THIS test binary, re-executed as a child process
@@ -195,7 +197,7 @@ func TestFetchPRPaginatesReviewsNotJustTheNewest30(t *testing.T) {
 	}
 }
 
-func reviewIDs(st *PRState) []string {
+func reviewIDs(st *model.PRState) []string {
 	var out []string
 	for id := range st.Reviews {
 		out = append(out, id)
@@ -214,21 +216,21 @@ func TestFetchPRPassesReviewsCursorAsGHFlag(t *testing.T) {
 }
 
 func TestForgeHost(t *testing.T) {
-	ghe := PRRef{URL: "https://microsoft.ghe.com/bic/aether/pull/42612"}
-	pub := PRRef{URL: "https://github.com/acme/widget/pull/1"}
-	slug := PRRef{Owner: "acme", Repo: "widget", Number: 2}
+	ghe := model.PRRef{URL: "https://microsoft.ghe.com/bic/aether/pull/42612"}
+	pub := model.PRRef{URL: "https://github.com/acme/widget/pull/1"}
+	slug := model.PRRef{Owner: "acme", Repo: "widget", Number: 2}
 	for _, tc := range []struct {
 		name string
-		refs []PRRef
+		refs []model.PRRef
 		want string
 		bad  bool
 	}{
-		{name: "url names the host", refs: []PRRef{ghe}, want: "microsoft.ghe.com"},
-		{name: "slug takes the fallback", refs: []PRRef{slug}, want: "fallback.example"},
+		{name: "url names the host", refs: []model.PRRef{ghe}, want: "microsoft.ghe.com"},
+		{name: "slug takes the fallback", refs: []model.PRRef{slug}, want: "fallback.example"},
 		{name: "no refs takes the fallback", want: "fallback.example"},
-		{name: "two forges is an error", refs: []PRRef{ghe, pub}, bad: true},
+		{name: "two forges is an error", refs: []model.PRRef{ghe, pub}, bad: true},
 	} {
-		got, err := forgeHost(tc.refs, "fallback.example")
+		got, err := model.ForgeHost(tc.refs, "fallback.example")
 		if tc.bad != (err != nil) || got != tc.want && !tc.bad {
 			t.Errorf("%s: got %q, %v", tc.name, got, err)
 		}
@@ -266,25 +268,25 @@ func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
 	if !pr.Threads["T1"].AwaitingUs("jack") {
 		t.Error("a reply held in a pending review counted as an answer")
 	}
-	if _, ok := findMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
+	if _, ok := model.FindMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
 		t.Error("a pending comment was recovered as sent")
 	}
-	d := Diff(&Snapshot{PRs: map[PRKey]*PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
-		&Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}, Complete: true}, "jack")
-	var got []Event
+	d := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
+		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true}, "jack")
+	var got []model.Event
 	for _, e := range d.Events {
-		if e.Kind == EvPendingReview {
+		if e.Kind == model.EvPendingReview {
 			got = append(got, e)
 		}
 	}
-	if len(got) != 1 || got[0].Tier != TierWake || !strings.Contains(got[0].Detail, "213120916") {
+	if len(got) != 1 || got[0].Tier != model.TierWake || !strings.Contains(got[0].Detail, "213120916") {
 		t.Fatalf("pending review events %+v; want one wake naming 213120916", got)
 	}
-	gone := Diff(&Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}, Complete: true},
-		&Snapshot{PRs: map[PRKey]*PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}, Complete: true}, "jack")
+	gone := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true},
+		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}, Complete: true}, "jack")
 	found := false
 	for _, e := range gone.Events {
-		found = found || e.Kind == EvPendingReviewGone
+		found = found || e.Kind == model.EvPendingReviewGone
 	}
 	if !found {
 		t.Error("the pending review going away was not recorded")

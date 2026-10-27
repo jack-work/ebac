@@ -4,150 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/gluck/ebac/internal/model"
 )
-
-// Tier decides whether an event is worth a Figaro turn.
-//
-// A review costs real money (the prangl log measures one at ~2.8M billable
-// tokens, and identifies TURNS as the lever, not verbosity). So the default
-// is silence: an event must earn tier 1 to wake anyone.
-type Tier int
-
-const (
-	TierRecord Tier = 2 // written to state, never wakes the aria
-	TierWake   Tier = 1 // worth a turn
-)
-
-type EventKind string
-
-const (
-	EvPRAdded         EventKind = "pr_added"
-	EvPRClosed        EventKind = "pr_closed"
-	EvPRMerged        EventKind = "pr_merged"
-	EvPRReopened      EventKind = "pr_reopened"
-	EvHeadMoved       EventKind = "head_moved"
-	EvDraftChanged    EventKind = "draft_changed"
-	EvThreadNew       EventKind = "thread_new"
-	EvThreadResolved  EventKind = "thread_resolved"
-	EvThreadUnresolve EventKind = "thread_unresolved"
-	EvThreadGone      EventKind = "thread_deleted"
-	EvCommentNew      EventKind = "comment_new"
-	EvCommentEdited   EventKind = "comment_edited"
-	EvReviewSubmitted EventKind = "review_submitted"
-	// EvReviewEdited fires when a review's State did NOT change but its
-	// Body did: some reviewer accounts (observed live: an automated
-	// "aether-review-bot:v1" identity) edit their verdict in place as new
-	// commits land, holding one review ID CHANGES_REQUESTED for the whole
-	// PR while silently swapping which finding is the blocking one. A
-	// diff keyed on State alone sees nothing there to report.
-	EvReviewEdited EventKind = "review_edited"
-	// EvPRCommentNew/Edited cover top-level PR conversation comments —
-	// GraphQL pullRequest.comments, not tied to any review thread. Kept as
-	// distinct kinds from EvCommentNew/Edited (which are thread-scoped)
-	// because a top-level comment has no ThreadID and no resolution state.
-	EvPRCommentNew    EventKind = "pr_comment_new"
-	EvPRCommentEdited EventKind = "pr_comment_edited"
-	// EvPendingReview: an unsubmitted review of ours exists. Every thread
-	// reply lands in it unseen and every new review is refused until the
-	// operator submits or deletes it; ebac does neither.
-	EvPendingReview     EventKind = "pending_review"
-	EvPendingReviewGone EventKind = "pending_review_gone"
-)
-
-type Event struct {
-	Kind     EventKind `json:"kind"`
-	Tier     Tier      `json:"tier"`
-	PR       PRKey     `json:"pr"`
-	ThreadID string    `json:"thread_id,omitempty"`
-	Comment  string    `json:"comment_id,omitempty"`
-	// ReviewID is the GraphQL review node ID for EvReviewSubmitted. It
-	// exists only so mergeEvents' dedup key has something to distinguish
-	// one review submission from another: two reviews on the same PR by
-	// the same author in the same state (e.g. GitHub splitting one
-	// "batch" of inline comments into several COMMENTED reviews) are
-	// otherwise byte-for-byte identical Events and collapse to one.
-	ReviewID string `json:"review_id,omitempty"`
-	Author   string `json:"author,omitempty"`
-	IsBot    bool   `json:"is_bot,omitempty"`
-	Stamped  bool   `json:"stamped,omitempty"`
-	Path     string `json:"path,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-}
-
-func (e Event) Line() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s", e.PR, e.Kind)
-	if e.Author != "" {
-		who := e.Author
-		if e.IsBot {
-			who += " (bot)"
-		}
-		if e.Stamped {
-			who += " (bot-stamped, not a person's review)"
-		}
-		fmt.Fprintf(&b, " by %s", who)
-	}
-	if e.Path != "" {
-		fmt.Fprintf(&b, " on %s", e.Path)
-	}
-	if e.Detail != "" {
-		// Cap here, not only at the call sites that build Detail. This
-		// string lands in a form that is mirrored whole into a model's
-		// context; a bound that depends on every producer remembering to
-		// apply it is not a bound.
-		fmt.Fprintf(&b, " — %s", firstLine(e.Detail))
-	}
-	return b.String()
-}
-
-type Delta struct {
-	Events []Event `json:"events"`
-	// SuppressedDeletions records that a partial scan prevented us from
-	// concluding anything was removed. It is a first-class result, not a
-	// silence: "the instrument could not see" and "nothing was there" must
-	// never render identically.
-	SuppressedDeletions []PRKey `json:"suppressed_deletions,omitempty"`
-}
-
-func (d *Delta) Empty() bool { return len(d.Events) == 0 }
-
-func (d *Delta) Tier1() []Event {
-	var out []Event
-	for _, e := range d.Events {
-		if e.Tier == TierWake {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-func (d *Delta) WakeWorthy() bool { return len(d.Tier1()) > 0 }
-
-// Summary is the one line that lands on the form. Keep it short: the form
-// is mirrored whole into context on every change.
-func (d *Delta) Summary() string {
-	if d.Empty() {
-		return "no change"
-	}
-	byKind := map[EventKind]int{}
-	order := []EventKind{}
-	for _, e := range d.Tier1() {
-		if byKind[e.Kind] == 0 {
-			order = append(order, e.Kind)
-		}
-		byKind[e.Kind]++
-	}
-	if len(order) == 0 {
-		return fmt.Sprintf("%d background event(s), none wake-worthy", len(d.Events))
-	}
-	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
-	parts := make([]string, 0, len(order))
-	for _, k := range order {
-		parts = append(parts, fmt.Sprintf("%d %s", byKind[k], k))
-	}
-	return strings.Join(parts, ", ")
-}
 
 // Diff computes prev -> next.
 //
@@ -156,10 +15,10 @@ func (d *Delta) Summary() string {
 //   - A comment whose body digest moved is an edit, and an edit resets any
 //     prior delivery state upstream (the poller handles that).
 //   - Bot authorship demotes an event to tier 2 but never discards it.
-func Diff(prev, next *Snapshot, me string) *Delta {
-	d := &Delta{}
+func Diff(prev, next *model.Snapshot, me string) *model.Delta {
+	d := &model.Delta{}
 	if prev == nil {
-		prev = &Snapshot{PRs: map[PRKey]*PRState{}, Complete: true}
+		prev = &model.Snapshot{PRs: map[model.PRKey]*model.PRState{}, Complete: true}
 	}
 
 	for _, key := range next.SortedPRKeys() {
@@ -167,8 +26,8 @@ func Diff(prev, next *Snapshot, me string) *Delta {
 		pp := prev.PRs[key]
 
 		if pp == nil {
-			d.Events = append(d.Events, Event{
-				Kind: EvPRAdded, Tier: TierWake, PR: key, URL: np.URL,
+			d.Events = append(d.Events, model.Event{
+				Kind: model.EvPRAdded, Tier: model.TierWake, PR: key, URL: np.URL,
 				Author: np.Author, Detail: np.Title,
 			})
 			// A newly-criticed PR reports its standing feedback as one
@@ -176,8 +35,8 @@ func Diff(prev, next *Snapshot, me string) *Delta {
 			// detonates a hundred-event first round.
 			c := np.Counts(me)
 			if c.Unresolved > 0 {
-				d.Events = append(d.Events, Event{
-					Kind: EvThreadNew, Tier: TierRecord, PR: key,
+				d.Events = append(d.Events, model.Event{
+					Kind: model.EvThreadNew, Tier: model.TierRecord, PR: key,
 					Detail: fmt.Sprintf("%d pre-existing unresolved thread(s) at adoption", c.Unresolved),
 				})
 			}
@@ -197,8 +56,8 @@ func Diff(prev, next *Snapshot, me string) *Delta {
 			continue
 		}
 		_ = pp
-		d.Events = append(d.Events, Event{
-			Kind: EvPRClosed, Tier: TierRecord, PR: key,
+		d.Events = append(d.Events, model.Event{
+			Kind: model.EvPRClosed, Tier: model.TierRecord, PR: key,
 			Detail: "no longer in critic scope",
 		})
 	}
@@ -208,28 +67,28 @@ func Diff(prev, next *Snapshot, me string) *Delta {
 	return d
 }
 
-func diffPR(d *Delta, pp, np *PRState, me string) {
+func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 	key := np.Key
 
 	if pp.State != np.State {
 		switch np.State {
 		case "MERGED":
-			d.Events = append(d.Events, Event{Kind: EvPRMerged, Tier: TierWake, PR: key, URL: np.URL})
+			d.Events = append(d.Events, model.Event{Kind: model.EvPRMerged, Tier: model.TierWake, PR: key, URL: np.URL})
 		case "CLOSED":
-			d.Events = append(d.Events, Event{Kind: EvPRClosed, Tier: TierWake, PR: key, URL: np.URL})
+			d.Events = append(d.Events, model.Event{Kind: model.EvPRClosed, Tier: model.TierWake, PR: key, URL: np.URL})
 		case "OPEN":
-			d.Events = append(d.Events, Event{Kind: EvPRReopened, Tier: TierWake, PR: key, URL: np.URL})
+			d.Events = append(d.Events, model.Event{Kind: model.EvPRReopened, Tier: model.TierWake, PR: key, URL: np.URL})
 		}
 	}
 
 	if pp.IsDraft != np.IsDraft {
 		detail := "marked ready for review"
-		tier := TierWake
+		tier := model.TierWake
 		if np.IsDraft {
 			detail = "converted to draft"
-			tier = TierRecord
+			tier = model.TierRecord
 		}
-		d.Events = append(d.Events, Event{Kind: EvDraftChanged, Tier: tier, PR: key, Detail: detail})
+		d.Events = append(d.Events, model.Event{Kind: model.EvDraftChanged, Tier: tier, PR: key, Detail: detail})
 	}
 
 	had := map[string]bool{}
@@ -238,14 +97,14 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 	}
 	for _, r := range np.Pending {
 		if !had[r.ID] {
-			d.Events = append(d.Events, Event{Kind: EvPendingReview, Tier: TierWake, PR: key, ReviewID: r.ID, Author: r.Author,
+			d.Events = append(d.Events, model.Event{Kind: model.EvPendingReview, Tier: model.TierWake, PR: key, ReviewID: r.ID, Author: r.Author,
 				Detail: fmt.Sprintf("review %d (opened %s) holds %d comments only its author can see; replies land in it and new reviews are refused until the operator submits or deletes it",
 					r.DatabaseID, r.CreatedAt, r.Comments)})
 		}
 		delete(had, r.ID)
 	}
 	for id := range had {
-		d.Events = append(d.Events, Event{Kind: EvPendingReviewGone, Tier: TierRecord, PR: key, ReviewID: id,
+		d.Events = append(d.Events, model.Event{Kind: model.EvPendingReviewGone, Tier: model.TierRecord, PR: key, ReviewID: id,
 			Detail: "the pending review was submitted or deleted"})
 	}
 
@@ -253,13 +112,13 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 		// A push only earns a turn when there is outstanding feedback it
 		// might have addressed. Force-push churn on a PR nobody has
 		// commented on is not news.
-		tier := TierRecord
+		tier := model.TierRecord
 		if c := np.Counts(me); c.Unresolved > 0 {
-			tier = TierWake
+			tier = model.TierWake
 		}
-		d.Events = append(d.Events, Event{
-			Kind: EvHeadMoved, Tier: tier, PR: key,
-			Detail: short(pp.HeadSHA) + " -> " + short(np.HeadSHA),
+		d.Events = append(d.Events, model.Event{
+			Kind: model.EvHeadMoved, Tier: tier, PR: key,
+			Detail: model.Short(pp.HeadSHA) + " -> " + model.Short(np.HeadSHA),
 		})
 	}
 
@@ -277,60 +136,60 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			// alice" quoting alice's reply, crediting the operator's
 			// own words as the finding and erasing bob's actual one.
 			first := nt.FirstComment()
-			ev := Event{
-				Kind: EvThreadNew, Tier: TierWake, PR: key, ThreadID: id,
+			ev := model.Event{
+				Kind: model.EvThreadNew, Tier: model.TierWake, PR: key, ThreadID: id,
 				Path: nt.Path,
 			}
 			if first != nil {
 				ev.Author, ev.IsBot, ev.Comment, ev.URL = first.Author, first.IsBot, first.ID, first.URL
-				ev.Detail = firstLine(first.Body)
+				ev.Detail = model.FirstLine(first.Body)
 				if first.IsBot || strings.EqualFold(first.Author, me) {
-					ev.Tier = TierRecord
+					ev.Tier = model.TierRecord
 				}
 			}
 			if nt.IsResolved {
-				ev.Tier = TierRecord
+				ev.Tier = model.TierRecord
 			}
 			d.Events = append(d.Events, ev)
 			continue
 		}
 
 		if pt.IsResolved != nt.IsResolved {
-			kind, tier := EvThreadResolved, TierRecord
+			kind, tier := model.EvThreadResolved, model.TierRecord
 			if !nt.IsResolved {
 				// Somebody re-opened a thread: that is a request.
-				kind, tier = EvThreadUnresolve, TierWake
+				kind, tier = model.EvThreadUnresolve, model.TierWake
 			}
-			d.Events = append(d.Events, Event{Kind: kind, Tier: tier, PR: key, ThreadID: id, Path: nt.Path})
+			d.Events = append(d.Events, model.Event{Kind: kind, Tier: tier, PR: key, ThreadID: id, Path: nt.Path})
 		}
 
-		prevComments := map[string]*Comment{}
+		prevComments := map[string]*model.Comment{}
 		for _, c := range pt.Comments {
 			prevComments[c.ID] = c
 		}
 		for _, nc := range nt.Comments {
 			pc := prevComments[nc.ID]
 			if pc == nil {
-				ev := Event{
-					Kind: EvCommentNew, Tier: TierWake, PR: key, ThreadID: id,
+				ev := model.Event{
+					Kind: model.EvCommentNew, Tier: model.TierWake, PR: key, ThreadID: id,
 					Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-					Path: nt.Path, URL: nc.URL, Detail: firstLine(nc.Body),
+					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body),
 				}
 				// Our own words never wake us.
 				if strings.EqualFold(nc.Author, me) || nc.IsBot || nt.IsResolved {
-					ev.Tier = TierRecord
+					ev.Tier = model.TierRecord
 				}
 				d.Events = append(d.Events, ev)
 				continue
 			}
 			if pc.Digest != nc.Digest {
-				ev := Event{
-					Kind: EvCommentEdited, Tier: TierWake, PR: key, ThreadID: id,
+				ev := model.Event{
+					Kind: model.EvCommentEdited, Tier: model.TierWake, PR: key, ThreadID: id,
 					Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-					Path: nt.Path, URL: nc.URL, Detail: firstLine(nc.Body),
+					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body),
 				}
 				if strings.EqualFold(nc.Author, me) || nc.IsBot || nt.IsResolved {
-					ev.Tier = TierRecord
+					ev.Tier = model.TierRecord
 				}
 				d.Events = append(d.Events, ev)
 			}
@@ -346,8 +205,8 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			d.SuppressedDeletions = append(d.SuppressedDeletions, key)
 			continue
 		}
-		d.Events = append(d.Events, Event{
-			Kind: EvThreadGone, Tier: TierRecord, PR: key, ThreadID: id, Path: pt.Path,
+		d.Events = append(d.Events, model.Event{
+			Kind: model.EvThreadGone, Tier: model.TierRecord, PR: key, ThreadID: id, Path: pt.Path,
 		})
 	}
 
@@ -363,7 +222,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 	for id, nr := range np.Reviews {
 		pv, existed := pp.Reviews[id]
 		if existed && pv.State == nr.State {
-			if pv.digest() == nr.digest() {
+			if pv.BodyDigest() == nr.BodyDigest() {
 				continue
 			}
 			// Same state, different body: some reviewer accounts edit
@@ -372,19 +231,19 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			// review across many rounds while swapping the actual blocking
 			// finding underneath). The label never changed but the
 			// substance did -- that is exactly what a wake exists for.
-			tier := TierWake
+			tier := model.TierWake
 			if nr.IsBot || strings.EqualFold(nr.Author, me) {
-				tier = TierRecord
+				tier = model.TierRecord
 			}
-			d.Events = append(d.Events, Event{
-				Kind: EvReviewEdited, Tier: tier, PR: key, Author: nr.Author,
+			d.Events = append(d.Events, model.Event{
+				Kind: model.EvReviewEdited, Tier: tier, PR: key, Author: nr.Author,
 				IsBot: nr.IsBot, Stamped: nr.Stamped, Detail: nr.State + " (findings updated)", ReviewID: id,
 			})
 			continue
 		}
-		tier := TierWake
+		tier := model.TierWake
 		if nr.IsBot || strings.EqualFold(nr.Author, me) || nr.State == "COMMENTED" && nr.Body == "" {
-			tier = TierRecord
+			tier = model.TierRecord
 		}
 		detail := nr.State
 		if existed {
@@ -401,8 +260,8 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 			// still readable in the review body if anyone needs it.
 			detail = "DISMISSED (submitted and dismissed between polls; original verdict not observed)"
 		}
-		d.Events = append(d.Events, Event{
-			Kind: EvReviewSubmitted, Tier: tier, PR: key, Author: nr.Author,
+		d.Events = append(d.Events, model.Event{
+			Kind: model.EvReviewSubmitted, Tier: tier, PR: key, Author: nr.Author,
 			IsBot: nr.IsBot, Stamped: nr.Stamped, Detail: detail, ReviewID: id,
 		})
 	}
@@ -410,7 +269,7 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 	// Top-level PR conversation comments: same new/edited shape as thread
 	// comments, but with no ThreadID and no resolved-state demotion (a
 	// top-level comment cannot be resolved).
-	prevPRComments := map[string]*Comment{}
+	prevPRComments := map[string]*model.Comment{}
 	for id, c := range pp.Comments {
 		prevPRComments[id] = c
 	}
@@ -418,25 +277,25 @@ func diffPR(d *Delta, pp, np *PRState, me string) {
 		nc := np.Comments[id]
 		pc := prevPRComments[id]
 		if pc == nil {
-			ev := Event{
-				Kind: EvPRCommentNew, Tier: TierWake, PR: key,
+			ev := model.Event{
+				Kind: model.EvPRCommentNew, Tier: model.TierWake, PR: key,
 				Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-				URL: nc.URL, Detail: firstLine(nc.Body),
+				URL: nc.URL, Detail: model.FirstLine(nc.Body),
 			}
 			if strings.EqualFold(nc.Author, me) || nc.IsBot || isAutomatonAck(nc.Body) {
-				ev.Tier = TierRecord
+				ev.Tier = model.TierRecord
 			}
 			d.Events = append(d.Events, ev)
 			continue
 		}
 		if pc.Digest != nc.Digest {
-			ev := Event{
-				Kind: EvPRCommentEdited, Tier: TierWake, PR: key,
+			ev := model.Event{
+				Kind: model.EvPRCommentEdited, Tier: model.TierWake, PR: key,
 				Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-				URL: nc.URL, Detail: firstLine(nc.Body),
+				URL: nc.URL, Detail: model.FirstLine(nc.Body),
 			}
 			if strings.EqualFold(nc.Author, me) || nc.IsBot || isAutomatonAck(nc.Body) {
-				ev.Tier = TierRecord
+				ev.Tier = model.TierRecord
 			}
 			d.Events = append(d.Events, ev)
 		}
@@ -458,40 +317,15 @@ func isAutomatonAck(body string) bool {
 	return strings.Contains(body, automatonAckMarker)
 }
 
-func short(sha string) string {
-	if len(sha) > 8 {
-		return sha[:8]
-	}
-	return sha
-}
-
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		s = s[:i]
-	}
-	const max = 110
-	if len(s) > max {
-		// Trim on a rune boundary so a multi-byte character is never cut
-		// in half into a replacement char.
-		r := []rune(s)
-		if len(r) > max {
-			r = r[:max]
-		}
-		s = string(r) + "…"
-	}
-	return s
-}
-
 // asReviewer re-tiers a delta for a seat reviewing someone else's PR: every
 // push and every dismissal of our own review earns a turn, because on repos
 // that dismiss stale approvals both mean the approval is gone.
-func asReviewer(d *Delta, me string) {
+func asReviewer(d *model.Delta, me string) {
 	for i, e := range d.Events {
-		ownDismissed := e.Kind == EvReviewSubmitted && strings.EqualFold(e.Author, me) &&
+		ownDismissed := e.Kind == model.EvReviewSubmitted && strings.EqualFold(e.Author, me) &&
 			strings.HasSuffix(e.Detail, "DISMISSED")
-		if e.Kind == EvHeadMoved || ownDismissed {
-			d.Events[i].Tier = TierWake
+		if e.Kind == model.EvHeadMoved || ownDismissed {
+			d.Events[i].Tier = model.TierWake
 		}
 	}
 }

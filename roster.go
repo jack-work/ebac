@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // The roster is a special role: one form holding a view of every active PR
@@ -133,7 +135,7 @@ func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]Rost
 	return rows, sum, nil
 }
 
-func health(w *Critic, row RosterRow, timer TimerStatus) string {
+func health(w *model.Critic, row RosterRow, timer TimerStatus) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason
@@ -148,7 +150,7 @@ func health(w *Critic, row RosterRow, timer TimerStatus) string {
 	case len(w.Runtime.PendingEvents) > 0 && w.Runtime.RetryCount > 0:
 		return fmt.Sprintf("delivery retrying (%d)", w.Runtime.RetryCount)
 	case w.Runtime.LastError != "":
-		return "error: " + firstLine(w.Runtime.LastError)
+		return "error: " + model.FirstLine(w.Runtime.LastError)
 	}
 	return "ok"
 }
@@ -237,7 +239,7 @@ func ReadRoster(ctx context.Context, st *Store, fig *Figaro) (rows []RosterRow, 
 // modeLabel renders the mode with a "+w" suffix when the critic may act on its
 // own PRs, so `ebac ls` shows the grant at a glance rather than hiding it one
 // `ebac show` away. A capability nobody can see is a capability nobody audits.
-func modeLabel(w *Critic) string {
+func modeLabel(w *model.Critic) string {
 	s := string(w.Mode)
 	if w.Write {
 		s += "+w"

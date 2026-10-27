@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gluck/ebac/internal/model"
+)
 
 // TestPRTableRowsAwaitingUsesRealIdentity reproduces the bug where `ebac
 // show` always echoed UNRES into the AWAITING column: cmdShow used to call
@@ -17,16 +21,16 @@ import "testing"
 // right and what the old hardcoded "" call site got wrong.
 func TestPRTableRowsAwaitingUsesRealIdentity(t *testing.T) {
 	const me = "figaro-bot"
-	pr := &PRState{
-		Key:     MakePRKey("bic", "aether", 30471),
+	pr := &model.PRState{
+		Key:     model.MakePRKey("bic", "aether", 30471),
 		State:   "OPEN",
 		HeadSHA: "c8a67a72",
 		Title:   "Split atomic instructions",
-		Threads: map[string]*Thread{
+		Threads: map[string]*model.Thread{
 			"t1": { // unresolved, but WE answered last -> not awaiting us
 				ID:         "t1",
 				IsResolved: false,
-				Comments: []*Comment{
+				Comments: []*model.Comment{
 					{Author: "a-human", Body: "question"},
 					{Author: me, Body: "answered"},
 				},
@@ -34,15 +38,15 @@ func TestPRTableRowsAwaitingUsesRealIdentity(t *testing.T) {
 			"t2": { // unresolved, human answered last -> awaiting us
 				ID:         "t2",
 				IsResolved: false,
-				Comments: []*Comment{
+				Comments: []*model.Comment{
 					{Author: me, Body: "answered"},
 					{Author: "a-human", Body: "one more thing"},
 				},
 			},
 		},
 	}
-	snap := &Snapshot{PRs: map[PRKey]*PRState{pr.Key: pr}}
-	refs := []PRRef{{Owner: "bic", Repo: "aether", Number: 30471, Title: pr.Title}}
+	snap := &model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}}
+	refs := []model.PRRef{{Owner: "bic", Repo: "aether", Number: 30471, Title: pr.Title}}
 
 	rows := prTableRows(refs, snap, me)
 	if len(rows) != 1 {

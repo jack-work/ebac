@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jack-work/figaro/api/form"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
+	"github.com/jack-work/figaro/api/form"
 )
 
 func TestLeaseTTLRenewsOnlyNearTheDeadline(t *testing.T) {
@@ -183,13 +185,13 @@ func TestNextBoardSurvivesALeafSystem(t *testing.T) {
 	b, _ := json.Marshal(cur)
 	_ = json.Unmarshal(b, &curKeys)
 
-	system := objectOf(curKeys["system"])
+	system := model.ObjectOf(curKeys["system"])
 	system["ebac"] = json.RawMessage(`{"runtime":{"round":41}}`)
-	posts := objectOf(curKeys["post"])
-	p1 := objectOf(posts["p1"])
+	posts := model.ObjectOf(curKeys["post"])
+	p1 := model.ObjectOf(posts["p1"])
 	p1["sent"] = json.RawMessage(`{"url":"u"}`)
-	posts["p1"] = mustJSON(p1)
-	next, err := nextBoard(cur, map[string]json.RawMessage{"system": mustJSON(system), "post": mustJSON(posts)}, nil)
+	posts["p1"] = model.MustJSON(p1)
+	next, err := nextBoard(cur, map[string]json.RawMessage{"system": model.MustJSON(system), "post": model.MustJSON(posts)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

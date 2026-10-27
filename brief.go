@@ -6,13 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // The brief is what actually costs money: it is a turn. The round's change is
 // already on the role form, which the seat studies, so the brief only says
 // where to look: the summary, the standing, the form, and the ack.
-func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int) string {
-	d := &Delta{Events: events}
+func buildBrief(w *model.Critic, snap *model.Snapshot, events []model.Event, me string, retry int) string {
+	d := &model.Delta{Events: events}
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "ebac %s round %d: %s\n", w.Name, w.Runtime.Round, d.Summary())
@@ -32,7 +34,7 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 					r.DatabaseID, r.Author, r.Comments)
 			}
 			fmt.Fprintf(&b, "  %s %s head %s: %d unresolved, %d awaiting a reply%s\n",
-				k, p.State, short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
+				k, p.State, model.Short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
 		}
 	}
 	fmt.Fprintf(&b, "New and edited comments are in your studied form %s, key inbox (each cut at 2 KB; the url has the rest). "+
@@ -45,10 +47,10 @@ func buildBrief(w *Critic, snap *Snapshot, events []Event, me string, retry int)
 
 // protocolText is everything a seat must know that does not change between
 // rounds. It is projected onto the role form, never repeated in a brief.
-func protocolText(w *Critic, snap *Snapshot, me string) string {
+func protocolText(w *model.Critic, snap *model.Snapshot, me string) string {
 	var b strings.Builder
 	b.WriteString("BOUNDARY\n")
-	if w.Mode == ModeReviewer {
+	if w.Mode == model.ModeReviewer {
 		b.WriteString(reviewerBoundary(w, snap, me))
 	} else if w.Write {
 		b.WriteString("  You have WRITE on these pull requests: reply to threads, comment, and push\n")
@@ -61,13 +63,13 @@ func protocolText(w *Critic, snap *Snapshot, me string) string {
 		b.WriteString("  touch their PRs and you have no gate. Report; do not act.\n\n")
 	}
 	switch w.Mode {
-	case ModeTeams:
+	case model.ModeTeams:
 		b.WriteString(teamsCharge(w))
-	case ModeAuthor:
+	case model.ModeAuthor:
 		b.WriteString(authorCharge(w))
-	case ModeDevelop:
+	case model.ModeDevelop:
 		b.WriteString(developCharge(w))
-	case ModeReviewer:
+	case model.ModeReviewer:
 		b.WriteString(reviewerCharge(w, snap))
 	default:
 		b.WriteString(reviewCharge(w))
@@ -117,7 +119,7 @@ func jsonLen(s string) int {
 	return len(b)
 }
 
-func reviewCharge(w *Critic) string {
+func reviewCharge(w *model.Critic) string {
 	var b strings.Builder
 	b.WriteString("YOUR JOB\n")
 	b.WriteString("  Read the delta. Decide whether anything here needs the operator. If it does, say so\n")
@@ -195,7 +197,7 @@ func writeDiscipline() string {
 		"  fewer words. A reviewer who found real defects has earned a light touch.\n"
 }
 
-func developCharge(w *Critic) string {
+func developCharge(w *model.Critic) string {
 	var b strings.Builder
 	b.WriteString("YOUR JOB — DEVELOP MODE\n")
 	b.WriteString("  You are not primarily reviewing these PRs. You are the harness's own test:\n")
@@ -250,7 +252,7 @@ func readSignature() (string, error) {
 	return sig, nil
 }
 
-func reviewerBoundary(w *Critic, snap *Snapshot, me string) string {
+func reviewerBoundary(w *model.Critic, snap *model.Snapshot, me string) string {
 	var b strings.Builder
 	b.WriteString("  You may comment on and reply to threads on the pull requests above.\n")
 	if w.Approve {
@@ -268,7 +270,7 @@ func reviewerBoundary(w *Critic, snap *Snapshot, me string) string {
 	return b.String()
 }
 
-func reviewerCharge(w *Critic, snap *Snapshot) string {
+func reviewerCharge(w *model.Critic, snap *model.Snapshot) string {
 	var b strings.Builder
 	b.WriteString("YOUR JOB — REVIEWER\n")
 	b.WriteString("  Review someone else's change with a light touch. The author decides everything.\n")
@@ -334,7 +336,7 @@ func reviewerCharge(w *Critic, snap *Snapshot) string {
 	return b.String()
 }
 
-func teamsCharge(w *Critic) string {
+func teamsCharge(w *model.Critic) string {
 	topic := ""
 	if w.Chat != nil {
 		topic = w.Chat.Topic
