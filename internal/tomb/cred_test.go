@@ -1,4 +1,4 @@
-package main
+package tomb
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 func TestTombGetsItsTokenOnFd3(t *testing.T) {
 	ctx := context.Background()
 	fakeCredExec(t, "tomb-fd")
-	tb := &Tomb{Bin: "tomb", Timeout: teamsTombWait, Cred: forge.NewCred("band-cred", forge.CredTeams)}
+	tb := &Tomb{Bin: "tomb", Timeout: TeamsTombWait, Cred: forge.NewCred("band-cred", forge.CredTeams)}
 	msgs, err := tb.Messages(ctx, "19:abc@thread.v2", 5)
 	if err != nil {
 		t.Fatal(err)

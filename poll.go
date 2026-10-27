@@ -10,6 +10,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/tomb"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -24,7 +25,7 @@ const (
 type Poller struct {
 	Store  *Store
 	GH     *forge.GH
-	Tomb   *Tomb
+	Tomb   *tomb.Tomb
 	Fig    *Figaro
 	Out    io.Writer
 	DryRun bool

@@ -1,21 +1,19 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/tomb"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
@@ -37,123 +35,9 @@ const (
 	teamsGoneAfter = 3 // consecutive "gone" answers before the chat is declared gone
 )
 
-const teamsTombWait = 60 * time.Second
-
 // teamsBlindAfter is how long the watcher may fail to read the chat before it
 // tells the seat it is not hearing it. A var so a test can shorten it.
 var teamsBlindAfter = 10 * time.Minute
-
-type TeamsMsg struct {
-	ID          string         `json:"id"`
-	Version     string         `json:"version"`
-	ComposeTime string         `json:"composetime"`
-	Arrival     string         `json:"originalarrivaltime"`
-	MessageType string         `json:"messagetype"`
-	From        string         `json:"imdisplayname"`
-	FromURL     string         `json:"from"`
-	TokenName   string         `json:"fromDisplayNameInToken"`
-	Content     string         `json:"content"`
-	Properties  map[string]any `json:"properties"`
-}
-
-func (m TeamsMsg) isMessage() bool {
-	return m.MessageType == "RichText/Html" || m.MessageType == "Text" || strings.HasPrefix(m.MessageType, "RichText")
-}
-
-func (m TeamsMsg) deleted() bool {
-	if m.Properties != nil {
-		if v, ok := m.Properties["deletetime"]; ok && v != nil && fmt.Sprint(v) != "" && fmt.Sprint(v) != "0" {
-			return true
-		}
-	}
-	return strings.TrimSpace(m.Content) == ""
-}
-
-// senderID is the last segment of the from URL: 8:orgid:<guid> for a person.
-func (m TeamsMsg) senderID() string {
-	return m.FromURL[strings.LastIndex(m.FromURL, "/")+1:]
-}
-
-// sender names who wrote m: the row's name, the token's, a name learned from
-// another row of the same sender, and at worst the sender id itself.
-func (m TeamsMsg) sender(names map[string]string) string {
-	for _, n := range []string{m.From, m.TokenName, names[m.senderID()], m.senderID()} {
-		if n = strings.TrimSpace(n); n != "" {
-			return n
-		}
-	}
-	return "unknown sender"
-}
-
-func (m TeamsMsg) hasImage() bool { return strings.Contains(m.Content, "<img") }
-
-// Tomb runs the tomb CLI. Its cwd is a scratch dir: tomb writes teams.log
-// into the cwd unless told otherwise, and --log ” is the otherwise.
-type Tomb struct {
-	Bin     string
-	Timeout time.Duration
-	// Cred mints the Teams token (band-cred teams-ebac), handed to tomb on fd 3
-	// with TOMB_AAD_TOKEN_FD=3: the env carries the fd number, never the token.
-	// nil only in tests that fake tomb.
-	Cred *forge.Cred
-}
-
-var errTombGone = errors.New("chat gone")
-
-func (t *Tomb) Messages(ctx context.Context, conv string, limit int) ([]TeamsMsg, error) {
-	ctx, cancel := context.WithTimeout(ctx, t.Timeout)
-	defer cancel()
-	cmd := forge.ExecCommandContext(ctx, t.Bin, "--log", "", "--json", "--raw", "messages", conv, "--limit", fmt.Sprint(limit))
-	cmd.Dir = os.TempDir()
-	cmd.Env = append(os.Environ(), "NO_COLOR=1")
-	if t.Cred != nil {
-		tok, err := t.Cred.Token(ctx)
-		if err != nil {
-			return nil, err
-		}
-		r, w, err := os.Pipe()
-		if err != nil {
-			return nil, err
-		}
-		defer r.Close()
-		// A token is a few KB, far under the pipe buffer: write it all, then close.
-		if _, err := w.WriteString(tok); err != nil {
-			w.Close()
-			return nil, err
-		}
-		w.Close()
-		cmd.ExtraFiles = []*os.File{r} // fd 3 in the child
-		cmd.Env = append(cmd.Env, "TOMB_AAD_TOKEN_FD=3")
-	}
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(errb.String())
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("tomb timed out after %s", t.Timeout)
-		}
-		if teamsGoneText.MatchString(msg) {
-			return nil, fmt.Errorf("%w: %s", errTombGone, msg)
-		}
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("tomb: %s", msg)
-	}
-	var resp struct {
-		Messages []TeamsMsg `json:"messages"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
-		return nil, fmt.Errorf("tomb: unreadable answer: %w", err)
-	}
-	return resp.Messages, nil
-}
-
-// Only the CHAT API's 404 or 403 means the chat may be gone. tomb's auth
-// errors read "auth service returned 403: ..." and an expired login must stay
-// transient: matching any "returned 403" would stop the critic for good after
-// three rounds of a sign-in problem.
-var teamsGoneText = regexp.MustCompile(`\bchat API returned (404|403)\b`)
 
 var (
 	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</li>`)
@@ -171,7 +55,7 @@ func teamsText(content string) string {
 
 // teamsDiff compares a fetch with what was seen. The first round only
 // records: a watcher that starts by announcing fifty old messages is noise.
-func teamsDiff(st *model.TeamsState, msgs []TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]InboxItem) {
+func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]InboxItem) {
 	items = map[string]InboxItem{}
 	first := st.Seen == nil
 	if first {
@@ -181,9 +65,9 @@ func teamsDiff(st *model.TeamsState, msgs []TeamsMsg, chat *model.ChatRef) (even
 		st.Names = map[string]string{}
 	}
 	for _, m := range msgs {
-		if n := strings.TrimSpace(m.From); n != "" && m.isMessage() && m.senderID() != "" {
-			if _, ok := st.Names[m.senderID()]; ok || len(st.Names) < teamsNamesMax {
-				st.Names[m.senderID()] = n
+		if n := strings.TrimSpace(m.From); n != "" && m.IsMessage() && m.SenderID() != "" {
+			if _, ok := st.Names[m.SenderID()]; ok || len(st.Names) < teamsNamesMax {
+				st.Names[m.SenderID()] = n
 			}
 		}
 	}
@@ -192,16 +76,16 @@ func teamsDiff(st *model.TeamsState, msgs []TeamsMsg, chat *model.ChatRef) (even
 		quiet[strings.ToLower(q)] = true
 	}
 	// A quiet sender is matched by name, by sender id, or by the bare orgid guid.
-	isQuiet := func(m TeamsMsg, who string) bool {
-		id := strings.ToLower(m.senderID())
+	isQuiet := func(m tomb.TeamsMsg, who string) bool {
+		id := strings.ToLower(m.SenderID())
 		return quiet[strings.ToLower(who)] || (id != "" && (quiet[id] || quiet[strings.TrimPrefix(id, "8:orgid:")]))
 	}
 	for _, m := range msgs {
-		if !m.isMessage() || m.ID == "" {
+		if !m.IsMessage() || m.ID == "" {
 			continue
 		}
 		d := model.BodyDigest(m.Content)
-		if m.deleted() {
+		if m.Deleted() {
 			d = "deleted"
 		}
 		prev, seen := st.Seen[m.ID]
@@ -219,14 +103,14 @@ func teamsDiff(st *model.TeamsState, msgs []TeamsMsg, chat *model.ChatRef) (even
 			continue // created and deleted between two rounds
 		}
 		tier := model.TierWake
-		who := m.sender(st.Names)
+		who := m.Sender(st.Names)
 		if kind == "teams_deleted" || isQuiet(m, who) {
 			tier = model.TierRecord
 		}
 		body, cut := model.CutBody(teamsText(m.Content), teamsBodyBytes)
 		events = append(events, model.Event{Kind: model.EventKind(kind), Tier: tier, PR: model.PRKey(chat.Topic), Comment: m.ID, Author: who,
 			Detail: model.FirstLine(body)})
-		it := InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.senderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.hasImage(),
+		it := InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.SenderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(),
 			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
 		if it.HasImage {
 			it.Fetch += fmt.Sprintf("; images: tomb --log '' --download-images <dir> messages '%s' --limit %d", chat.ID, teamsLimit)
@@ -265,7 +149,7 @@ func pollTeams(ctx context.Context, p *Poller, w *model.Critic) error {
 
 	msgs, err := p.Tomb.Messages(ctx, w.Chat.ID, teamsLimit)
 	if err != nil {
-		if errors.Is(err, errTombGone) {
+		if errors.Is(err, tomb.ErrTombGone) {
 			st.GoneStreak++
 			if st.GoneSince == "" {
 				st.GoneSince = time.Now().UTC().Format(time.RFC3339)

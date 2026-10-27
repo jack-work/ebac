@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,17 +12,18 @@ import (
 
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/tomb"
 )
 
-func tmsg(id, from, content string) TeamsMsg {
-	return TeamsMsg{ID: id, Version: id, ComposeTime: "2026-10-21T22:00:00Z", MessageType: "RichText/Html", From: from, Content: content}
+func tmsg(id, from, content string) tomb.TeamsMsg {
+	return tomb.TeamsMsg{ID: id, Version: id, ComposeTime: "2026-10-21T22:00:00Z", MessageType: "RichText/Html", From: from, Content: content}
 }
 
 func testChat() *model.ChatRef {
 	return &model.ChatRef{ID: "19:abc@thread.v2", Topic: "MD1 + Cowork", Quiet: []string{"Jack Kelliher"}}
 }
 
-func baseline(t *testing.T, msgs ...TeamsMsg) *model.TeamsState {
+func baseline(t *testing.T, msgs ...tomb.TeamsMsg) *model.TeamsState {
 	t.Helper()
 	st := &model.TeamsState{}
 	ev, items := teamsDiff(st, msgs, testChat())
@@ -35,12 +35,12 @@ func baseline(t *testing.T, msgs ...TeamsMsg) *model.TeamsState {
 
 func TestTeamsFirstRoundBaselinesSilently(t *testing.T) {
 	st := baseline(t, tmsg("100", "Akshay", "<p>hi</p>"), tmsg("101", "Liang", "yo"),
-		TeamsMsg{ID: "102", MessageType: "ThreadActivity/AddMember"})
+		tomb.TeamsMsg{ID: "102", MessageType: "ThreadActivity/AddMember"})
 	if len(st.Seen) != 2 {
 		t.Fatalf("seen = %v; want the two messages and no thread activity", st.Seen)
 	}
 	// Positive control: the same state now reports a new message.
-	ev, _ := teamsDiff(st, []TeamsMsg{tmsg("103", "Akshay", "new")}, testChat())
+	ev, _ := teamsDiff(st, []tomb.TeamsMsg{tmsg("103", "Akshay", "new")}, testChat())
 	if len(ev) != 1 {
 		t.Fatalf("after the baseline a new message gave %d events", len(ev))
 	}
@@ -48,7 +48,7 @@ func TestTeamsFirstRoundBaselinesSilently(t *testing.T) {
 
 func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
 	st := baseline(t, tmsg("100", "Akshay", "old"))
-	ev, items := teamsDiff(st, []TeamsMsg{tmsg("100", "Akshay", "old"),
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("100", "Akshay", "old"),
 		tmsg("200", "Liang Shi", `<p>Ship it &amp; tell <b>Jack</b><br>line two</p><img src="x">`)}, testChat())
 	if len(ev) != 1 || ev[0].Kind != "teams_new" || ev[0].Tier != model.TierWake || ev[0].Author != "Liang Shi" {
 		t.Fatalf("events = %+v", ev)
@@ -70,7 +70,7 @@ func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
 
 func TestTeamsQuietSenderIsRecordedNotWoken(t *testing.T) {
 	st := baseline(t)
-	ev, items := teamsDiff(st, []TeamsMsg{tmsg("300", "jack kelliher", "note to self")}, testChat())
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("300", "jack kelliher", "note to self")}, testChat())
 	if len(ev) != 1 || ev[0].Tier != model.TierRecord {
 		t.Fatalf("quiet sender (case-insensitive) must be TierRecord: %+v", ev)
 	}
@@ -88,17 +88,17 @@ func TestTeamsEditIsContentNotVersion(t *testing.T) {
 	r := tmsg("400", "Akshay", "v1")
 	r.Version = "999"
 	r.Properties = map[string]any{"emotions": []any{map[string]any{"key": "like"}}}
-	if ev, _ := teamsDiff(st, []TeamsMsg{r}, testChat()); len(ev) != 0 {
+	if ev, _ := teamsDiff(st, []tomb.TeamsMsg{r}, testChat()); len(ev) != 0 {
 		t.Fatalf("a reaction produced %+v", ev)
 	}
-	ev, items := teamsDiff(st, []TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat())
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat())
 	if len(ev) != 1 || ev[0].Kind != "teams_edited" || ev[0].Tier != model.TierWake {
 		t.Fatalf("edit gave %+v", ev)
 	}
 	if items["teams-400"].Body != "v2" {
 		t.Fatalf("edit inbox body = %q", items["teams-400"].Body)
 	}
-	if ev, _ := teamsDiff(st, []TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat()); len(ev) != 0 {
+	if ev, _ := teamsDiff(st, []tomb.TeamsMsg{tmsg("400", "Akshay", "v2")}, testChat()); len(ev) != 0 {
 		t.Fatalf("an unchanged edit re-announced: %+v", ev)
 	}
 }
@@ -107,12 +107,12 @@ func TestTeamsDeletes(t *testing.T) {
 	st := baseline(t, tmsg("500", "Akshay", "oops"))
 	d := tmsg("500", "Akshay", "")
 	d.Properties = map[string]any{"deletetime": "1792621672158"}
-	ev, _ := teamsDiff(st, []TeamsMsg{d}, testChat())
+	ev, _ := teamsDiff(st, []tomb.TeamsMsg{d}, testChat())
 	if len(ev) != 1 || ev[0].Kind != "teams_deleted" || ev[0].Tier != model.TierRecord {
 		t.Fatalf("delete gave %+v", ev)
 	}
 	// Created and deleted between two rounds: nothing to say.
-	ev, items := teamsDiff(st, []TeamsMsg{d, func() TeamsMsg { m := d; m.ID = "501"; return m }()}, testChat())
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{d, func() tomb.TeamsMsg { m := d; m.ID = "501"; return m }()}, testChat())
 	if len(ev) != 0 || len(items) != 0 {
 		t.Fatalf("born-dead message gave %+v %v", ev, items)
 	}
@@ -120,7 +120,7 @@ func TestTeamsDeletes(t *testing.T) {
 
 func TestTeamsSeenIsPrunedOldestFirst(t *testing.T) {
 	st := &model.TeamsState{Seen: map[string]string{}}
-	var msgs []TeamsMsg
+	var msgs []tomb.TeamsMsg
 	for i := 0; i < teamsSeenMax+20; i++ {
 		msgs = append(msgs, tmsg(fmt.Sprint(1792621000000+i), "A", fmt.Sprint(i)))
 	}
@@ -138,14 +138,14 @@ func TestTeamsSeenIsPrunedOldestFirst(t *testing.T) {
 
 // ---------- tomb: fake exec ----------
 
-func fakeTomb(t *testing.T, scenario string) *Tomb {
+func fakeTomb(t *testing.T, scenario string) *tomb.Tomb {
 	t.Helper()
 	orig := forge.ExecCommandContext
 	forge.ExecCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=TestTombHelperProcess", "--", scenario}, args...)...)
 	}
 	t.Cleanup(func() { forge.ExecCommandContext = orig })
-	return &Tomb{Bin: "unused", Timeout: 10 * time.Second}
+	return &tomb.Tomb{Bin: "unused", Timeout: 10 * time.Second}
 }
 
 // TestTombHelperProcess is the fake tomb; gated on "--" in argv like TestHelperProcess.
@@ -179,34 +179,6 @@ func TestTombHelperProcess(t *testing.T) {
 		os.Exit(0)
 	}
 	os.Exit(1)
-}
-
-func TestTombErrorClassification(t *testing.T) {
-	ctx := context.Background()
-	for _, c := range []struct {
-		scenario string
-		gone     bool
-		text     string
-	}{
-		{"gone404", true, "chat API returned 404"},
-		{"gone403", true, "chat API returned 403"},
-		{"auth403", false, "auth service returned 403"},
-		{"down", false, "connection refused"},
-		{"garbage", false, "unreadable answer"},
-	} {
-		_, err := fakeTomb(t, c.scenario).Messages(ctx, "19:abc@thread.v2", 5)
-		if err == nil {
-			t.Fatalf("%s: no error", c.scenario)
-		}
-		if errors.Is(err, errTombGone) != c.gone || !strings.Contains(err.Error(), c.text) {
-			t.Errorf("%s: gone=%v err=%v; want gone=%v containing %q", c.scenario, errors.Is(err, errTombGone), err, c.gone, c.text)
-		}
-	}
-	// Positive control: the fake answers when it should.
-	msgs, err := fakeTomb(t, "ok").Messages(ctx, "19:abc@thread.v2", 5)
-	if err != nil || len(msgs) != 1 || msgs[0].From != "A" {
-		t.Fatalf("ok scenario: %v %+v", err, msgs)
-	}
 }
 
 // ---------- live: one teams critic through baseline, news and gone ----------
@@ -330,7 +302,7 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 
 const jackID = "8:orgid:bc3cb0f4-1239-4ec7-a528-4913522f79c5"
 
-func from(m TeamsMsg, id string) TeamsMsg {
+func from(m tomb.TeamsMsg, id string) tomb.TeamsMsg {
 	m.FromURL = "https://noam-pilot2.msgapi.teams.microsoft.com/v1/users/ME/contacts/" + id
 	return m
 }
@@ -340,7 +312,7 @@ func from(m TeamsMsg, id string) TeamsMsg {
 // still matches.
 func TestTeamsBlankNameUsesLearnedNameAndStaysQuiet(t *testing.T) {
 	st := baseline(t, from(tmsg("600", "Jack Kelliher", "named row"), jackID))
-	ev, items := teamsDiff(st, []TeamsMsg{from(tmsg("601", "", "blank row"), jackID)}, testChat())
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{from(tmsg("601", "", "blank row"), jackID)}, testChat())
 	if len(ev) != 1 || ev[0].Author != "Jack Kelliher" || ev[0].Tier != model.TierRecord {
 		t.Fatalf("blank-name row from a quiet sender: %+v", ev)
 	}
@@ -354,7 +326,7 @@ func TestTeamsUnknownBlankSenderShowsIDAndQuietMatchesByID(t *testing.T) {
 	chat.Quiet = []string{"bc3cb0f4-1239-4ec7-a528-4913522f79c5"} // bare guid
 	st := &model.TeamsState{}
 	teamsDiff(st, nil, chat)
-	ev, _ := teamsDiff(st, []TeamsMsg{
+	ev, _ := teamsDiff(st, []tomb.TeamsMsg{
 		from(tmsg("700", "", "self note"), jackID),
 		from(tmsg("701", "", "someone else"), "8:orgid:00000000-0000-0000-0000-000000000001"),
 	}, chat)
@@ -375,7 +347,7 @@ func TestTeamsTokenNameFallback(t *testing.T) {
 	st := baseline(t)
 	m := from(tmsg("800", "", "x"), "8:orgid:00000000-0000-0000-0000-000000000002")
 	m.TokenName = "Liang Shi"
-	if ev, _ := teamsDiff(st, []TeamsMsg{m}, testChat()); len(ev) != 1 || ev[0].Author != "Liang Shi" {
+	if ev, _ := teamsDiff(st, []tomb.TeamsMsg{m}, testChat()); len(ev) != 1 || ev[0].Author != "Liang Shi" {
 		t.Fatalf("token name not used: %+v", ev)
 	}
 }

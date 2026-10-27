@@ -16,6 +16,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/tomb"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta
@@ -533,7 +534,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	p := &Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &tomb.Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: tomb.TeamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {
