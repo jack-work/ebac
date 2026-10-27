@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"context"
@@ -17,11 +17,11 @@ import (
 
 // githubPRs translates GitHub pull requests: threads, reviews and PR comments
 // become the critic's prs state, its inbox and its outbox.
-type githubPRs struct{}
+type Source struct{}
 
-func (githubPRs) Name() string { return "github-pr" }
+func (Source) Name() string { return "github-pr" }
 
-func (githubPRs) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
+func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	return pollGitHub(ctx, p, w)
 }
 
@@ -198,7 +198,7 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 
 	delta := Diff(prev, next, p.Me)
 	if w.Mode == model.ModeReviewer {
-		asReviewer(delta, p.Me)
+		AsReviewer(delta, p.Me)
 	}
 
 	if p.DryRun {

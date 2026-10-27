@@ -19,6 +19,7 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/internal/source/github"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
 )
@@ -61,7 +62,7 @@ type globals struct {
 }
 
 func init() {
-	for _, s := range []poll.Source{githubPRs{}, teamsChat{}, authorWatch{}} {
+	for _, s := range []poll.Source{github.Source{}, teamsChat{}, authorWatch{}} {
 		poll.Register(s)
 	}
 }

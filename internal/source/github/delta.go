@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"fmt"
@@ -320,7 +320,7 @@ func isAutomatonAck(body string) bool {
 // asReviewer re-tiers a delta for a seat reviewing someone else's PR: every
 // push and every dismissal of our own review earns a turn, because on repos
 // that dismiss stale approvals both mean the approval is gone.
-func asReviewer(d *model.Delta, me string) {
+func AsReviewer(d *model.Delta, me string) {
 	for i, e := range d.Events {
 		ownDismissed := e.Kind == model.EvReviewSubmitted && strings.EqualFold(e.Author, me) &&
 			strings.HasSuffix(e.Detail, "DISMISSED")

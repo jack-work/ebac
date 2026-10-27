@@ -9,6 +9,7 @@ import (
 	ebacbrief "github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/source/github"
 )
 
 func TestAsReviewerWakesOnPushAndOwnDismissal(t *testing.T) {
@@ -25,7 +26,7 @@ func TestAsReviewerWakesOnPushAndOwnDismissal(t *testing.T) {
 		{"thread resolved", model.Event{Kind: model.EvThreadResolved, Tier: model.TierRecord}, model.TierRecord},
 	} {
 		d := &model.Delta{Events: []model.Event{tc.ev}}
-		asReviewer(d, me)
+		github.AsReviewer(d, me)
 		if got := d.Events[0].Tier; got != tc.want {
 			t.Errorf("%s: tier %d, want %d", tc.name, got, tc.want)
 		}
@@ -113,7 +114,7 @@ func TestStampedReviewStillWakesAndSaysSo(t *testing.T) {
 		}
 		return p
 	}
-	d := Diff(snapWith(pr()), snapWith(pr(stamped)), "jack")
+	d := github.Diff(snapWith(pr()), snapWith(pr(stamped)), "jack")
 	if len(d.Events) != 1 || d.Events[0].Tier != model.TierWake || !strings.Contains(d.Events[0].Line(), "by lukas (bot-stamped") {
 		t.Fatalf("events %+v", d.Events)
 	}
@@ -133,7 +134,7 @@ func TestNewThreadTierByOpener(t *testing.T) {
 		th := &model.Thread{ID: "t", Comments: []*model.Comment{{Author: tc.opener, IsBot: tc.isBot, Body: "x"}}}
 		prev := snapWith(&model.PRState{Key: model.MakePRKey("acme", "widget", 1), State: "OPEN"})
 		next := snapWith(&model.PRState{Key: model.MakePRKey("acme", "widget", 1), State: "OPEN", Threads: map[string]*model.Thread{"t": th}})
-		d := Diff(prev, next, "John-Kelliher")
+		d := github.Diff(prev, next, "John-Kelliher")
 		if len(d.Events) != 1 || d.Events[0].Tier != tc.want {
 			t.Errorf("opener %s: events %+v, want tier %d", tc.opener, d.Events, tc.want)
 		}
