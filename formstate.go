@@ -29,10 +29,9 @@ import (
 //	post.<id>                    the outbox (outbox.go)
 //	system.ebac                  runtime, incl. the outbox watermark (never shown to seats)
 
-const (
-	criticKind        = "ebac.critic"
-	protocolKeyPrefix = "harness_protocol_"
-)
+const criticKind = "ebac.critic"
+
+const protocolKeyPrefix = "harness_protocol_"
 
 // ebacState is what ebac keeps under system.ebac.
 type ebacState struct {
