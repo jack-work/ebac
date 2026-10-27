@@ -18,11 +18,9 @@ type Source interface {
 
 var sources = map[string]Source{}
 
-func init() {
-	for _, s := range []Source{githubPRs{}, teamsChat{}, authorWatch{}} {
-		sources[s.Name()] = s
-	}
-}
+// Register makes a source reachable by its Name. The binary registers every
+// source at start-up, before any round runs.
+func Register(s Source) { sources[s.Name()] = s }
 
 // SourceName is the critic's source; critics made before sources existed are
 // GitHub PR critics.

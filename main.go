@@ -51,6 +51,12 @@ type globals struct {
 	host   string
 }
 
+func init() {
+	for _, s := range []Source{githubPRs{}, teamsChat{}, authorWatch{}} {
+		Register(s)
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
