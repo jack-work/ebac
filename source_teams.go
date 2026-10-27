@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -94,7 +95,7 @@ type Tomb struct {
 	// Cred mints the Teams token (band-cred teams-ebac), handed to tomb on fd 3
 	// with TOMB_AAD_TOKEN_FD=3: the env carries the fd number, never the token.
 	// nil only in tests that fake tomb.
-	Cred *Cred
+	Cred *forge.Cred
 }
 
 var errTombGone = errors.New("chat gone")
@@ -102,7 +103,7 @@ var errTombGone = errors.New("chat gone")
 func (t *Tomb) Messages(ctx context.Context, conv string, limit int) ([]TeamsMsg, error) {
 	ctx, cancel := context.WithTimeout(ctx, t.Timeout)
 	defer cancel()
-	cmd := execCommandContext(ctx, t.Bin, "--log", "", "--json", "--raw", "messages", conv, "--limit", fmt.Sprint(limit))
+	cmd := forge.ExecCommandContext(ctx, t.Bin, "--log", "", "--json", "--raw", "messages", conv, "--limit", fmt.Sprint(limit))
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	if t.Cred != nil {

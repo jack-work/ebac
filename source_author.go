@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -27,27 +28,6 @@ func (authorWatch) Round(ctx context.Context, p *Poller, w *model.Critic) error 
 }
 
 const (
-	authorTitleBytes = 120
-	authorListLimit  = 200
-)
-
-// AuthoredPR is one PR on the form: short fields only.
-type AuthoredPR struct {
-	Repo    string `json:"repo"`
-	Number  int    `json:"n"`
-	URL     string `json:"url"`
-	Title   string `json:"title"`
-	State   string `json:"state"` // OPEN, CLOSED, MERGED
-	Draft   bool   `json:"draft,omitempty"`
-	Head    string `json:"head"` // 12 hex
-	Created string `json:"created"`
-	Updated string `json:"updated"`
-	Merged  string `json:"merged,omitempty"`
-}
-
-func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number) }
-
-const (
 	EvAuthorNew      model.EventKind = "author_pr_new"
 	EvAuthorMerged   model.EventKind = "author_pr_merged"
 	EvAuthorDraft    model.EventKind = "author_pr_draft"
@@ -58,13 +38,13 @@ const (
 
 // authorDiff compares this round's PRs with what was seen. The first round
 // only records: a watch that starts by announcing a week of PRs is noise.
-func authorDiff(st *model.AuthorState, prs []AuthoredPR) []model.Event {
+func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR) []model.Event {
 	first := st.Seen == nil
 	if first {
 		st.Seen = map[string]model.AuthorSeen{}
 	}
 	var events []model.Event
-	ev := func(kind model.EventKind, tier model.Tier, pr AuthoredPR) {
+	ev := func(kind model.EventKind, tier model.Tier, pr forge.AuthoredPR) {
 		events = append(events, model.Event{Kind: kind, Tier: tier, PR: model.PRKey(pr.Key()), URL: pr.URL, Detail: pr.Title})
 	}
 	for _, pr := range prs {
@@ -105,50 +85,6 @@ func authorDiff(st *model.AuthorState, prs []AuthoredPR) []model.Event {
 	return events
 }
 
-// ListAuthoredPRs lists one author's PRs in a repo updated since a time,
-// every state.
-func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time.Time) ([]AuthoredPR, error) {
-	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", "all",
-		"--search", "updated:>=" + since.UTC().Format(time.RFC3339), "--limit", fmt.Sprint(authorListLimit),
-		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt"}
-	out, err := g.run(ctx, args, nil)
-	if err != nil {
-		return nil, err
-	}
-	var rows []struct {
-		Number    int    `json:"number"`
-		URL       string `json:"url"`
-		Title     string `json:"title"`
-		State     string `json:"state"`
-		IsDraft   bool   `json:"isDraft"`
-		Head      string `json:"headRefOid"`
-		CreatedAt string `json:"createdAt"`
-		UpdatedAt string `json:"updatedAt"`
-		MergedAt  string `json:"mergedAt"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		return nil, fmt.Errorf("decode pr list: %w", err)
-	}
-	if len(rows) >= authorListLimit {
-		return nil, fmt.Errorf("%s: %d PRs hit the list limit; narrow the window", repo, len(rows))
-	}
-	prs := make([]AuthoredPR, 0, len(rows))
-	for _, r := range rows {
-		title, _ := model.CutBody(r.Title, authorTitleBytes)
-		head := r.Head
-		if len(head) > 12 {
-			head = head[:12]
-		}
-		merged := r.MergedAt
-		if strings.HasPrefix(merged, "0001-") {
-			merged = ""
-		}
-		prs = append(prs, AuthoredPR{Repo: repo, Number: r.Number, URL: r.URL, Title: title, State: r.State,
-			Draft: r.IsDraft, Head: head, Created: r.CreatedAt, Updated: r.UpdatedAt, Merged: merged})
-	}
-	return prs, nil
-}
-
 func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
@@ -170,7 +106,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 
-	var prs []AuthoredPR
+	var prs []forge.AuthoredPR
 	for _, repo := range a.Repos {
 		got, err := p.GH.ListAuthoredPRs(ctx, repo, a.Login, a.Since)
 		if err != nil {
@@ -192,7 +128,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 		}
 		w.Runtime.PendingEvents = mergeEvents(w.Runtime.PendingEvents, events)
 	}
-	authored := map[string]AuthoredPR{}
+	authored := map[string]forge.AuthoredPR{}
 	for _, pr := range prs {
 		authored[pr.Key()] = pr
 	}
@@ -322,7 +258,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 			ref.Repos = append(ref.Repos, r)
 		}
 	}
-	if err := checkForgeHost(*host); err != nil {
+	if err := forge.CheckForgeHost(*host); err != nil {
 		return err
 	}
 	if ref.AlertRole != "" && !strings.HasPrefix(ref.AlertRole, "@") {

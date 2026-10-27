@@ -1,4 +1,4 @@
-package main
+package forge
 
 import (
 	"bytes"
@@ -67,13 +67,13 @@ func NewGH(bin, host string) *GH {
 
 // ghCreds names the band-cred credential for each forge host ebac may call.
 // A host without one is refused by band-cred: never another host's token.
-var ghCreds = map[string]string{"microsoft.ghe.com": credGitHub}
+var ghCreds = map[string]string{"microsoft.ghe.com": CredGitHub}
 
 // defaultForgeHost is the host a PR reference without one (owner/repo#N)
 // resolves to: the one forge ebac holds a band-cred credential for. It was
 // github.com, which ebac cannot reach since every call takes a band-cred token:
 // three critics added from shorthand on 2026-10-24 failed every round.
-func defaultForgeHost() string {
+func DefaultForgeHost() string {
 	if len(ghCreds) == 1 {
 		for h := range ghCreds {
 			return h
@@ -84,7 +84,7 @@ func defaultForgeHost() string {
 
 // checkForgeHost refuses, at creation, a host ebac holds no credential for:
 // such a critic could never poll.
-func checkForgeHost(host string) error {
+func CheckForgeHost(host string) error {
 	if _, ok := ghCreds[host]; !ok {
 		hosts := make([]string, 0, len(ghCreds))
 		for h := range ghCreds {
@@ -108,7 +108,7 @@ func credForHost(host string) *Cred {
 // Nix build sandbox's checkPhase -- there is no /usr/bin/env or /bin/bash to
 // find, so a script-based fake fails there with a confusing ENOENT on the
 // fake's own path). Production never overrides this.
-var execCommandContext = exec.CommandContext
+var ExecCommandContext = exec.CommandContext
 
 func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
@@ -122,7 +122,7 @@ func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, erro
 		// GH_ENTERPRISE_TOKEN is what gh reads for a non-github.com host.
 		env = append(env, "GH_TOKEN="+tok, "GH_ENTERPRISE_TOKEN="+tok)
 	}
-	cmd := execCommandContext(ctx, g.Bin, args...)
+	cmd := ExecCommandContext(ctx, g.Bin, args...)
 	cmd.Env = env
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -408,7 +408,7 @@ func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*mode
 			reviewsCursor = pr.Reviews.PageInfo.EndCursor
 		}
 	}
-	markStamped(st.Reviews)
+	MarkStamped(st.Reviews)
 	return st, nil
 }
 
@@ -419,7 +419,7 @@ const (
 
 // markStamped flags person-login reviews that a bot produced: either the body
 // says so, or a bot submitted the same state on the same PR just before.
-func markStamped(reviews map[string]*model.Review) {
+func MarkStamped(reviews map[string]*model.Review) {
 	for _, r := range reviews {
 		if r.IsBot {
 			continue

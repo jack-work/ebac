@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -139,11 +140,11 @@ func TestTeamsSeenIsPrunedOldestFirst(t *testing.T) {
 
 func fakeTomb(t *testing.T, scenario string) *Tomb {
 	t.Helper()
-	orig := execCommandContext
-	execCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+	orig := forge.ExecCommandContext
+	forge.ExecCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=TestTombHelperProcess", "--", scenario}, args...)...)
 	}
-	t.Cleanup(func() { execCommandContext = orig })
+	t.Cleanup(func() { forge.ExecCommandContext = orig })
 	return &Tomb{Bin: "unused", Timeout: 10 * time.Second}
 }
 

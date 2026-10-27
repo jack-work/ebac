@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -95,7 +96,7 @@ func TestMarkStamped(t *testing.T) {
 	} {
 		r := tc.r
 		r.ID, r.Author = "h", "lukas"
-		markStamped(map[string]*model.Review{"b": bot, "h": &r})
+		forge.MarkStamped(map[string]*model.Review{"b": bot, "h": &r})
 		if r.Stamped != tc.want || bot.Stamped {
 			t.Errorf("%s: stamped %v (bot %v), want %v", tc.name, r.Stamped, bot.Stamped, tc.want)
 		}

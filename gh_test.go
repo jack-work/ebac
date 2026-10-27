@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,8 +9,52 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
+
+// 2026-10-20: a pending review swallowed 344 thread replies on bic/aether#56134
+// while ebac recorded every one as sent.
+func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
+	g := fakeGH(t, "pending")
+	pr, err := g.FetchPR(context.Background(), "acme", "widget", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pr.Pending) != 1 || pr.Pending[0].DatabaseID != 213120916 || pr.Pending[0].Comments != 344 || pr.Pending[0].Author != "jack" {
+		t.Fatalf("pending = %+v", pr.Pending)
+	}
+	cs := pr.Threads["T1"].Comments
+	if cs[0].State != "" || cs[1].State != "PENDING" {
+		t.Fatalf("comment states %q %q; want published, PENDING", cs[0].State, cs[1].State)
+	}
+	if !pr.Threads["T1"].AwaitingUs("jack") {
+		t.Error("a reply held in a pending review counted as an answer")
+	}
+	if _, ok := model.FindMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
+		t.Error("a pending comment was recovered as sent")
+	}
+	d := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
+		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true}, "jack")
+	var got []model.Event
+	for _, e := range d.Events {
+		if e.Kind == model.EvPendingReview {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 || got[0].Tier != model.TierWake || !strings.Contains(got[0].Detail, "213120916") {
+		t.Fatalf("pending review events %+v; want one wake naming 213120916", got)
+	}
+	gone := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true},
+		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}, Complete: true}, "jack")
+	found := false
+	for _, e := range gone.Events {
+		found = found || e.Kind == model.EvPendingReviewGone
+	}
+	if !found {
+		t.Error("the pending review going away was not recorded")
+	}
+}
 
 // fakeGH points GH.run at THIS test binary, re-executed as a child process
 // (the same helper-process trick os/exec's own tests use), rather than an
@@ -21,15 +64,15 @@ import (
 // lookup fails and reports ENOENT confusingly on the SCRIPT's own path, not
 // the missing interpreter. Re-execing the already-built Go test binary needs
 // no interpreter at all.
-func fakeGH(t *testing.T, scenario string) *GH {
+func fakeGH(t *testing.T, scenario string) *forge.GH {
 	t.Helper()
-	orig := execCommandContext
-	execCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+	orig := forge.ExecCommandContext
+	forge.ExecCommandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		cs := append([]string{"-test.run=TestHelperProcess", "--", scenario}, args...)
 		return exec.CommandContext(ctx, os.Args[0], cs...)
 	}
-	t.Cleanup(func() { execCommandContext = orig })
-	g := NewGH("unused", "microsoft.ghe.com")
+	t.Cleanup(func() { forge.ExecCommandContext = orig })
+	g := forge.NewGH("unused", "microsoft.ghe.com")
 	g.WriteGap = 0
 	g.NoCred = true // the fake gh needs no token
 	return g
@@ -169,74 +212,6 @@ const emptyJSON = `{"data":{"repository":{"pullRequest":{
   "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}
 }}}}`
 
-// Observed live on bic/aether#24485: by the time it had gone through a dozen
-// automated review rounds it carried well over a hundred individual Review
-// nodes, all fetched through a single `reviews(last:30)` with no cursor at
-// all. FetchPR only ever looked at page 0, so anything before the newest 30
-// was silently dropped -- with nothing in the response distinguishing "there
-// are only 30" from "we didn't ask for the rest." A critic could report "no
-// new reviews" while reviews genuinely existed just outside the window.
-func TestFetchPRPaginatesReviewsNotJustTheNewest30(t *testing.T) {
-	g := fakeGH(t, "paginate")
-	st, err := g.FetchPR(context.Background(), "bic", "aether", 1)
-	if err != nil {
-		t.Fatalf("FetchPR: %v", err)
-	}
-	if !st.Complete {
-		t.Fatalf("both pages exhausted their cursors; Complete should be true")
-	}
-	want := []string{"r1", "r2", "r3"}
-	for _, id := range want {
-		if _, ok := st.Reviews[id]; !ok {
-			t.Errorf("review %s missing: only got %d review(s) (%v) -- reviews truncated to a single page again",
-				id, len(st.Reviews), reviewIDs(st))
-		}
-	}
-	if len(st.Reviews) != len(want) {
-		t.Errorf("got %d reviews, want exactly %d: %v", len(st.Reviews), len(want), reviewIDs(st))
-	}
-}
-
-func reviewIDs(st *model.PRState) []string {
-	var out []string
-	for id := range st.Reviews {
-		out = append(out, id)
-	}
-	return out
-}
-
-// Guard against a copy-paste regression: the query must actually pass
-// reviewsCursor as its own GraphQL variable, not silently reuse
-// reviewThreads' cursor or drop it.
-func TestFetchPRPassesReviewsCursorAsGHFlag(t *testing.T) {
-	g := fakeGH(t, "logcursor")
-	if _, err := g.FetchPR(context.Background(), "bic", "aether", 1); err != nil {
-		t.Fatalf("FetchPR: %v (reviewsCursor argument likely missing from the query)", err)
-	}
-}
-
-func TestForgeHost(t *testing.T) {
-	ghe := model.PRRef{URL: "https://microsoft.ghe.com/bic/aether/pull/42612"}
-	pub := model.PRRef{URL: "https://github.com/acme/widget/pull/1"}
-	slug := model.PRRef{Owner: "acme", Repo: "widget", Number: 2}
-	for _, tc := range []struct {
-		name string
-		refs []model.PRRef
-		want string
-		bad  bool
-	}{
-		{name: "url names the host", refs: []model.PRRef{ghe}, want: "microsoft.ghe.com"},
-		{name: "slug takes the fallback", refs: []model.PRRef{slug}, want: "fallback.example"},
-		{name: "no refs takes the fallback", want: "fallback.example"},
-		{name: "two forges is an error", refs: []model.PRRef{ghe, pub}, bad: true},
-	} {
-		got, err := model.ForgeHost(tc.refs, "fallback.example")
-		if tc.bad != (err != nil) || got != tc.want && !tc.bad {
-			t.Errorf("%s: got %q, %v", tc.name, got, err)
-		}
-	}
-}
-
 const pendingJSON = `{"data":{"repository":{"pullRequest":{
   "number":1,"url":"https://x/pull/1","title":"t","state":"OPEN","isDraft":false,"merged":false,
   "reviewDecision":"","updatedAt":"","baseRefName":"main","author":{"login":"a","__typename":"User"},
@@ -249,60 +224,3 @@ const pendingJSON = `{"data":{"repository":{"pullRequest":{
       {"id":"C1","url":"u1","body":"finding","state":"SUBMITTED","createdAt":"1","updatedAt":"1","author":{"login":"amy","__typename":"User"}},
       {"id":"C2","url":"u2","body":"fixed <!-- ebac:post:rw:p1 -->","state":"PENDING","createdAt":"2","updatedAt":"2","author":{"login":"jack","__typename":"User"}}]}}]}
 }}}}`
-
-// 2026-10-20: a pending review swallowed 344 thread replies on bic/aether#56134
-// while ebac recorded every one as sent.
-func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
-	g := fakeGH(t, "pending")
-	pr, err := g.FetchPR(context.Background(), "acme", "widget", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pr.Pending) != 1 || pr.Pending[0].DatabaseID != 213120916 || pr.Pending[0].Comments != 344 || pr.Pending[0].Author != "jack" {
-		t.Fatalf("pending = %+v", pr.Pending)
-	}
-	cs := pr.Threads["T1"].Comments
-	if cs[0].State != "" || cs[1].State != "PENDING" {
-		t.Fatalf("comment states %q %q; want published, PENDING", cs[0].State, cs[1].State)
-	}
-	if !pr.Threads["T1"].AwaitingUs("jack") {
-		t.Error("a reply held in a pending review counted as an answer")
-	}
-	if _, ok := model.FindMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
-		t.Error("a pending comment was recovered as sent")
-	}
-	d := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
-		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true}, "jack")
-	var got []model.Event
-	for _, e := range d.Events {
-		if e.Kind == model.EvPendingReview {
-			got = append(got, e)
-		}
-	}
-	if len(got) != 1 || got[0].Tier != model.TierWake || !strings.Contains(got[0].Detail, "213120916") {
-		t.Fatalf("pending review events %+v; want one wake naming 213120916", got)
-	}
-	gone := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}, Complete: true},
-		&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}, Complete: true}, "jack")
-	found := false
-	for _, e := range gone.Events {
-		found = found || e.Kind == model.EvPendingReviewGone
-	}
-	if !found {
-		t.Error("the pending review going away was not recorded")
-	}
-}
-
-func TestClientErrorIsFinalExceptRateLimits(t *testing.T) {
-	for msg, final := range map[string]bool{
-		"gh: Validation Failed (HTTP 422)":       true,
-		"gh: Not Found (HTTP 404)":               true,
-		"gh: API rate limit exceeded (HTTP 429)": false,
-		"gh: Bad Gateway (HTTP 502)":             false,
-		"gh timed out after 90s":                 false,
-	} {
-		if got := clientError(errors.New(msg)) != ""; got != final {
-			t.Errorf("%q: final=%v, want %v", msg, got, final)
-		}
-	}
-}

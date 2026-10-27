@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -25,7 +26,7 @@ import (
 type Promoter struct {
 	Store *Store
 	Fig   *Figaro
-	GH    *GH
+	GH    *forge.GH
 	Out   io.Writer
 	Host  string
 	Dry   bool
@@ -118,7 +119,7 @@ func (p *Promoter) Promote(ctx context.Context) (*PromoteResult, error) {
 		// A PR closed while it sat in the queue is not worth a seat.
 		// Check before claiming, so a closed PR does not consume the slot
 		// it would have held.
-		gh := NewGH(p.GH.Bin, next.Ref().HostOf(p.Host))
+		gh := forge.NewGH(p.GH.Bin, next.Ref().HostOf(p.Host))
 		if st, err := gh.FetchPR(ctx, next.Owner, next.Repo, next.Number); err == nil && st.Closed() {
 			next.State = QDropped
 			next.Note = "closed before promotion (" + st.State + ")"

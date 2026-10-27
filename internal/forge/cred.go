@@ -1,4 +1,4 @@
-package main
+package forge
 
 import (
 	"bytes"
@@ -29,8 +29,8 @@ type Cred struct {
 }
 
 const (
-	credGitHub = "ghe-ebac"
-	credTeams  = "teams-ebac"
+	CredGitHub = "ghe-ebac"
+	CredTeams  = "teams-ebac"
 )
 
 func NewCred(bin, name string) *Cred {
@@ -50,7 +50,7 @@ func (c *Cred) Token(ctx context.Context) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
-	cmd := execCommandContext(ctx, c.Bin, "token", c.Name)
+	cmd := ExecCommandContext(ctx, c.Bin, "token", c.Name)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

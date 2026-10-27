@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
@@ -66,7 +67,7 @@ func cmdMigrate(ctx context.Context, g globals, args []string) error {
 			continue
 		}
 		if st.Me == "" {
-			if me, err := NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
+			if me, err := forge.NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
 				st.Me = me
 			}
 		}
@@ -115,7 +116,7 @@ func cmdCompact(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if w, err := f.critic(); err == nil {
-		if me, err := NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
+		if me, err := forge.NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
 			st.Me = me
 		}
 	}

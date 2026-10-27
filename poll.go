@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -22,7 +23,7 @@ const (
 
 type Poller struct {
 	Store  *Store
-	GH     *GH
+	GH     *forge.GH
 	Tomb   *Tomb
 	Fig    *Figaro
 	Out    io.Writer

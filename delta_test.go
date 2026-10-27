@@ -531,22 +531,6 @@ func TestBackoffClimbsAndCaps(t *testing.T) {
 	}
 }
 
-func TestIsBot(t *testing.T) {
-	for _, tc := range []struct {
-		a    gqlAuthor
-		want bool
-	}{
-		{gqlAuthor{Login: "copilot-pull-request-reviewer", Typename: "Bot"}, true},
-		{gqlAuthor{Login: "some-app[bot]", Typename: "User"}, true},
-		{gqlAuthor{Login: "coderabbitai", Typename: "User"}, true},
-		{gqlAuthor{Login: "alice", Typename: "User"}, false},
-	} {
-		if got := isBot(tc.a); got != tc.want {
-			t.Errorf("isBot(%s) = %v, want %v", tc.a.Login, got, tc.want)
-		}
-	}
-}
-
 func TestSetJSONRefusesDottedKeys(t *testing.T) {
 	// Guards the measured figaro hazard: a dotted write into a subtree that
 	// was written as a literal creates a flat decoy key, and a later unset

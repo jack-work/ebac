@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -68,7 +69,7 @@ func main() {
 	g := globals{
 		gh:     env("EBAC_GH", "gh"),
 		figaro: os.Getenv("EBAC_SOCKET"),
-		host:   env("EBAC_HOST", defaultForgeHost()),
+		host:   env("EBAC_HOST", forge.DefaultForgeHost()),
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -280,10 +281,10 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if w.Host, err = model.ForgeHost(w.PRs, g.host); err != nil {
 		return err
 	}
-	if err := checkForgeHost(w.Host); err != nil {
+	if err := forge.CheckForgeHost(w.Host); err != nil {
 		return err
 	}
-	gh := NewGH(g.gh, w.Host)
+	gh := forge.NewGH(g.gh, w.Host)
 	if *repo != "" {
 		refs, err := gh.ListPRs(ctx, *repo, *author, "open", 100)
 		if err != nil {
@@ -477,7 +478,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		}
 		return nil
 	}
-	me, _ := NewGH(g.gh, w.Host).Whoami(ctx)
+	me, _ := forge.NewGH(g.gh, w.Host).Whoami(ctx)
 	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "PR\tSTATE\tHEAD\tTHREADS\tUNRES\tAWAITING\tTITLE")
@@ -532,7 +533,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &Poller{Store: st, GH: NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait, Cred: NewCred(env("EBAC_BAND_CRED", ""), credTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	p := &Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: teamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {
@@ -897,7 +898,7 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 	full := fmt.Sprintf("%s\n\n---\nFiled by ebac (critic `%s`, round %d, role %s) on %s.\n",
 		strings.TrimRight(string(body), "\n"), w.Name, w.Runtime.Round, w.FormID,
 		time.Now().UTC().Format(time.RFC3339))
-	url, err := NewGH(g.gh, g.host).CreateIssue(ctx, target, *title, full, labels)
+	url, err := forge.NewGH(g.gh, g.host).CreateIssue(ctx, target, *title, full, labels)
 	if err != nil {
 		return err
 	}

@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
 
-func apr(n int, state string, draft bool, head string) AuthoredPR {
-	return AuthoredPR{Repo: "bic/aether", Number: n, URL: "https://x/pull/" + head, Title: "t", State: state, Draft: draft, Head: head}
+func apr(n int, state string, draft bool, head string) forge.AuthoredPR {
+	return forge.AuthoredPR{Repo: "bic/aether", Number: n, URL: "https://x/pull/" + head, Title: "t", State: state, Draft: draft, Head: head}
 }
 
 func authorKinds(ev []model.Event) map[string]model.Tier {
@@ -25,10 +26,10 @@ func authorKinds(ev []model.Event) map[string]model.Tier {
 
 func TestAuthorDiff(t *testing.T) {
 	st := &model.AuthorState{}
-	if ev := authorDiff(st, []AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}); len(ev) != 0 {
+	if ev := authorDiff(st, []forge.AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}); len(ev) != 0 {
 		t.Fatalf("first round must only record: %+v", ev)
 	}
-	ev := authorDiff(st, []AuthoredPR{
+	ev := authorDiff(st, []forge.AuthoredPR{
 		apr(1, "MERGED", false, "a"), // merged -> wake
 		apr(2, "OPEN", false, "b"),   // draft turned ready -> wake new
 		apr(3, "MERGED", false, "c"), // unchanged
@@ -52,7 +53,7 @@ func TestAuthorDiff(t *testing.T) {
 			t.Fatalf("%s: tier %v; all %v", k, got[k], got)
 		}
 	}
-	ev = authorDiff(st, []AuthoredPR{
+	ev = authorDiff(st, []forge.AuthoredPR{
 		apr(1, "MERGED", false, "a"), apr(2, "OPEN", false, "b2"), apr(3, "MERGED", false, "c"),
 		apr(4, "CLOSED", false, "d"), apr(5, "OPEN", true, "e"), apr(6, "MERGED", false, "f"),
 	})
@@ -63,7 +64,7 @@ func TestAuthorDiff(t *testing.T) {
 	if (&model.Delta{Events: ev}).WakeWorthy() {
 		t.Fatal("a round of closes and head moves woke the seat")
 	}
-	ev = authorDiff(st, []AuthoredPR{apr(4, "OPEN", false, "d")})
+	ev = authorDiff(st, []forge.AuthoredPR{apr(4, "OPEN", false, "d")})
 	if authorKinds(ev)["bic/aether#4 author_pr_reopened"] != model.TierRecord {
 		t.Fatalf("reopen: %v", authorKinds(ev))
 	}

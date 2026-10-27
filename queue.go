@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -369,7 +370,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		fs := newFlagSet("queue promote")
 		dry := fs.Bool("dry-run", false, "decide, change nothing")
 		_ = fs.Parse(args)
-		p := &Promoter{Store: st, Fig: fig, GH: NewGH(g.gh, g.host), Out: os.Stdout,
+		p := &Promoter{Store: st, Fig: fig, GH: forge.NewGH(g.gh, g.host), Out: os.Stdout,
 			Host: g.host, Dry: *dry}
 		_, err := p.Promote(ctx)
 		return err
