@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // githubPRs translates GitHub pull requests: threads, reviews and PR comments
@@ -59,7 +60,7 @@ func retireGone(ctx context.Context, p *Poller, w *model.Critic, gone []model.PR
 	if len(w.PRs) == 0 {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "every pull request is gone: " + strings.Join(names, ", ")
-		_ = disableTimer(w.Name)
+		_ = systemd.DisableTimer(w.Name)
 	}
 	p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
 		w.Name, strings.Join(names, ", "), prGoneAfter))

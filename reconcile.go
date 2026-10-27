@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // The reconciler.
@@ -116,10 +118,10 @@ func Reconcile(ctx context.Context, st *Store, fig *Figaro, out io.Writer, dryRu
 		// R3: a live critic with no armed timer never runs again, and nothing
 		// else in the system notices.
 		if !c.Runtime.Stopped {
-			if ts := TimerState(c.Name); !ts.Armed() {
+			if ts := systemd.TimerState(c.Name); !ts.Armed() {
 				if dryRun {
 					add("R3-timer", c.Name, "timer "+ts.Display, "would re-arm", false)
-				} else if err := EnableTimer(c.Name, c.Interval()); err != nil {
+				} else if err := systemd.EnableTimer(c.Name, c.Interval()); err != nil {
 					add("R3-timer", c.Name, "timer "+ts.Display, "re-arm FAILED: "+err.Error(), false)
 				} else {
 					add("R3-timer", c.Name, "timer was "+ts.Display, "re-armed at "+c.Interval().String(), true)

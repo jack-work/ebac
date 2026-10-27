@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // Promote is the queue's heartbeat: take pending PRs while under budget, turn
@@ -230,7 +231,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		fmt.Fprintf(p.Out, "queue: %s adopted with a warning: %v\n", name, err)
 	}
 
-	if err := EnableTimer(name, interval); err != nil {
+	if err := systemd.EnableTimer(name, interval); err != nil {
 		return name, fmt.Errorf("critic created but timer not armed: %w", err)
 	}
 	return name, nil

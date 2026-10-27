@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta
@@ -181,7 +182,7 @@ func cmdInit(args []string) error {
 			self = p
 		}
 	}
-	dir, err := InstallUnits(self)
+	dir, err := systemd.InstallUnits(self)
 	if err != nil {
 		return err
 	}
@@ -334,7 +335,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	fmt.Printf("stop when: %s\n", describeStop(w.Stop))
 
 	if *arm {
-		if err := EnableTimer(w.Name, *interval); err != nil {
+		if err := systemd.EnableTimer(w.Name, *interval); err != nil {
 			return fmt.Errorf("critic created but timer not armed: %w", err)
 		}
 		fmt.Printf("armed: ebac@%s.timer every %s\n", w.Name, *interval)
@@ -452,7 +453,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	// whole command.
 	fmt.Printf("critic     %s (%s)\n", w.Name, w.Mode)
 	fmt.Printf("role      %s -> %s\n", w.FormID, seat)
-	fmt.Printf("timer     %s, next %s\n", TimerState(w.Name).Display, NextElapse(w.Name))
+	fmt.Printf("timer     %s, next %s\n", systemd.TimerState(w.Name).Display, systemd.NextElapse(w.Name))
 	fmt.Printf("round     %d, last success %s\n", w.Runtime.Round, stamp(w.Runtime.LastSuccess))
 	fmt.Printf("stop when %s\n", describeStop(w.Stop))
 	if w.Runtime.LastError != "" {
@@ -620,7 +621,7 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	w.Runtime.Stopped = stop
 	if stop {
 		w.Runtime.StopReason = *reason
-		_ = disableTimer(w.Name)
+		_ = systemd.DisableTimer(w.Name)
 	} else {
 		w.Runtime.StopReason = ""
 		w.Runtime.ConsecutiveFailures = 0
@@ -648,8 +649,8 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	_ = disableTimer(w.Name)
-	if err := removeTimerDropIns(w.Name); err != nil {
+	_ = systemd.DisableTimer(w.Name)
+	if err := systemd.RemoveTimerDropIns(w.Name); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %s: %v\n", w.Name, err)
 	}
 	snap, _ := st.LoadSnapshot(ctx, w.Name)

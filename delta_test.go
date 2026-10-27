@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 func cmt(id, author, body string, bot bool) *model.Comment {
@@ -566,7 +567,7 @@ func TestSetJSONRefusesDottedKeys(t *testing.T) {
 func TestUnarmedTimerIsNeverHealthy(t *testing.T) {
 	w := &model.Critic{Name: "x"}
 	row := RosterRow{Seat: "abc123"}
-	for _, ts := range []TimerStatus{
+	for _, ts := range []systemd.TimerStatus{
 		{Display: "absent"},
 		{Display: "disabled", Known: true},
 		{Display: "enabled/inactive", Known: true, Enabled: true},
@@ -576,14 +577,14 @@ func TestUnarmedTimerIsNeverHealthy(t *testing.T) {
 			t.Errorf("timer %+v scored healthy", ts)
 		}
 	}
-	armed := TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
+	armed := systemd.TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
 	if got := health(w, row, armed); got != "ok" {
 		t.Errorf("armed timer scored %q, want ok", got)
 	}
 }
 
 func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
-	armed := TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
+	armed := systemd.TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
 		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, armed); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)

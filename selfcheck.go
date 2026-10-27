@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // The selfcheck is the instrument a develop-mode seat runs every heartbeat.
@@ -113,7 +114,7 @@ func Selfcheck(ctx context.Context, st *Store, fig *Figaro, out io.Writer, only 
 		if w.Runtime.Archived || w.Runtime.Stopped {
 			continue
 		}
-		if s := TimerState(w.Name); !s.Armed() {
+		if s := systemd.TimerState(w.Name); !s.Armed() {
 			unarmed = append(unarmed, w.Name+"("+s.Display+")")
 		}
 	}
@@ -158,7 +159,7 @@ func Selfcheck(ctx context.Context, st *Store, fig *Figaro, out io.Writer, only 
 			continue
 		}
 		owing++
-		if w.Runtime.Archived || w.Runtime.Stopped || !TimerState(w.Name).Armed() {
+		if w.Runtime.Archived || w.Runtime.Stopped || !systemd.TimerState(w.Name).Armed() {
 			stranded = append(stranded, fmt.Sprintf("%s(%d events)", w.Name, len(w.Runtime.PendingEvents)))
 		}
 	}

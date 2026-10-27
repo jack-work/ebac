@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // authorWatch follows one GitHub user's pull requests in a list of repos:
@@ -156,7 +157,7 @@ func pollAuthor(ctx context.Context, p *Poller, w *model.Critic) error {
 	if a.Until != nil && time.Now().After(*a.Until) {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "window ended " + a.Until.UTC().Format(time.RFC3339)
-		_ = disableTimer(w.Name)
+		_ = systemd.DisableTimer(w.Name)
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 		return p.Store.SaveCritic(ctx, w)
 	}
@@ -352,7 +353,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
 	}
-	if err := EnableTimer(*name, *every); err != nil {
+	if err := systemd.EnableTimer(*name, *every); err != nil {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("author watch %q: role %s, %s in %s since %s, alert %s, every %s\n", *name, formID, ref.Login,

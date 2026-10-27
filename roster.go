@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // The roster is a special role: one form holding a view of every active PR
@@ -88,7 +89,7 @@ func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]Rost
 		if !w.Runtime.LastPolled.IsZero() {
 			row.LastPolled = w.Runtime.LastPolled.UTC().Format(time.RFC3339)
 		}
-		timer := TimerState(w.Name)
+		timer := systemd.TimerState(w.Name)
 		row.Timer = timer.Display
 
 		// Seat health is the SAME question the selfcheck asks, asked the
@@ -135,7 +136,7 @@ func BuildRoster(ctx context.Context, st *Store, fig *Figaro, me string) ([]Rost
 	return rows, sum, nil
 }
 
-func health(w *model.Critic, row RosterRow, timer TimerStatus) string {
+func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason

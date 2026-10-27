@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -233,7 +234,7 @@ func (p *Poller) maybeArchive(ctx context.Context, w *model.Critic, snap *model.
 
 	// The timer is disabled and the form left standing for whoever still
 	// wants to read it; nothing renews its lease now, so it expires.
-	if err := disableTimer(w.Name); err != nil {
+	if err := systemd.DisableTimer(w.Name); err != nil {
 		fmt.Fprintf(p.Out, "%s: could not disable timer: %v\n", w.Name, err)
 	}
 	return nil

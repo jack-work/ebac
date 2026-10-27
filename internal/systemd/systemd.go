@@ -1,4 +1,4 @@
-package main
+package systemd
 
 import (
 	"fmt"
@@ -232,7 +232,7 @@ func EnableTimer(name string, interval time.Duration) error {
 // removeTimerDropIns deletes the critic's ebac@<name>.timer.d (its interval
 // drop-ins): a removed critic left them behind, and they piled up in
 // ~/.config/systemd/user for every critic that ever ran.
-func removeTimerDropIns(name string) error {
+func RemoveTimerDropIns(name string) error {
 	if err := model.ValidName(name); err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func removeTimerDropIns(name string) error {
 	return systemctl("daemon-reload")
 }
 
-func disableTimer(name string) error {
+func DisableTimer(name string) error {
 	unit := fmt.Sprintf("ebac@%s.timer", name)
 	if _, err := systemctlOut("is-enabled", unit); err != nil {
 		// Not enabled: nothing to do, and that is not a failure.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/systemd"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
@@ -414,7 +415,7 @@ func teamsGone(ctx context.Context, p *Poller, w *model.Critic, cause error) err
 		return err
 	}
 	p.wakeOnce(ctx, w, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
-	_ = disableTimer(w.Name)
+	_ = systemd.DisableTimer(w.Name)
 	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 	return p.Store.SaveCritic(ctx, w)
 }
@@ -465,7 +466,7 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
 	}
-	if err := EnableTimer(*name, *every); err != nil {
+	if err := systemd.EnableTimer(*name, *every); err != nil {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("teams critic %q: role %s, chat %s (%s), seat %s, every %s\n", *name, formID, *chat, *topic, *aria, *every)
