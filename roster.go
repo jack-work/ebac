@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/systemd"
@@ -224,7 +225,7 @@ func ReadRoster(ctx context.Context, st *Store, fig *figaro.Figaro) (rows []Rost
 		// A truncated roster is a cut object, so this is where elision
 		// surfaces. Say which failure it was rather than reporting an
 		// empty fleet.
-		return nil, sum, 0, fmt.Errorf("roster index unparseable (elided at %d chars?): %w", formValueElisionLimit, err)
+		return nil, sum, 0, fmt.Errorf("roster index unparseable (elided at %d chars?): %w", brief.FormValueElisionLimit, err)
 	}
 	rawSum, err := json.Marshal(form["summary"])
 	if err == nil {

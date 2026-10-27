@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
@@ -82,7 +83,7 @@ func (p *Poller) deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 		return nil // not an error exit: an empty seat is an operator condition
 	}
 
-	brief := buildBrief(w, snap, w.Runtime.PendingEvents, p.Me, w.Runtime.RetryCount)
+	brief := brief.BuildBrief(w, snap, w.Runtime.PendingEvents, p.Me, w.Runtime.RetryCount)
 	if err := p.Fig.Send(ctx, target, brief); err != nil {
 		w.Runtime.RetryCount++
 		if w.Runtime.RetryCount >= maxRetries {

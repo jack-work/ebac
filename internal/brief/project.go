@@ -1,4 +1,4 @@
-package main
+package brief
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ import (
 // The harness contract tells the seat to read the form directly when it sees
 // a cut.
 
-func describeStop(s model.StopConditions) string {
+func DescribeStop(s model.StopConditions) string {
 	var parts []string
 	if s.UntilAllClosed {
 		g := time.Duration(s.ArchiveGraceSec) * time.Second
@@ -52,7 +52,7 @@ func tier2(events []model.Event) []model.Event {
 // formValueElisionLimit is where a studied form's value is cut. MEASURED,
 // not documented — the docs claim values are "not truncated", and they are:
 // 2046 characters survive, 2047 is elided with a trailing `…`.
-const formValueElisionLimit = 2046
+const FormValueElisionLimit = 2046
 
 type HarnessContract struct {
 	Truncation string `json:"if_a_value_looks_cut"`
@@ -65,15 +65,15 @@ type HarnessContract struct {
 	Protocol   string `json:"protocol"`
 }
 
-func harnessContract(w *model.Critic) HarnessContract {
+func NewHarnessContract(w *model.Critic) HarnessContract {
 	c := HarnessContract{
-		Truncation: fmt.Sprintf("Values here are cut at %d chars with a trailing … (a cut object also has unbalanced braces). Expected, not a bug. On either sign read the real value with `figaro form %s -j` before drawing a conclusion, and never report on an elided value.", formValueElisionLimit, w.FormID),
+		Truncation: fmt.Sprintf("Values here are cut at %d chars with a trailing … (a cut object also has unbalanced braces). Expected, not a bug. On either sign read the real value with `figaro form %s -j` before drawing a conclusion, and never report on an elided value.", FormValueElisionLimit, w.FormID),
 		Rule:       "write ONLY ack_round, ack_note and post.<id>. ebac owns kind, critic, prs, harness and harness_protocol_*: anything written there is overwritten next round.",
 		Post:       fmt.Sprintf("Post through this form, never with gh directly: `ebac post --critic %s --pr <owner/repo#n> [--reply-to <thread id> [--react +1] [--resolve] | --path <file> --line <n>] [--event COMMENT|APPROVE] --body-file <file>`. --react reacts to the comment that opened the thread; --resolve resolves it after the reply; with either, --body-file is optional. A top-level PR comment omits --event; --event submits a review, and so does --path. ebac sends it within one round and writes post.<id>.sent (url), .reacted, .resolved, .refused (why) or .error. A pending (unsubmitted) review of yours on the PR swallows replies unseen and blocks reviews: ebac refuses those until the operator submits or deletes it.", w.Name),
 		Ack:        fmt.Sprintf("ebac ack --critic %s --round <delta.round> [--note '<one line>']", w.Name),
 		Selfcheck:  fmt.Sprintf("ebac selfcheck --critic %s", w.Name),
 		Authority:  "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
-		Protocol:   "Your standing protocol is keys " + protocolKeyPrefix + "1, 2, ... read in order. Deliveries carry only the delta and the ack command.",
+		Protocol:   "Your standing protocol is keys " + ProtocolKeyPrefix + "1, 2, ... read in order. Deliveries carry only the delta and the ack command.",
 	}
 	switch {
 	case w.Mode == model.ModeReviewer && w.Approve:

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/form"
@@ -30,8 +31,6 @@ import (
 //	system.ebac                  runtime, incl. the outbox watermark (never shown to seats)
 
 const criticKind = "ebac.critic"
-
-const protocolKeyPrefix = "harness_protocol_"
 
 // ebacState is what ebac keeps under system.ebac.
 type ebacState struct {
@@ -463,7 +462,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		"kind":   model.MustJSON(criticKind),
 		"critic": cfgRaw,
 	}
-	harness, err := json.Marshal(harnessContract(w))
+	harness, err := json.Marshal(brief.NewHarnessContract(w))
 	if err != nil {
 		return err
 	}
@@ -479,12 +478,12 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 			view = &model.Snapshot{PRs: prs}
 		}
 		for k := range set {
-			if strings.HasPrefix(k, protocolKeyPrefix) {
+			if strings.HasPrefix(k, brief.ProtocolKeyPrefix) {
 				delete(set, k)
 			}
 		}
-		for i, c := range protocolChunks(protocolText(w, view, s.Me)) {
-			set[fmt.Sprintf("%s%d", protocolKeyPrefix, i+1)] = model.MustJSON(c)
+		for i, c := range brief.ProtocolChunks(brief.ProtocolText(w, view, s.Me)) {
+			set[fmt.Sprintf("%s%d", brief.ProtocolKeyPrefix, i+1)] = model.MustJSON(c)
 		}
 		system := model.ObjectOf(cur["system"])
 		system["ebac"] = model.MustJSON(sys)
@@ -516,7 +515,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 			if k == "delta" || k == "sync" {
 				remove = append(remove, k)
 			}
-			if strings.HasPrefix(k, protocolKeyPrefix) {
+			if strings.HasPrefix(k, brief.ProtocolKeyPrefix) {
 				if _, keep := set[k]; !keep {
 					remove = append(remove, k)
 				}

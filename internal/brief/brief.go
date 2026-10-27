@@ -1,4 +1,4 @@
-package main
+package brief
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gluck/ebac/internal/model"
 )
@@ -13,7 +14,7 @@ import (
 // The brief is what actually costs money: it is a turn. The round's change is
 // already on the role form, which the seat studies, so the brief only says
 // where to look: the summary, the standing, the form, and the ack.
-func buildBrief(w *model.Critic, snap *model.Snapshot, events []model.Event, me string, retry int) string {
+func BuildBrief(w *model.Critic, snap *model.Snapshot, events []model.Event, me string, retry int) string {
 	d := &model.Delta{Events: events}
 	var b strings.Builder
 
@@ -47,7 +48,7 @@ func buildBrief(w *model.Critic, snap *model.Snapshot, events []model.Event, me 
 
 // protocolText is everything a seat must know that does not change between
 // rounds. It is projected onto the role form, never repeated in a brief.
-func protocolText(w *model.Critic, snap *model.Snapshot, me string) string {
+func ProtocolText(w *model.Critic, snap *model.Snapshot, me string) string {
 	var b strings.Builder
 	b.WriteString("BOUNDARY\n")
 	if w.Mode == model.ModeReviewer {
@@ -80,11 +81,11 @@ func protocolText(w *model.Critic, snap *model.Snapshot, me string) string {
 }
 
 // protocolChunkLimit keeps each chunk's JSON under the study elision cut.
-const protocolChunkLimit = formValueElisionLimit - 46
+const protocolChunkLimit = FormValueElisionLimit - 46
 
 // protocolChunks splits text on line boundaries so no chunk, JSON-encoded,
 // is cut when a seat studies the form. Concatenated, the chunks are the text.
-func protocolChunks(text string) []string {
+func ProtocolChunks(text string) []string {
 	var out []string
 	var cur strings.Builder
 	fits := func(s string) bool { return jsonLen(s) <= protocolChunkLimit }
@@ -242,7 +243,7 @@ func signaturePath() string {
 	return filepath.Join(dir, "ebac", "signature")
 }
 
-func readSignature() (string, error) {
+func ReadSignature() (string, error) {
 	path := signaturePath()
 	raw, err := os.ReadFile(path)
 	sig := strings.TrimSpace(string(raw))
@@ -326,7 +327,7 @@ func reviewerCharge(w *model.Critic, snap *model.Snapshot) string {
 	b.WriteString("  8. REPLIES. Concede fast when the author is right; one line when not. Never\n")
 	b.WriteString("     resolve someone else's thread.\n")
 	b.WriteString(signalDiscipline())
-	if sig, err := readSignature(); err == nil {
+	if sig, err := ReadSignature(); err == nil {
 		b.WriteString("\nSIGNATURE\n")
 		b.WriteString(sig)
 		b.WriteString("\n")
@@ -348,3 +349,15 @@ func teamsCharge(w *model.Critic) string {
 		"  ebac only reads this chat; it never posts to it. If key gone appears, the chat is unreadable: polling has\n" +
 		"  stopped and the form says what to do.\n"
 }
+
+func authorCharge(w *model.Critic) string {
+	a := w.Author
+	return "YOUR JOB — AUTHOR WATCH\n" +
+		fmt.Sprintf("  You are told when %s publishes a NEW pull request (a draft turning ready counts) or one is MERGED,\n", a.Login) +
+		fmt.Sprintf("  in %s. Key authored lists every such PR since %s (number, title, state, draft, head,\n",
+			strings.Join(a.Repos, ", "), a.Since.UTC().Format(time.RFC3339)) +
+		"  created/updated/merged, url). Closes, reopens, head moves and new drafts are recorded there but do not\n" +
+		"  wake you. ebac only reads these PRs; it never posts to them.\n"
+}
+
+const ProtocolKeyPrefix = "harness_protocol_"

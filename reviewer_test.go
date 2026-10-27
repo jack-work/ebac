@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	ebacbrief "github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
 )
@@ -42,7 +43,7 @@ func TestReviewerBrief(t *testing.T) {
 	mine := &model.PRState{Key: model.MakePRKey("acme", "widget", 8), Number: 8, State: "OPEN", Author: "jack"}
 	w := &model.Critic{Name: "rev", Mode: model.ModeReviewer, Host: "ghe.example", Approve: true,
 		Worktree: &model.Worktree{Clone: "/src/widget", Root: "/wt"}, Notes: "skill://widget-review"}
-	brief := protocolText(w, snapWith(theirs, mine), "jack")
+	brief := ebacbrief.ProtocolText(w, snapWith(theirs, mine), "jack")
 
 	for _, want := range []string{
 		"You may APPROVE: acme/widget#7.\n",
@@ -60,7 +61,7 @@ func TestReviewerBrief(t *testing.T) {
 	}
 
 	t.Setenv("EBAC_SIGNATURE", filepath.Join(t.TempDir(), "absent"))
-	if !strings.Contains(protocolText(w, snapWith(theirs), "jack"), "NO SIGNATURE") {
+	if !strings.Contains(ebacbrief.ProtocolText(w, snapWith(theirs), "jack"), "NO SIGNATURE") {
 		t.Error("a missing signature must stop the seat posting")
 	}
 }
@@ -75,7 +76,7 @@ func TestHarnessAuthorityFollowsTheGrant(t *testing.T) {
 		{model.Critic{Mode: model.ModeReviewer}, "REVIEWER: comment and reply."},
 		{model.Critic{Mode: model.ModeReviewer, Approve: true}, "REVIEWER: comment, reply, and approve"},
 	} {
-		if got := harnessContract(&tc.critic).Authority; !strings.HasPrefix(got, tc.prefix) {
+		if got := ebacbrief.NewHarnessContract(&tc.critic).Authority; !strings.HasPrefix(got, tc.prefix) {
 			t.Errorf("%+v: authority %q, want prefix %q", tc.critic.Mode, got, tc.prefix)
 		}
 	}
@@ -150,7 +151,7 @@ func TestPostingSeatsAreToldToSignalNotNarrate(t *testing.T) {
 		{model.Critic{Name: "rw", Mode: model.ModeReview, Write: true}, true},
 		{model.Critic{Name: "rev", Mode: model.ModeReviewer, Host: "ghe.example"}, true},
 	} {
-		brief := protocolText(&tc.critic, snapWith(pr), "jack")
+		brief := ebacbrief.ProtocolText(&tc.critic, snapWith(pr), "jack")
 		if got := strings.Contains(brief, "SIGNAL, DO NOT NARRATE"); got != tc.want {
 			t.Errorf("%s: signal section present=%v, want %v", tc.critic.Name, got, tc.want)
 		}

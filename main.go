@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/model"
@@ -246,7 +247,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("--clone and --worktree-root go together")
 	}
 	if m == model.ModeReviewer {
-		if _, err := readSignature(); err != nil {
+		if _, err := brief.ReadSignature(); err != nil {
 			return err
 		}
 	}
@@ -335,7 +336,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	for _, r := range w.PRs {
 		fmt.Printf("  %s\n", r.Key())
 	}
-	fmt.Printf("stop when: %s\n", describeStop(w.Stop))
+	fmt.Printf("stop when: %s\n", brief.DescribeStop(w.Stop))
 
 	if *arm {
 		if err := systemd.EnableTimer(w.Name, *interval); err != nil {
@@ -458,7 +459,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	fmt.Printf("role      %s -> %s\n", w.FormID, seat)
 	fmt.Printf("timer     %s, next %s\n", systemd.TimerState(w.Name).Display, systemd.NextElapse(w.Name))
 	fmt.Printf("round     %d, last success %s\n", w.Runtime.Round, stamp(w.Runtime.LastSuccess))
-	fmt.Printf("stop when %s\n", describeStop(w.Stop))
+	fmt.Printf("stop when %s\n", brief.DescribeStop(w.Stop))
 	if w.Runtime.LastError != "" {
 		fmt.Printf("error     %s\n", w.Runtime.LastError)
 	}

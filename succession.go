@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -209,7 +210,7 @@ func standbyBrief(c *model.Critic, pol SuccessionPolicy, holder string, fill flo
 		fmt.Fprintf(&b, "  %d. %s\n", i+1, t)
 	}
 	fmt.Fprintf(&b, "\nRead the role with `figaro form %s -j`. Values there are elided at %d chars "+
-		"with a trailing …; re-read rather than reporting on a cut value.\n", c.FormID, formValueElisionLimit)
+		"with a trailing …; re-read rather than reporting on a cut value.\n", c.FormID, brief.FormValueElisionLimit)
 	b.WriteString("\nNEVER TWO HOLDERS. Until the cast lands, the other aria answers. If you are " +
 		"unsure whether you hold this critic, you do not.\n")
 	return b.String()

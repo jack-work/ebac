@@ -210,16 +210,6 @@ func countWake(events []model.Event) int {
 	return n
 }
 
-func authorCharge(w *model.Critic) string {
-	a := w.Author
-	return "YOUR JOB — AUTHOR WATCH\n" +
-		fmt.Sprintf("  You are told when %s publishes a NEW pull request (a draft turning ready counts) or one is MERGED,\n", a.Login) +
-		fmt.Sprintf("  in %s. Key authored lists every such PR since %s (number, title, state, draft, head,\n",
-			strings.Join(a.Repos, ", "), a.Since.UTC().Format(time.RFC3339)) +
-		"  created/updated/merged, url). Closes, reopens, head moves and new drafts are recorded there but do not\n" +
-		"  wake you. ebac only reads these PRs; it never posts to them.\n"
-}
-
 // cmdAddAuthor mints an author watch: role form, critic, optional seat, timer.
 func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("add-author")
