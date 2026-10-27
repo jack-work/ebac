@@ -21,7 +21,7 @@ type teamsChat struct{}
 
 func (teamsChat) Name() string { return "teams-chat" }
 
-func (teamsChat) Round(ctx context.Context, p *Poller, w *Critic) error { return p.pollTeams(ctx, w) }
+func (teamsChat) Round(ctx context.Context, p *Poller, w *Critic) error { return pollTeams(ctx, p, w) }
 
 const (
 	ModeTeams      Mode = "teams"
@@ -268,7 +268,7 @@ func teamsDiff(st *TeamsState, msgs []TeamsMsg, chat *ChatRef) (events []Event, 
 	return events, items
 }
 
-func (p *Poller) pollTeams(ctx context.Context, w *Critic) error {
+func pollTeams(ctx context.Context, p *Poller, w *Critic) error {
 	if w.Chat == nil || w.Chat.ID == "" {
 		return fmt.Errorf("%s: teams critic without a chat id", w.Name)
 	}
@@ -295,9 +295,9 @@ func (p *Poller) pollTeams(ctx context.Context, w *Critic) error {
 			st.FailSince = time.Now().UTC().Format(time.RFC3339)
 		}
 		if st.GoneStreak >= teamsGoneAfter {
-			return p.teamsGone(ctx, w, err)
+			return teamsGone(ctx, p, w, err)
 		}
-		p.teamsBlind(ctx, w, err)
+		teamsBlind(ctx, p, w, err)
 		_ = p.Store.SaveCritic(ctx, w)
 		return fmt.Errorf("%s: %w", w.Name, err)
 	}
@@ -332,14 +332,14 @@ func (p *Poller) pollTeams(ctx context.Context, w *Critic) error {
 	}
 	renew(ctx, p.Fig, w.FormID)
 
-	derr := p.deliverTeams(ctx, w)
+	derr := deliverTeams(ctx, p, w)
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
 	}
 	return derr
 }
 
-func (p *Poller) deliverTeams(ctx context.Context, w *Critic) error {
+func deliverTeams(ctx context.Context, p *Poller, w *Critic) error {
 	pending := &Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		if len(w.Runtime.PendingEvents) > 0 {
@@ -396,7 +396,7 @@ func teamsBrief(w *Critic, events []Event) string {
 // longer than teamsBlindAfter: the form's key blind says since when and the
 // last error, refreshed only when the error changes, and is removed by the
 // first good round.
-func (p *Poller) teamsBlind(ctx context.Context, w *Critic, cause error) {
+func teamsBlind(ctx context.Context, p *Poller, w *Critic, cause error) {
 	st := w.Runtime.Teams
 	since, err := time.Parse(time.RFC3339, st.FailSince)
 	if err != nil || time.Since(since) < teamsBlindAfter {
@@ -422,7 +422,7 @@ func (p *Poller) teamsBlind(ctx context.Context, w *Critic, cause error) {
 }
 
 // teamsGone marks the chat gone on the form, wakes the seat once and stops.
-func (p *Poller) teamsGone(ctx context.Context, w *Critic, cause error) error {
+func teamsGone(ctx context.Context, p *Poller, w *Critic, cause error) error {
 	st := w.Runtime.Teams
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("chat gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)

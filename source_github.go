@@ -16,7 +16,7 @@ type githubPRs struct{}
 func (githubPRs) Name() string { return "github-pr" }
 
 func (githubPRs) Round(ctx context.Context, p *Poller, w *Critic) error {
-	return p.pollGitHub(ctx, w)
+	return pollGitHub(ctx, p, w)
 }
 
 // A PR the forge says does not exist (deleted, or its repository renamed or
@@ -28,7 +28,7 @@ var prGone = regexp.MustCompile(`Could not resolve to a (PullRequest|Repository)
 
 // retireGone marks each gone PR on the form, stops polling it and wakes the
 // seat once; a critic with no PR left stops.
-func (p *Poller) retireGone(ctx context.Context, w *Critic, gone []PRRef, errs map[PRKey]string) error {
+func retireGone(ctx context.Context, p *Poller, w *Critic, gone []PRRef, errs map[PRKey]string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	keep := w.PRs[:0]
 	isGone := map[PRKey]bool{}
@@ -64,7 +64,7 @@ func (p *Poller) retireGone(ctx context.Context, w *Critic, gone []PRRef, errs m
 	return p.Store.SaveCritic(ctx, w)
 }
 
-func (p *Poller) pollGitHub(ctx context.Context, w *Critic) error {
+func pollGitHub(ctx context.Context, p *Poller, w *Critic) error {
 	name := w.Name
 	if w.Host != "" {
 		p.GH.Host = w.Host
@@ -161,7 +161,7 @@ func (p *Poller) pollGitHub(ctx context.Context, w *Critic) error {
 				errs[PRKey(k)] = msg
 			}
 		}
-		if err := p.retireGone(ctx, w, gone, errs); err != nil {
+		if err := retireGone(ctx, p, w, gone, errs); err != nil {
 			return err
 		}
 		if w.Runtime.Stopped {

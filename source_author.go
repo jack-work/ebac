@@ -20,7 +20,7 @@ type authorWatch struct{}
 func (authorWatch) Name() string { return "github-author" }
 
 func (authorWatch) Round(ctx context.Context, p *Poller, w *Critic) error {
-	return p.pollAuthor(ctx, w)
+	return pollAuthor(ctx, p, w)
 }
 
 const (
@@ -170,7 +170,7 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 	return prs, nil
 }
 
-func (p *Poller) pollAuthor(ctx context.Context, w *Critic) error {
+func pollAuthor(ctx context.Context, p *Poller, w *Critic) error {
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
 		return fmt.Errorf("%s: author watch without a login or repos", w.Name)
@@ -230,7 +230,7 @@ func (p *Poller) pollAuthor(ctx context.Context, w *Critic) error {
 		return err
 	}
 	renew(ctx, p.Fig, w.FormID)
-	derr := p.deliverAuthor(ctx, w)
+	derr := deliverAuthor(ctx, p, w)
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (w *Critic) alertTarget() string {
 	return w.FormID
 }
 
-func (p *Poller) deliverAuthor(ctx context.Context, w *Critic) error {
+func deliverAuthor(ctx context.Context, p *Poller, w *Critic) error {
 	pending := &Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
 		fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
