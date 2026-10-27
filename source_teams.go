@@ -23,15 +23,17 @@ func (teamsChat) Name() string { return "teams-chat" }
 
 func (teamsChat) Round(ctx context.Context, p *Poller, w *Critic) error { return pollTeams(ctx, p, w) }
 
+const ModeTeams Mode = "teams"
+
 const (
-	ModeTeams      Mode = "teams"
-	teamsLimit          = 50
-	teamsSeenMax        = 300
-	teamsNamesMax       = 200
-	teamsBodyBytes      = 1500
-	teamsGoneAfter      = 3 // consecutive "gone" answers before the chat is declared gone
-	teamsTombWait       = 60 * time.Second
+	teamsLimit     = 50
+	teamsSeenMax   = 300
+	teamsNamesMax  = 200
+	teamsBodyBytes = 1500
+	teamsGoneAfter = 3 // consecutive "gone" answers before the chat is declared gone
 )
+
+const teamsTombWait = 60 * time.Second
 
 type ChatRef struct {
 	ID    string `json:"id"`

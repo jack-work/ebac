@@ -23,10 +23,11 @@ func (authorWatch) Round(ctx context.Context, p *Poller, w *Critic) error {
 	return pollAuthor(ctx, p, w)
 }
 
+const ModeAuthor Mode = "author"
+
 const (
-	ModeAuthor       Mode = "author"
-	authorTitleBytes      = 120
-	authorListLimit       = 200
+	authorTitleBytes = 120
+	authorListLimit  = 200
 )
 
 // AuthorRef is an author watch's configuration.
