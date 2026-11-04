@@ -3,6 +3,7 @@ package poll
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ type SuccessionPolicy struct {
 	Instructions   string   `json:"instructions"`
 	DivisibleTasks []string `json:"divisible_tasks"`
 }
+
+// successionPolicy is the policy SuperviseSuccession applies; a variable so a test can lower the thresholds.
+var successionPolicy = DefaultSuccession
 
 func DefaultSuccession() SuccessionPolicy {
 	return SuccessionPolicy{
@@ -103,7 +107,7 @@ func successionAction(fill float64, standby string, standbyAlive bool, pol Succe
 // the existing heartbeat rather than a second daemon: the timer already runs
 // every 5m and already knows the seat.
 func (p *Poller) SuperviseSuccession(ctx context.Context, c *model.Critic) {
-	pol := DefaultSuccession()
+	pol := successionPolicy()
 
 	form, err := p.Fig.Form(ctx, c.FormID)
 	if err != nil {
@@ -164,6 +168,23 @@ func (p *Poller) SuperviseSuccession(ctx context.Context, c *model.Critic) {
 				"Answer its questions fully — being asked is now your job.",
 			c.Name, standby, fill*100, c.FormID))
 
+	// REPORT MODE (GO-20261104-ebac-narrow): ebac holds no fork grant, so it does not mint a standby. It tells the
+	// maintainer role ONCE per holder, with the exact gesture; a human forks as the seat's owner and casts.
+	case fill >= pol.StandbyAt && c.Runtime.Standby == "" && reportTo() != "":
+		state.Stage = "report-mode"
+		if c.Runtime.SuccessionReported == holder {
+			state.Note = "near capacity; reported to " + reportTo() + "; waiting for a manual fork + cast"
+			break
+		}
+		if err := p.Fig.Send(ctx, reportTo(), successionReport(c, pol, holder, fill)); err != nil {
+			state.Note = "near-capacity report to " + reportTo() + " FAILED: " + err.Error()
+			break
+		}
+		c.Runtime.SuccessionReported = holder
+		_ = p.Store.SaveCritic(ctx, c)
+		state.Note = fmt.Sprintf("near capacity (%.0f%%): reported to %s", fill*100, reportTo())
+		fmt.Fprintf(p.Out, "%s: seat %s at %.0f%%: reported to %s (no fork)\n", c.Name, holder, fill*100, reportTo())
+
 	// STANDBY. Mint one and give it the read-only warm-up.
 	case fill >= pol.StandbyAt && c.Runtime.Standby == "":
 		brief := standbyBrief(c, pol, holder, fill)
@@ -217,3 +238,17 @@ func standbyBrief(c *model.Critic, pol SuccessionPolicy, holder string, fill flo
 }
 
 func round2(f float64) float64 { return float64(int(f*100+0.5)) / 100 }
+
+// reportTo is the role a near-capacity seat is reported to instead of forked (EBAC_SUCCESSION_REPORT_TO, set in
+// ebac's units: uid ebac holds no fork grant). Empty: the old behaviour (fork a standby, recast).
+func reportTo() string { return strings.TrimSpace(os.Getenv("EBAC_SUCCESSION_REPORT_TO")) }
+
+func successionReport(c *model.Critic, pol SuccessionPolicy, holder string, fill float64) string {
+	return fmt.Sprintf("ebac SUCCESSION REPORT: critic %q, seat %s is at %.0f%% of its context (threshold %.0f%%).\n"+
+		"ebac holds no fork grant; succeed the seat as its owner (gluck):\n"+
+		"  1. figaro fork %s:%d --stay -O %s -j   (check the minted id is non-empty)\n"+
+		"  2. ebac cast --critic %s --aria <new id>   (the role %s then points at it; callers keep the role id)\n"+
+		"  3. tell the outgoing holder %s to stand down (advisor only).\n"+
+		"This report is sent once per holder.",
+		c.Name, holder, fill*100, pol.StandbyAt*100, holder, pol.ForkTurn, pol.StandbyOutfit, c.Name, c.FormID, holder)
+}
