@@ -246,9 +246,10 @@ func reportTo() string { return strings.TrimSpace(os.Getenv("EBAC_SUCCESSION_REP
 func successionReport(c *model.Critic, pol SuccessionPolicy, holder string, fill float64) string {
 	return fmt.Sprintf("ebac SUCCESSION REPORT: critic %q, seat %s is at %.0f%% of its context (threshold %.0f%%).\n"+
 		"ebac holds no fork grant; succeed the seat as its owner (gluck):\n"+
-		"  1. figaro fork %s:%d --stay -O %s -j   (check the minted id is non-empty)\n"+
-		"  2. ebac cast --critic %s --aria <new id>   (the role %s then points at it; callers keep the role id)\n"+
-		"  3. tell the outgoing holder %s to stand down (advisor only).\n"+
-		"This report is sent once per holder.",
-		c.Name, holder, fill*100, pol.StandbyAt*100, holder, pol.ForkTurn, pol.StandbyOutfit, c.Name, c.FormID, holder)
+		"  1. figaro fork %s:%d --stay -j   (check the minted id is non-empty)\n"+
+		"  2. figaro state outfit default --id <new id>   (a fork inherits an old model; the default outfit sets the current one)\n"+
+		"  3. ebac cast --critic %s --aria <new id>   (the role %s then points at it; callers keep the role id)\n"+
+		"  4. tell the outgoing holder %s to stand down (advisor only).\n"+
+		"If the seat already succeeded itself (the role points elsewhere), there is nothing to do. Sent once per holder.",
+		c.Name, holder, fill*100, pol.StandbyAt*100, holder, pol.ForkTurn, c.Name, c.FormID, holder)
 }
