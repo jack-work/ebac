@@ -543,3 +543,16 @@ func (f *Figaro) SetJSONIfVersion(ctx context.Context, id, key string, v any, ve
 	}
 	return nil
 }
+
+// IsRefused reports figaro's authz refusal of an RPC ("none grants <verb> here", code -32020), as opposed to any other
+// failure. uid ebac holds no fork, kill or sandbox `use` grant (GO-20261104-ebac-narrow), so a mint, fork or kill is refused.
+func IsRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	return strings.Contains(m, "-32020") || strings.Contains(m, "none grants")
+}
+
+// MintHint is the operator's way round a refused mint: create the seat as its owner, then cast it.
+const MintHint = "ebac holds no grant to mint an aria: create the seat as gluck (figaro new -O default -j), then ebac cast --critic <name> --aria <id>"

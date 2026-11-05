@@ -220,6 +220,9 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 
 	seat, err := p.Fig.NewAria(ctx, cfg.Outfit)
 	if err != nil {
+		if figaro.IsRefused(err) {
+			return "", fmt.Errorf("mint seat for %s: %s", formID, figaro.MintHint)
+		}
 		return "", fmt.Errorf("mint seat: %w", err)
 	}
 	if err := p.Fig.Cast(ctx, seat, formID); err != nil {

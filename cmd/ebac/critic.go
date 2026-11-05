@@ -136,6 +136,9 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	if seat == "" && *mint {
 		seat, err = fig.NewAria(ctx, *outfits)
 		if err != nil {
+			if figaro.IsRefused(err) {
+				return fmt.Errorf("%s (critic created, unseated)", figaro.MintHint)
+			}
 			return fmt.Errorf("mint aria: %w", err)
 		}
 		fmt.Printf("minted aria %s\n", seat)
@@ -237,6 +240,9 @@ func cmdCast(ctx context.Context, g globals, args []string) error {
 		}
 		seat, err = fig.NewAria(ctx, *outfits)
 		if err != nil {
+			if figaro.IsRefused(err) {
+				return fmt.Errorf("%s", figaro.MintHint)
+			}
 			return err
 		}
 		fmt.Printf("minted aria %s\n", seat)
@@ -375,8 +381,5 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	return nil
 }
 
-// purgeRefused reports figaro's authz refusal (code -32020, "none grants ...") as opposed to any other failure.
-func purgeRefused(err error) bool {
-	m := err.Error()
-	return strings.Contains(m, "-32020") || strings.Contains(m, "none grants")
-}
+// purgeRefused reports figaro's authz refusal of the kill (see figaro.IsRefused).
+func purgeRefused(err error) bool { return figaro.IsRefused(err) }
