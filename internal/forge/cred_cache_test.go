@@ -70,3 +70,93 @@ func TestCredNoRuntimeDirMintsEveryProcess(t *testing.T) {
 		t.Fatalf("without a runtime dir: mints=%d want 2", n)
 	}
 }
+
+func cacheFiles(t *testing.T) []string {
+	t.Helper()
+	ents, _ := os.ReadDir(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "ebac-cred"))
+	var out []string
+	for _, e := range ents {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// Only the explicit allowlist rests on disk (band-work leader): a credential not on it is never written.
+func TestCredCacheOnlyAllowlisted(t *testing.T) {
+	sock, _ := fakePrincipalSocket(t)
+	t.Setenv("EBAC_BAND_CRED_SOCKET", sock)
+	if _, err := NewCred("band-cred", "other-cred").Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f := cacheFiles(t); len(f) != 0 {
+		t.Fatalf("a non-listed credential was written: %v", f)
+	}
+	// control: a listed one IS written
+	if _, err := NewCred("band-cred", CredTeams).Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f := cacheFiles(t); len(f) != 1 || f[0] != CredTeams+".json" {
+		t.Fatalf("listed credential not cached: %v", f)
+	}
+}
+
+// band-cred's no_cache wins, even for a listed credential.
+func TestCredCacheHonoursNoCache(t *testing.T) {
+	sock, _ := fakePrincipalSocket(t)
+	t.Setenv("EBAC_BAND_CRED_SOCKET", sock)
+	fakeNoCache = true
+	t.Cleanup(func() { fakeNoCache = false })
+	if _, err := NewCred("band-cred", CredTeams).Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f := cacheFiles(t); len(f) != 0 {
+		t.Fatalf("a no_cache token was written: %v", f)
+	}
+}
+
+// An expired entry is DELETED, not just ignored.
+func TestCredCacheDeletesExpired(t *testing.T) {
+	_, _ = fakePrincipalSocket(t) // isolates XDG_RUNTIME_DIR
+	c := NewCred("band-cred", CredTeams)
+	p := c.cachePath()
+	_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	b, _ := json.Marshal(cachedToken{Token: "gho_OLD", ExpiresAt: time.Now().Add(-time.Hour).Unix()})
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := c.readCache(time.Now()); ok {
+		t.Fatal("an expired entry was used")
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("expired entry not deleted: %v", err)
+	}
+}
+
+// Each round logs which token it used (fingerprint + expiry), mint then cache with the SAME fingerprint; never the token.
+func TestCredLogsUseByFingerprint(t *testing.T) {
+	sock, _ := fakePrincipalSocket(t)
+	t.Setenv("EBAC_BAND_CRED_SOCKET", sock)
+	t.Setenv("EBAC_RPC_AUDIT", "1")
+	r, w, _ := os.Pipe()
+	orig := os.Stderr
+	os.Stderr = w
+	for i := 0; i < 2; i++ {
+		_, _ = NewCred("band-cred", CredTeams).Token(context.Background())
+	}
+	os.Stderr = orig
+	w.Close()
+	out := make([]byte, 4096)
+	n, _ := r.Read(out)
+	log := string(out[:n])
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "source=mint") || !strings.Contains(lines[1], "source=cache") {
+		t.Fatalf("want a mint line then a cache line:\n%s", log)
+	}
+	fp := func(l string) string { i := strings.Index(l, "fp="); return l[i : i+15] }
+	if fp(lines[0]) != fp(lines[1]) {
+		t.Fatalf("fingerprints differ: %q vs %q", lines[0], lines[1])
+	}
+	if strings.Contains(log, fakeTok) {
+		t.Fatal("the token itself reached the log")
+	}
+}

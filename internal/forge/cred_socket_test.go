@@ -15,6 +15,9 @@ import (
 // fakePrincipalSocket serves band-cred's principal-socket protocol on a unix
 // socket: GET /cred/<name> only, answers keyed by name. It records every
 // request so a test can assert what ebac sent.
+// fakeNoCache makes the fake band-cred mark its tokens no_cache.
+var fakeNoCache bool
+
 func fakePrincipalSocket(t *testing.T) (string, *[]string) {
 	t.Helper()
 	// Isolate the cross-process token cache: never the real runtime dir (a test run once wrote its fake token there).
@@ -44,8 +47,8 @@ func fakePrincipalSocket(t *testing.T) (string, *[]string) {
 		switch {
 		case r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/cred/"):
 			send(w, 404, map[string]string{"error": "a principal socket serves /cred/<name> only"})
-		case name == CredGitHub || name == CredTeams:
-			send(w, 200, map[string]any{"name": name, "token": fakeTok, "expires_at": 1893456000})
+		case name == CredGitHub || name == CredTeams || name == "other-cred":
+			send(w, 200, map[string]any{"name": name, "token": fakeTok, "expires_at": 1893456000, "no_cache": fakeNoCache})
 		case name == "stale-one":
 			send(w, 503, map[string]string{"error": "credential_stale", "name": name, "stale": "credential_stale:" + name, "reason": "sign-in expired"})
 		case name == "garbled":

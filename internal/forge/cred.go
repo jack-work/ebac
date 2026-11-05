@@ -3,6 +3,8 @@ package forge
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,10 +37,11 @@ type Cred struct {
 	Reuse   time.Duration
 	Timeout time.Duration
 
-	mu  sync.Mutex
-	tok string
-	at  time.Time
-	exp int64 // unix expiry of tok (socket path); 0 = unknown
+	mu      sync.Mutex
+	tok     string
+	at      time.Time
+	exp     int64 // unix expiry of tok (socket path); 0 = unknown
+	noCache bool  // band-cred said this token may not rest anywhere
 }
 
 const (
@@ -68,9 +71,10 @@ func (c *Cred) Token(ctx context.Context) (string, error) {
 	// Cross-process cache (band-work leader 2026-11-05: one mint per round, i.e. every ~10 s, kept band-cred's audit
 	// stream from ever going quiet): a socket-minted token is kept until cacheMargin before its expiry in a 0600 file in
 	// the RUNTIME dir (tmpfs, uid ebac only, gone at reboot), never on persistent disk.
-	if c.Socket != "" {
+	if c.Socket != "" && cacheable[c.Name] {
 		if tok, exp, ok := c.readCache(time.Now()); ok {
 			c.tok, c.at, c.exp = tok, time.Now(), exp
+			c.logUse("cache")
 			return tok, nil
 		}
 	}
@@ -88,10 +92,30 @@ func (c *Cred) Token(ctx context.Context) (string, error) {
 		return "", err
 	}
 	c.tok, c.at, c.exp = tok, time.Now(), exp
-	if c.Socket != "" && exp > 0 {
+	if c.Socket != "" && exp > 0 && cacheable[c.Name] && !c.noCache {
 		c.writeCache(tok, exp)
 	}
+	c.logUse("mint")
 	return tok, nil
+}
+
+// cacheable is the explicit allowlist of credentials whose access token may rest in the runtime dir (band-work leader,
+// 2026-11-05): exactly the ones ebac polls. Any other credential is never written.
+var cacheable = map[string]bool{CredGitHub: true, CredTeams: true}
+
+// logUse names, per round, which token a call used (cheroot 2026-11-05: band-cred only audits MINTS, so a cached use is
+// visible only here). band-cred has no mint id: the token is identified by a 12-hex SHA-256 fingerprint (never the token)
+// and its expiry. Only with EBAC_RPC_AUDIT=1 (ebac's units), so an operator's CLI stays quiet.
+func (c *Cred) logUse(source string) {
+	if os.Getenv("EBAC_RPC_AUDIT") != "1" || c.tok == "" {
+		return
+	}
+	sum := sha256.Sum256([]byte(c.tok))
+	exp := "-"
+	if c.exp > 0 {
+		exp = time.Unix(c.exp, 0).UTC().Format(time.RFC3339)
+	}
+	fmt.Fprintf(os.Stderr, "ebac-cred %s source=%s fp=%s expires=%s\n", c.Name, source, hex.EncodeToString(sum[:])[:12], exp)
 }
 
 // cacheMargin: a cached token is used until this long before its expiry.
@@ -129,6 +153,7 @@ func (c *Cred) readCache(now time.Time) (string, int64, bool) {
 	}
 	var ct cachedToken
 	if json.Unmarshal(b, &ct) != nil || ct.Token == "" || time.Unix(ct.ExpiresAt, 0).Sub(now) <= cacheMargin {
+		_ = os.Remove(p) // expired, near expiry or unreadable: DELETE, do not just ignore (band-work leader)
 		return "", 0, false
 	}
 	return ct.Token, ct.ExpiresAt, true
@@ -204,6 +229,7 @@ func (c *Cred) fromSocket(ctx context.Context) (string, int64, error) {
 			Name      string `json:"name"`
 			Token     string `json:"token"`
 			ExpiresAt int64  `json:"expires_at"`
+			NoCache   bool   `json:"no_cache"` // band-cred may forbid resting this token anywhere
 		}
 		if err := json.Unmarshal(body, &ok); err != nil {
 			return "", 0, fmt.Errorf("band-cred %s via %s: http 200 but the body is not JSON (%d bytes)", c.Name, c.Socket, len(body))
@@ -212,6 +238,7 @@ func (c *Cred) fromSocket(ctx context.Context) (string, int64, error) {
 			return "", 0, fmt.Errorf("band-cred %s via %s: answered for %q", c.Name, c.Socket, ok.Name)
 		}
 		tok, err := oneToken(c.Name, ok.Token)
+		c.noCache = ok.NoCache
 		return tok, ok.ExpiresAt, err
 	}
 	var e struct {
