@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ type Cred struct {
 	mu  sync.Mutex
 	tok string
 	at  time.Time
+	exp int64 // unix expiry of tok (socket path); 0 = unknown
 }
 
 const (
@@ -60,23 +62,92 @@ func (c *Cred) staleErr(msg string) error {
 func (c *Cred) Token(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.tok != "" && time.Since(c.at) < c.Reuse {
+	if c.tok != "" && c.fresh(time.Now()) {
 		return c.tok, nil
+	}
+	// Cross-process cache (band-work leader 2026-11-05: one mint per round, i.e. every ~10 s, kept band-cred's audit
+	// stream from ever going quiet): a socket-minted token is kept until cacheMargin before its expiry in a 0600 file in
+	// the RUNTIME dir (tmpfs, uid ebac only, gone at reboot), never on persistent disk.
+	if c.Socket != "" {
+		if tok, exp, ok := c.readCache(time.Now()); ok {
+			c.tok, c.at, c.exp = tok, time.Now(), exp
+			return tok, nil
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 	var tok string
+	var exp int64
 	var err error
 	if c.Socket != "" {
-		tok, err = c.fromSocket(ctx)
+		tok, exp, err = c.fromSocket(ctx)
 	} else {
 		tok, err = c.fromCLI(ctx)
 	}
 	if err != nil {
 		return "", err
 	}
-	c.tok, c.at = tok, time.Now()
+	c.tok, c.at, c.exp = tok, time.Now(), exp
+	if c.Socket != "" && exp > 0 {
+		c.writeCache(tok, exp)
+	}
 	return tok, nil
+}
+
+// cacheMargin: a cached token is used until this long before its expiry.
+const cacheMargin = 5 * time.Minute
+
+// fresh: a token with a known expiry is good until cacheMargin before it; one without (the CLI path) for Reuse.
+func (c *Cred) fresh(now time.Time) bool {
+	if c.exp > 0 {
+		return time.Unix(c.exp, 0).Sub(now) > cacheMargin
+	}
+	return now.Sub(c.at) < c.Reuse
+}
+
+func (c *Cred) cachePath() string {
+	rt := os.Getenv("XDG_RUNTIME_DIR")
+	if rt == "" || !filepath.IsAbs(rt) {
+		return ""
+	}
+	return filepath.Join(rt, "ebac-cred", c.Name+".json")
+}
+
+type cachedToken struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+func (c *Cred) readCache(now time.Time) (string, int64, bool) {
+	p := c.cachePath()
+	if p == "" {
+		return "", 0, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", 0, false
+	}
+	var ct cachedToken
+	if json.Unmarshal(b, &ct) != nil || ct.Token == "" || time.Unix(ct.ExpiresAt, 0).Sub(now) <= cacheMargin {
+		return "", 0, false
+	}
+	return ct.Token, ct.ExpiresAt, true
+}
+
+// writeCache is best effort: a failure only costs the next process a mint.
+func (c *Cred) writeCache(tok string, exp int64) {
+	p := c.cachePath()
+	if p == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return
+	}
+	b, _ := json.Marshal(cachedToken{Token: tok, ExpiresAt: exp})
+	tmp := p + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, p)
+	}
 }
 
 // fromCLI runs `band-cred token <name>` (gluck's owner socket, phase 1).
@@ -107,7 +178,7 @@ func oneToken(name, tok string) (string, error) {
 // fromSocket mints over band-cred's principal socket: GET /cred/<name>.
 // 200 carries {"name","token","expires_at"}; anything else {"error",...}.
 // A 200 body is never echoed (it holds the token); an error body is.
-func (c *Cred) fromSocket(ctx context.Context) (string, error) {
+func (c *Cred) fromSocket(ctx context.Context) (string, int64, error) {
 	hc := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -117,16 +188,16 @@ func (c *Cred) fromSocket(ctx context.Context) (string, error) {
 	}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://band-cred/cred/"+url.PathEscape(c.Name), nil)
 	if err != nil {
-		return "", fmt.Errorf("band-cred %s via %s: %v", c.Name, c.Socket, err)
+		return "", 0, fmt.Errorf("band-cred %s via %s: %v", c.Name, c.Socket, err)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("band-cred %s via %s: %v", c.Name, c.Socket, err)
+		return "", 0, fmt.Errorf("band-cred %s via %s: %v", c.Name, c.Socket, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("band-cred %s via %s: http %d, reading body: %v", c.Name, c.Socket, resp.StatusCode, err)
+		return "", 0, fmt.Errorf("band-cred %s via %s: http %d, reading body: %v", c.Name, c.Socket, resp.StatusCode, err)
 	}
 	if resp.StatusCode == http.StatusOK {
 		var ok struct {
@@ -135,12 +206,13 @@ func (c *Cred) fromSocket(ctx context.Context) (string, error) {
 			ExpiresAt int64  `json:"expires_at"`
 		}
 		if err := json.Unmarshal(body, &ok); err != nil {
-			return "", fmt.Errorf("band-cred %s via %s: http 200 but the body is not JSON (%d bytes)", c.Name, c.Socket, len(body))
+			return "", 0, fmt.Errorf("band-cred %s via %s: http 200 but the body is not JSON (%d bytes)", c.Name, c.Socket, len(body))
 		}
 		if ok.Name != "" && ok.Name != c.Name {
-			return "", fmt.Errorf("band-cred %s via %s: answered for %q", c.Name, c.Socket, ok.Name)
+			return "", 0, fmt.Errorf("band-cred %s via %s: answered for %q", c.Name, c.Socket, ok.Name)
 		}
-		return oneToken(c.Name, ok.Token)
+		tok, err := oneToken(c.Name, ok.Token)
+		return tok, ok.ExpiresAt, err
 	}
 	var e struct {
 		Error  string `json:"error"`
@@ -152,7 +224,7 @@ func (c *Cred) fromSocket(ctx context.Context) (string, error) {
 		text = text[:512] + "..."
 	}
 	if err := json.Unmarshal(body, &e); err != nil || e.Error == "" {
-		return "", fmt.Errorf("band-cred %s via %s: http %d: %s", c.Name, c.Socket, resp.StatusCode, text)
+		return "", 0, fmt.Errorf("band-cred %s via %s: http %d: %s", c.Name, c.Socket, resp.StatusCode, text)
 	}
 	if e.Error == "credential_stale" {
 		msg := e.Stale
@@ -162,11 +234,11 @@ func (c *Cred) fromSocket(ctx context.Context) (string, error) {
 		if e.Reason != "" {
 			msg += " (" + e.Reason + ")"
 		}
-		return "", c.staleErr(msg)
+		return "", 0, c.staleErr(msg)
 	}
 	msg := e.Error
 	if e.Reason != "" {
 		msg += ": " + e.Reason
 	}
-	return "", fmt.Errorf("band-cred %s via %s: http %d %s", c.Name, c.Socket, resp.StatusCode, msg)
+	return "", 0, fmt.Errorf("band-cred %s via %s: http %d %s", c.Name, c.Socket, resp.StatusCode, msg)
 }

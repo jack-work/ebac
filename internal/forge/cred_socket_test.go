@@ -17,6 +17,8 @@ import (
 // request so a test can assert what ebac sent.
 func fakePrincipalSocket(t *testing.T) (string, *[]string) {
 	t.Helper()
+	// Isolate the cross-process token cache: never the real runtime dir (a test run once wrote its fake token there).
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	dir, err := os.MkdirTemp("", "ebac-bc") // short: sun_path is 108 bytes
 	if err != nil {
 		t.Fatal(err)
