@@ -141,6 +141,14 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		}
 		return nil
 	}
+	if k := w.Keel; k != nil {
+		fmt.Printf("keel      %s paths %s, waiting on %s, self %s, alert %s\n", k.Repo, strings.Join(k.Paths, ","),
+			strings.Join(k.WaitingOn, ","), strings.Join(k.Self, ","), w.AlertTarget())
+		if s := w.Runtime.Keel; s != nil {
+			fmt.Printf("seen      %d comment(s) in %d thread(s), gone streak %d\n", len(s.Seen), len(s.Resolved), s.GoneStreak)
+		}
+		return nil
+	}
 	if w.Chat != nil {
 		fmt.Printf("chat      %s (%s), quiet: %s\n", w.Chat.Topic, w.Chat.ID, strings.Join(w.Chat.Quiet, ", "))
 		if t := w.Runtime.Teams; t != nil {
