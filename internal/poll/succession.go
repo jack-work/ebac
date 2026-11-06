@@ -247,9 +247,8 @@ func successionReport(c *model.Critic, pol SuccessionPolicy, holder string, fill
 	return fmt.Sprintf("ebac SUCCESSION REPORT: critic %q, seat %s is at %.0f%% of its context (threshold %.0f%%).\n"+
 		"Hand it over with figaro succeed (Boss 2026-11-06: succession is figaro succeed ONLY, no manual fork + cast),\n"+
 		"as the seat's owner; the critic's role form %s is the role:\n"+
-		"  1. figaro succeed %s -- \"<handoff: you now hold ebac critic %s; read the role form %s; ack the last delivered round>\"\n"+
-		"     (add --abdication linger if %s still has other work: the default retires it)\n"+
-		"  2. figaro state outfit default --id <successor id>   (a fork inherits an old model)\n"+
+		"  figaro succeed %s -O default -- \"<handoff: you now hold ebac critic %s; read the role form %s; ack the last delivered round>\"\n"+
+		"  (add --abdication linger if %s still has other work: the default retires it); then verify target-aria + system.model once.\n"+
 		"If the role already points elsewhere, there is nothing to do. Sent once per holder.",
 		c.Name, holder, fill*100, pol.StandbyAt*100, c.FormID, c.FormID, c.Name, c.FormID, holder)
 }
