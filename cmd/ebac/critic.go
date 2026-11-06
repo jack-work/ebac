@@ -35,7 +35,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	grace := fs.Duration("archive-grace", 6*time.Hour, "keep polling this long after the last PR closes")
 	noArchive := fs.Bool("no-archive", false, "do not archive when all PRs close")
 	maxFail := fs.Int("max-failures", 20, "stop after N consecutive failed rounds (0 = never)")
-	arm := fs.Bool("arm", false, "enable the systemd timer immediately")
+	arm := fs.Bool("arm", true, "enable the systemd timer immediately (in ebac's own user manager); --arm=false to stage only")
 	write := fs.Bool("write", false, "grant this critic authority to reply/comment/push on its PRs (never approve/merge/close)")
 	approve := fs.Bool("approve", false, "reviewer mode: may approve PRs it did not author")
 	clone := fs.String("clone", "", "reviewer mode: local clone to fetch PR heads through")
@@ -167,9 +167,9 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 		}
 		fmt.Printf("armed: ebac@%s.timer every %s\n", w.Name, *interval)
 	} else {
-		fmt.Printf("\nnot armed. Dry-run first, then arm:\n")
+		fmt.Printf("\nnot armed (--arm=false). Dry-run first; ebac reconcile arms it within 30 min, or arm now:\n")
 		fmt.Printf("  ebac poll --critic %s --dry-run\n", w.Name)
-		fmt.Printf("  systemctl --user enable --now ebac@%s.timer\n", w.Name)
+		fmt.Printf("  ebac reconcile   (ebac's timers live in ebac's own user manager, not gluck's)\n")
 	}
 	return nil
 }
@@ -290,7 +290,7 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	}
 	fmt.Printf("%s: %sped (%s)\n", w.Name, verb, w.Runtime.StopReason)
 	if !stop {
-		fmt.Printf("re-arm with: systemctl --user enable --now ebac@%s.timer\n", w.Name)
+		fmt.Printf("re-armed by the next ebac reconcile (within 30 min), or now: ebac reconcile\n")
 	}
 	return nil
 }
