@@ -245,11 +245,11 @@ func reportTo() string { return strings.TrimSpace(os.Getenv("EBAC_SUCCESSION_REP
 
 func successionReport(c *model.Critic, pol SuccessionPolicy, holder string, fill float64) string {
 	return fmt.Sprintf("ebac SUCCESSION REPORT: critic %q, seat %s is at %.0f%% of its context (threshold %.0f%%).\n"+
-		"ebac holds no fork grant; succeed the seat as its owner (gluck):\n"+
-		"  1. figaro fork %s:%d --stay -j   (check the minted id is non-empty)\n"+
-		"  2. figaro state outfit default --id <new id>   (a fork inherits an old model; the default outfit sets the current one)\n"+
-		"  3. ebac cast --critic %s --aria <new id>   (the role %s then points at it; callers keep the role id)\n"+
-		"  4. tell the outgoing holder %s to stand down (advisor only).\n"+
-		"If the seat already succeeded itself (the role points elsewhere), there is nothing to do. Sent once per holder.",
-		c.Name, holder, fill*100, pol.StandbyAt*100, holder, pol.ForkTurn, c.Name, c.FormID, holder)
+		"Hand it over with figaro succeed (Boss 2026-11-06: succession is figaro succeed ONLY, no manual fork + cast),\n"+
+		"as the seat's owner; the critic's role form %s is the role:\n"+
+		"  1. figaro succeed %s -- \"<handoff: you now hold ebac critic %s; read the role form %s; ack the last delivered round>\"\n"+
+		"     (add --abdication linger if %s still has other work: the default retires it)\n"+
+		"  2. figaro state outfit default --id <successor id>   (a fork inherits an old model)\n"+
+		"If the role already points elsewhere, there is nothing to do. Sent once per holder.",
+		c.Name, holder, fill*100, pol.StandbyAt*100, c.FormID, c.FormID, c.Name, c.FormID, holder)
 }
