@@ -324,7 +324,20 @@ func (f *CriticForm) Snapshot() (*model.Snapshot, error) {
 	return &model.Snapshot{Critic: name, Round: e.Round, TakenAt: e.TakenAt, PRs: prs, Complete: e.Complete, Note: e.Note}, nil
 }
 
-// criticForms reads every form declaring kind ebac.critic.
+// criticRows picks the list rows worth reading as critic forms, from the row
+// alone. Archived forms are never read: a read renews their keepalive.
+func criticRows(rows []rpc.FigaroInfoResponse) []string {
+	var ids []string
+	for _, r := range rows {
+		if r.Kind != "form" || !strings.HasPrefix(r.Name, "ebac-") || strings.HasPrefix(r.Name, model.ArchivedFormPrefix) {
+			continue
+		}
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
+// criticForms reads every live form declaring kind ebac.critic.
 func (s *Store) criticForms(ctx context.Context) ([]*CriticForm, error) {
 	ang, err := s.Fig.Angelus()
 	if err != nil {
@@ -335,11 +348,8 @@ func (s *Store) criticForms(ctx context.Context) ([]*CriticForm, error) {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}
 	var out []*CriticForm
-	for _, r := range resp.Figaros {
-		if r.Kind != "form" || !strings.HasPrefix(r.Name, "ebac-") {
-			continue
-		}
-		f, err := s.ReadForm(ctx, r.ID)
+	for _, id := range criticRows(resp.Figaros) {
+		f, err := s.ReadForm(ctx, id)
 		if errors.Is(err, figaro.ErrFormGone) {
 			continue
 		}
@@ -510,7 +520,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		if changed {
 			set["post"] = model.MustJSON(posts)
 		}
-		var remove []string
+		remove := retireKeys(w, cur, set)
 		for k := range cur {
 			if k == "delta" || k == "sync" {
 				remove = append(remove, k)
@@ -523,6 +533,20 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		}
 		return set, remove
 	})
+}
+
+// retireKeys renames an archived critic's form out of enumeration and frees
+// its seat (a role's target-aria holds that aria alive); kind stays, for
+// history. It returns the keys to remove; a live critic is left as is.
+func retireKeys(w *model.Critic, cur, set map[string]json.RawMessage) []string {
+	if !w.Runtime.Archived {
+		return nil
+	}
+	set["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)
+	if _, ok := cur["target-aria"]; ok {
+		return []string{"target-aria"}
+	}
+	return nil
 }
 
 // criticConfig is a critic without the fields that live elsewhere.

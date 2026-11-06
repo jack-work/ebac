@@ -197,12 +197,20 @@ func (w *Critic) AlertTarget() string {
 	return w.FormID
 }
 
+// ArchivedFormPrefix names a retired critic's role form. Enumeration skips
+// such rows from the list alone: every form read renews figaro's keepalive,
+// so a retired form that is still read never lapses (28 alive on 2026-11-05).
+const ArchivedFormPrefix = "ebac-archived-"
+
 func ValidName(n string) error {
 	if n == "" {
 		return fmt.Errorf("critic name is required")
 	}
 	if len(n) > 64 {
 		return fmt.Errorf("critic name too long")
+	}
+	if strings.HasPrefix("ebac-"+n, ArchivedFormPrefix) {
+		return fmt.Errorf("critic name %q: the archived- prefix is reserved for retired role forms", n)
 	}
 	for _, r := range n {
 		ok := r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')

@@ -323,10 +323,10 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	fmt.Printf("%s: archived to %s\n", w.Name, dir)
-	if !*purge {
-		if err := st.SaveCritic(ctx, w); err != nil {
-			return err
-		}
+	// Saved even before a purge: ebac holds no kill grant, and a refused
+	// purge must still leave the form renamed and seatless, to lapse.
+	if err := st.SaveCritic(ctx, w); err != nil {
+		return err
 	}
 	if *purge {
 		fig := st.Fig

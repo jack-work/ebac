@@ -46,6 +46,20 @@ func auditRPC(method, target string) {
 	fmt.Fprintf(auditOut, "figaro-rpc %s %s\n", method, target)
 }
 
+// AuditTo redirects the audit to w (nil: off) and returns the undo. For
+// tests that count reads; a connection is tapped only if dialled after it.
+func AuditTo(w io.Writer) func() {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	prev := auditOut
+	auditOut = w
+	return func() {
+		auditMu.Lock()
+		defer auditMu.Unlock()
+		auditOut = prev
+	}
+}
+
 // auditTap wraps an aria connection: jkrpc encodes one JSON message per
 // Write, so each Write is one request. Only the method and the aria id are
 // read; the params are never logged.
