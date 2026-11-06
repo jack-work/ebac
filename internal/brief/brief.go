@@ -68,6 +68,8 @@ func ProtocolText(w *model.Critic, snap *model.Snapshot, me string) string {
 		b.WriteString(teamsCharge(w))
 	case model.ModeAuthor:
 		b.WriteString(authorCharge(w))
+	case model.ModeKeel:
+		b.WriteString(keelCharge(w))
 	case model.ModeDevelop:
 		b.WriteString(developCharge(w))
 	case model.ModeReviewer:
@@ -358,6 +360,20 @@ func authorCharge(w *model.Critic) string {
 			strings.Join(a.Repos, ", "), a.Since.UTC().Format(time.RFC3339)) +
 		"  created/updated/merged, url). Closes, reopens, head moves and new drafts are recorded there but do not\n" +
 		"  wake you. ebac only reads these PRs; it never posts to them.\n"
+}
+
+func keelCharge(w *model.Critic) string {
+	k := w.Keel
+	scope := k.Repo
+	if len(k.Paths) > 0 {
+		scope += " (" + strings.Join(k.Paths, ", ") + ")"
+	}
+	return "YOUR JOB — KEEL THREADS WATCH\n" +
+		fmt.Sprintf("  You are woken when %s writes or edits a comment in an open keel thread of %s.\n", strings.Join(k.WaitingOn, " or "), scope) +
+		"  Key inbox holds each new comment (author, thread, path, line, quote, text cut at 2 KB); key threads indexes\n" +
+		"  every thread (path, line, resolved, comment count, last author). Other authors, resolves and reopens are\n" +
+		"  recorded but do not wake you; your own comments are never announced. ebac only reads keel; it never posts.\n" +
+		"  If key gone appears, keel is unreadable: polling has stopped and the form says what to do.\n"
 }
 
 const ProtocolKeyPrefix = "harness_protocol_"

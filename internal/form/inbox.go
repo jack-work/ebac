@@ -30,6 +30,9 @@ type InboxItem struct {
 	At       string `json:"at"`
 	URL      string `json:"url,omitempty"`
 	Thread   string `json:"thread,omitempty"`
+	Path     string `json:"path,omitempty"`  // keel: the file the thread is anchored to
+	Line     int    `json:"line,omitempty"`  // keel: its first line
+	Quote    string `json:"quote,omitempty"` // keel: the selected text, cut
 	Body     string `json:"body"`
 	Cut      bool   `json:"cut,omitempty"` // the full text is at URL
 }

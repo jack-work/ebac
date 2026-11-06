@@ -77,6 +77,7 @@ type Runtime struct {
 	// Teams is a teams critic's seen-map and gone tracking.
 	Teams  *TeamsState  `json:"teams,omitempty"`
 	Author *AuthorState `json:"author,omitempty"`
+	Keel   *KeelState   `json:"keel,omitempty"`
 
 	Stopped    bool      `json:"stopped"`
 	StopReason string    `json:"stop_reason,omitempty"`
@@ -138,6 +139,8 @@ type Critic struct {
 	Chat *ChatRef `json:"chat,omitempty"`
 	// Author is an author watch's configuration (source github-author).
 	Author *AuthorRef `json:"author_watch,omitempty"`
+	// Keel is a keel-threads watch's configuration (source keel-threads).
+	Keel *KeelRef `json:"keel,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`
@@ -185,14 +188,20 @@ func (w *Critic) SourceName() string {
 	if w.Mode == ModeAuthor {
 		return "github-author"
 	}
+	if w.Mode == ModeKeel {
+		return "keel-threads"
+	}
 	return "github-pr"
 }
 
-// alertTarget is who an author watch wakes: the configured role, else the
-// critic's own role form.
+// alertTarget is who an author or keel watch wakes: the configured role, else
+// the critic's own role form.
 func (w *Critic) AlertTarget() string {
 	if w.Author != nil && w.Author.AlertRole != "" {
 		return w.Author.AlertRole
+	}
+	if w.Keel != nil && w.Keel.AlertRole != "" {
+		return w.Keel.AlertRole
 	}
 	return w.FormID
 }
@@ -285,4 +294,30 @@ type TeamsState struct {
 	FailSince string            `json:"fail_since,omitempty"`
 	Blind     bool              `json:"blind,omitempty"`
 	BlindErr  string            `json:"blind_err,omitempty"`
+}
+
+const ModeKeel Mode = "keel"
+
+// KeelRef is a keel-threads watch: one keel repo's comment threads, read
+// through ebac's own unix socket door (read-only, GET threads only).
+type KeelRef struct {
+	Repo  string   `json:"repo"`            // owner/name; the viewer id is owner-name
+	Paths []string `json:"paths,omitempty"` // globs; empty = every path
+	// WaitingOn are the authors whose new or edited comment in an open
+	// thread wakes the seat (display name, account or alias).
+	WaitingOn []string `json:"waiting_on"`
+	// Self are the seat's own names: their comments are never announced.
+	Self      []string `json:"self,omitempty"`
+	AlertRole string   `json:"alert_role,omitempty"`
+}
+
+// KeelState lives under system.ebac.runtime: the seat never sees it.
+type KeelState struct {
+	Seen       map[string]string `json:"seen,omitempty"`     // comment id -> body digest
+	Resolved   map[string]bool   `json:"resolved,omitempty"` // thread id -> resolved
+	GoneStreak int               `json:"gone_streak,omitempty"`
+	GoneSince  string            `json:"gone_since,omitempty"`
+	FailSince  string            `json:"fail_since,omitempty"`
+	Blind      bool              `json:"blind,omitempty"`
+	BlindErr   string            `json:"blind_err,omitempty"`
 }

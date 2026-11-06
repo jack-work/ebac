@@ -13,6 +13,7 @@ import (
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/source/author"
 	"github.com/gluck/ebac/internal/source/github"
+	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/internal/source/teams"
 )
 
@@ -25,6 +26,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--every 5m]
                                             watch one author's PRs: wake on a new PR or a merge
+  ebac add-keel --name N --repo O/R [--paths GLOB[,GLOB]] [--aria SEAT | --alert @ROLE] --waiting-on "A[,B]"
+              [--self "A,B"] [--every 5m]   watch one keel repo's comment threads: wake when A answers
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -54,7 +57,7 @@ type globals struct {
 }
 
 func init() {
-	for _, s := range []poll.Source{github.Source{}, teams.Source{}, author.Source{}} {
+	for _, s := range []poll.Source{github.Source{}, teams.Source{}, author.Source{}, keel.Source{}} {
 		poll.Register(s)
 	}
 }
@@ -84,6 +87,8 @@ func main() {
 		err = cmdAddTeams(ctx, g, args)
 	case "add-author":
 		err = cmdAddAuthor(ctx, g, args)
+	case "add-keel":
+		err = cmdAddKeel(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
 	case "set-write":
