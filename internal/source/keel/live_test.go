@@ -144,3 +144,65 @@ func TestLiveKeelRoundsBaselineAnswerBlindGone(t *testing.T) {
 		t.Fatalf("a stopped critic polled again: %v\n%s", err, out.String())
 	}
 }
+
+func TestLiveKeelFeedRoundsBaselineAnswerCursor(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	old := feedWait
+	feedWait = 0
+	t.Cleanup(func() { feedWait = old })
+	fk := &fakeKeel{}
+	q := th("t1", false, cm("c1", seat, "question?"))
+	fk.threads = byPathOf(q)
+	fk.events = []FeedEvent{ev(1, "comment.created", "t1", "c1", "admin", seat)}
+	sock := unixKeel(t, fk).T.(Door).Socket
+	t.Setenv("EBAC_KEEL_SOCKET", sock)
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-keelfeed")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &model.Critic{Name: "livetest-keelfeed-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
+		CreatedAt: time.Now().UTC(), FormID: id, Keel: feedRef()}
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	round := func() error { return (&poll.Poller{Store: st, Fig: f, Out: &out}).Poll(ctx, w.Name) }
+	load := func() *model.Critic {
+		c, err := st.LoadCritic(ctx, w.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if err := round(); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if c := load(); !c.Runtime.Keel.FeedStarted || c.Runtime.Keel.Cursor != 1 || len(c.Runtime.PendingEvents) != 0 {
+		t.Fatalf("baseline: %+v pending %v", c.Runtime.Keel, c.Runtime.PendingEvents)
+	}
+	q.Comments = append(q.Comments, cm("c2", gluck, "please look"), cm("c3", seat, "on it"))
+	fk.mu.Lock()
+	fk.threads = byPathOf(q)
+	fk.events = append(fk.events, ev(2, "comment.created", "t1", "c2", "admin", gluck), ev(3, "comment.created", "t1", "c3", "admin", seat))
+	fk.mu.Unlock()
+	if err := round(); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	c := load()
+	if c.Runtime.Keel.Cursor != 3 || len(c.Runtime.PendingEvents) != 1 || c.Runtime.PendingEvents[0].Tier != model.TierWake || c.Runtime.PendingEvents[0].Comment != "c2" {
+		t.Fatalf("answer: cursor %d pending %+v", c.Runtime.Keel.Cursor, c.Runtime.PendingEvents)
+	}
+	if err := round(); err != nil {
+		t.Fatalf("quiet: %v", err)
+	}
+	if c := load(); c.Runtime.Keel.Cursor != 3 || len(c.Runtime.PendingEvents) != 1 {
+		t.Fatalf("quiet round changed things: cursor %d pending %+v", c.Runtime.Keel.Cursor, c.Runtime.PendingEvents)
+	}
+}
