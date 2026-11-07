@@ -19,7 +19,7 @@ import (
 const boss = "Jack Kelliher ⟩ jack"
 
 func ref() *model.KeelRef {
-	return &model.KeelRef{Repo: "jack-work/notes", WaitingOn: []string{"Jack Kelliher"}, Self: []string{"figaro-seat"}}
+	return &model.KeelRef{Repo: "jack-work/notes", WaitingOn: []string{boss}, Self: []string{"figaro-seat ⟩ jack"}}
 }
 
 func cm(id, author, body string) Comment {
@@ -63,7 +63,7 @@ func wakes(ev []model.Event) int {
 }
 
 func TestKeelFirstRoundSilentThenBossReplyWakes(t *testing.T) {
-	q := th("t1", false, cm("c1", "figaro-seat", "question?"))
+	q := th("t1", false, cm("c1", "figaro-seat ⟩ jack", "question?"))
 	st := baseline(t, ref(), map[string][]Thread{"doc/a.md": {q}})
 	if st.Seen["c1"] == "" {
 		t.Fatalf("baseline did not record c1: %v", st.Seen)
@@ -84,9 +84,9 @@ func TestKeelFirstRoundSilentThenBossReplyWakes(t *testing.T) {
 }
 
 func TestKeelOtherAuthorRecordsOwnIsSilent(t *testing.T) {
-	q := th("t1", false, cm("c1", "figaro-seat", "question?"))
+	q := th("t1", false, cm("c1", "figaro-seat ⟩ jack", "question?"))
 	st := baseline(t, ref(), map[string][]Thread{"doc/a.md": {q}})
-	q.Comments = append(q.Comments, cm("c2", "Liang Shi ⟩ liang", "my two cents"), cm("c3", "figaro-seat", "follow-up"))
+	q.Comments = append(q.Comments, cm("c2", "Liang Shi ⟩ jack", "my two cents"), cm("c3", "figaro-seat ⟩ jack", "follow-up"))
 	ev, items, _ := keelDiff(st, ref(), map[string][]Thread{"doc/a.md": {q}})
 	if len(ev) != 1 || ev[0].Comment != "c2" || ev[0].Tier != model.TierRecord {
 		t.Fatalf("events = %+v; want only c2, recorded", ev)
@@ -113,7 +113,7 @@ func TestKeelEditWakesAndUnchangedIsSilent(t *testing.T) {
 }
 
 func TestKeelResolvedRecordsAndAnswerInResolvedThreadRecords(t *testing.T) {
-	q := th("t1", false, cm("c1", "figaro-seat", "q"))
+	q := th("t1", false, cm("c1", "figaro-seat ⟩ jack", "q"))
 	st := baseline(t, ref(), map[string][]Thread{"doc/a.md": {q}})
 	q.Resolved = true
 	q.Comments = append(q.Comments, cm("c2", boss, "done"))
@@ -152,38 +152,58 @@ func TestKeelPathFilter(t *testing.T) {
 	}
 }
 
-// The waited-on match is whole-name and case-insensitive on any of keel's
-// names; a near miss must not wake (negative controls).
-func TestKeelWaitedOnAuthorMatch(t *testing.T) {
+func TestKeelThreadsPathMatchesExactlyOnThePrincipal(t *testing.T) {
 	r := ref()
 	for _, tc := range []struct {
-		c    Comment
-		want bool
+		c          Comment
+		self, wake bool
 	}{
-		{cm("1", boss, ""), true},
-		{Comment{Author: "jack"}, false}, // account alone, not listed
-		{Comment{Author: "JACK KELLIHER ⟩ jack"}, true},
-		{Comment{Alias: "jack kelliher"}, true},
-		{Comment{Author: "Jack Kelliherx ⟩ jackx"}, false},
-		{Comment{Author: "Jack"}, false},
-		{Comment{Author: "Liang Shi ⟩ liang"}, false},
-		{Comment{}, false},
+		{cm("1", boss, ""), false, true},
+		{cm("2", "figaro-seat ⟩ jack", ""), true, false},
+		{cm("3", "JACK KELLIHER ⟩ jack", ""), false, false},
+		{cm("4", "jack", ""), false, false},
+		{Comment{Author: "Jack Kelliher ⟩ jack ⟩ x", Account: "jack"}, false, false},
+		{Comment{Author: boss, Account: "eve", Alias: "Jack Kelliher"}, false, true},
+		{Comment{Author: "figaro-seat ⟩ eve", Account: "eve", Alias: "figaro-seat"}, false, true},
+		{Comment{Author: "figaro-seat", Account: "eve"}, false, true},
+		{Comment{}, false, true},
 	} {
-		if got := matches(tc.c, r.WaitingOn); got != tc.want {
-			t.Errorf("matches(%+v) = %v, want %v", tc.c, got, tc.want)
+		who := FeedEvent{Signed: tc.c.Author, Author: tc.c.Account}
+		if got := exactly(who, r.Self); got != tc.self {
+			t.Errorf("self(%+v) = %v, want %v", tc.c, got, tc.self)
+		}
+		if got := !exactly(who, r.Self) && shouldWake(who, r); got != tc.wake {
+			t.Errorf("wake(%+v) = %v, want %v", tc.c, got, tc.wake)
 		}
 	}
-	r.WaitingOn = []string{"jack"}
-	if !matches(cm("1", boss, ""), r.WaitingOn) {
-		t.Error("account match failed")
-	}
-	// The same Boss reply from a non-waited author records instead of waking.
-	r.WaitingOn = []string{"Someone Else"}
-	q := th("t1", false)
+}
+
+func TestKeelThreadsPathAStrangerSigningTheSeatsNameWakes(t *testing.T) {
+	r := &model.KeelRef{Repo: "jack-work/notes", WaitingOn: []string{boss}, Self: []string{"Figaro ⟩ jack"}}
+	q := th("t1", false, cm("c0", boss, "start"))
 	st := baseline(t, r, map[string][]Thread{"doc/a.md": {q}})
-	q.Comments = []Comment{cm("c1", boss, "hi")}
-	if ev, _, _ := keelDiff(st, r, map[string][]Thread{"doc/a.md": {q}}); len(ev) != 1 || ev[0].Tier != model.TierRecord {
-		t.Fatalf("non-waited author: %+v", ev)
+	q.Comments = append(q.Comments,
+		Comment{ID: "s1", Author: "Figaro ⟩ eve", Account: "eve", Alias: "Figaro", Body: "imitation", Created: time.Unix(1, 0)},
+		Comment{ID: "s2", Author: "Figaro", Account: "eve", Body: "bare imitation", Created: time.Unix(1, 0)},
+		cm("g1", boss, "the real one"),
+		cm("o1", "Figaro ⟩ jack", "the seat's own"),
+		cm("x1", "Figaro c9ff4e17 ⟩ jack", "another seat"))
+	ev, items, _ := keelDiff(st, r, map[string][]Thread{"doc/a.md": {q}})
+	got := map[string]model.Tier{}
+	for _, e := range ev {
+		got[e.Comment] = e.Tier
+	}
+	want := map[string]model.Tier{"s1": model.TierWake, "s2": model.TierWake, "g1": model.TierWake, "x1": model.TierRecord}
+	if len(got) != len(want) {
+		t.Fatalf("events %v, want %v", got, want)
+	}
+	for id, tier := range want {
+		if got[id] != tier {
+			t.Errorf("%s: %v, want %v", id, got[id], tier)
+		}
+	}
+	if _, ok := items["keel-o1"]; ok {
+		t.Error("the seat's own comment reached its inbox")
 	}
 }
 

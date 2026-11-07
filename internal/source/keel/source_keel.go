@@ -56,13 +56,6 @@ type IndexEntry struct {
 	LastBy   string `json:"last_by,omitempty"`
 }
 
-// names are every way a comment's author can be written: keel's nametag
-// ("alias ⟩ account"), its alias part, the account and the alias.
-func names(c Comment) []string {
-	alias, _, _ := strings.Cut(c.Author, " ⟩ ")
-	return []string{c.Author, alias, c.Account, c.Alias}
-}
-
 func nametagAccount(n string) string {
 	if _, account, ok := strings.Cut(n, " ⟩ "); ok {
 		return account
@@ -128,27 +121,14 @@ func seatOf(ctx context.Context, p *poll.Poller, w *model.Critic) string {
 	return id
 }
 
+func shouldWake(e FeedEvent, ref *model.KeelRef) bool {
+	return exactly(e, ref.WaitingOn) || !knownPrincipal(e.Author, ref)
+}
+
 func knownPrincipal(author string, ref *model.KeelRef) bool {
 	for _, n := range append(append([]string{}, ref.Self...), ref.WaitingOn...) {
 		if n = strings.TrimSpace(n); n != "" && nametagAccount(n) == author {
 			return true
-		}
-	}
-	return false
-}
-
-func matches(c Comment, list []string) bool { return anyMatch(names(c), list) }
-
-func anyMatch(ns, list []string) bool {
-	for _, n := range ns {
-		n = strings.TrimSpace(n)
-		if n == "" {
-			continue
-		}
-		for _, want := range list {
-			if strings.EqualFold(n, strings.TrimSpace(want)) {
-				return true
-			}
 		}
 	}
 	return false
@@ -210,7 +190,8 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 				d := model.BodyDigest(c.Body)
 				prev, had := st.Seen[c.ID]
 				seen[c.ID] = d
-				if first || prev == d || matches(c, ref.Self) {
+				who := FeedEvent{Signed: c.Author, Author: c.Account}
+				if first || prev == d || exactly(who, ref.Self) {
 					continue
 				}
 				kind := EvKeelNew
@@ -218,7 +199,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 					kind = EvKeelEdited
 				}
 				tier := model.TierRecord
-				if !t.Resolved && matches(c, ref.WaitingOn) {
+				if !t.Resolved && shouldWake(who, ref) {
 					tier = model.TierWake
 				}
 				body, cut := model.CutBody(c.Body, keelBodyBytes)
@@ -360,7 +341,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 				kind = EvKeelEdited
 			}
 			tier := model.TierRecord
-			if !x.t.Resolved && (exactly(e, ref.WaitingOn) || !knownPrincipal(e.Author, ref)) {
+			if !x.t.Resolved && shouldWake(e, ref) {
 				tier = model.TierWake
 			}
 			line := indexEntry(x.path, x.t).Line
@@ -387,11 +368,7 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 
-	ref := w.Keel
-	if ref.Feed {
-		ref = withSeat(ref, seatOf(ctx, p, w))
-	}
-	round, err := fetchRound(ctx, cl, st, ref)
+	round, err := fetchRound(ctx, cl, st, withSeat(w.Keel, seatOf(ctx, p, w)))
 	if err != nil {
 		if errors.Is(err, ErrGone) {
 			st.GoneStreak++
