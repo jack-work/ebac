@@ -400,3 +400,82 @@ func TestAddKeelTransportForRef(t *testing.T) {
 		t.Fatalf("url: %+v", h)
 	}
 }
+
+const urbanVinegar = "edfcc588a39b011cc2471ec492c66095"
+
+func TestTheSeatsOwnSignaturesAreSelf(t *testing.T) {
+	got := seatNametags("@"+urbanVinegar, []string{"admin"})
+	want := []string{"Figaro ⟩ admin", "Figaro " + urbanVinegar + " ⟩ admin", "Figaro edfcc588 ⟩ admin", "Figaro urban-vinegar ⟩ admin"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("seat nametags %q, want %q", got, want)
+	}
+	if seatNametags("", []string{"admin"}) != nil {
+		t.Fatal("no seat, yet self names")
+	}
+	ref := &model.KeelRef{Repo: notesR, Feed: true, WaitingOn: []string{gluck}}
+	if a := nametagAccounts(withSeat(ref, urbanVinegar)); len(a) != 1 || a[0] != "admin" {
+		t.Fatalf("accounts %v", a)
+	}
+}
+
+func TestASeatIsNeverHandedItsOwnReplies(t *testing.T) {
+	ref := withSeat(&model.KeelRef{Repo: notesR, Feed: true, WaitingOn: []string{gluck}}, urbanVinegar)
+	nametags := map[string]string{
+		"own-short":  "Figaro edfcc588 ⟩ admin",
+		"own-handle": "Figaro urban-vinegar ⟩ admin",
+		"own-bare":   "Figaro ⟩ admin",
+		"own-full":   "Figaro " + urbanVinegar + " ⟩ admin",
+		"other-seat": "Figaro c9ff4e17 ⟩ admin",
+		"gluck":      gluck,
+		"bare":       "admin",
+		"stranger":   "Jack ⟩ eve",
+	}
+	var cs []Comment
+	var evs []FeedEvent
+	seq := int64(0)
+	for id, n := range nametags {
+		cs = append(cs, cm(id, n, "body of "+id))
+		seq++
+		author := "admin"
+		if id == "stranger" {
+			author = "eve"
+		}
+		evs = append(evs, ev(seq, "comment.created", "t1", id, author, n))
+	}
+	r := feedDiff(0, ref, evs, byPathOf(th("t1", false, cs...)))
+	got := map[string]model.Tier{}
+	for _, e := range r.events {
+		got[e.Comment] = e.Tier
+	}
+	want := map[string]model.Tier{"other-seat": model.TierRecord, "gluck": model.TierWake, "bare": model.TierRecord, "stranger": model.TierWake}
+	if len(got) != len(want) {
+		t.Fatalf("events %v, want %v", got, want)
+	}
+	for id, tier := range want {
+		if got[id] != tier {
+			t.Errorf("%s (%q): %v, want %v", id, nametags[id], got[id], tier)
+		}
+	}
+	for _, own := range []string{"own-short", "own-handle", "own-bare", "own-full"} {
+		if _, ok := r.items["keel-"+own]; ok {
+			t.Errorf("the seat's own %q reached its inbox", nametags[own])
+		}
+	}
+}
+
+func TestAnotherSeatsReplyRecordsWithoutWaking(t *testing.T) {
+	ref := withSeat(&model.KeelRef{Repo: notesR, Feed: true, WaitingOn: []string{gluck}}, "c9ff4e17"+strings.Repeat("0", 24))
+	q := th("t1", false, cm("u", "Figaro edfcc588 ⟩ admin", "from urban-vinegar"))
+	r := feedDiff(0, ref, []FeedEvent{ev(1, "comment.created", "t1", "u", "admin", "Figaro edfcc588 ⟩ admin")}, byPathOf(q))
+	if len(r.events) != 1 || r.events[0].Tier != model.TierRecord {
+		t.Fatalf("another seat's reply: %+v", r.events)
+	}
+}
+
+func TestSelfWinsOverWaitingOn(t *testing.T) {
+	ref := &model.KeelRef{Repo: notesR, Feed: true, WaitingOn: []string{gluck}, Self: []string{gluck}}
+	q := th("t1", false, cm("g", gluck, "hi"))
+	if r := feedDiff(0, ref, []FeedEvent{ev(1, "comment.created", "t1", "g", "admin", gluck)}, byPathOf(q)); len(r.events) != 0 {
+		t.Fatalf("a nametag in both lists was announced: %+v", r.events)
+	}
+}

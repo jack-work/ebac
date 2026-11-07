@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jack-work/figaro/api/handle"
+
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
@@ -76,6 +78,54 @@ func exactly(e FeedEvent, nametags []string) bool {
 		}
 	}
 	return false
+}
+
+func nametagAccounts(ref *model.KeelRef) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range append(append([]string{}, ref.Self...), ref.WaitingOn...) {
+		if a := nametagAccount(strings.TrimSpace(n)); a != "" && !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func seatNametags(seat string, accounts []string) []string {
+	seat = strings.TrimPrefix(strings.TrimSpace(seat), "@")
+	if seat == "" {
+		return nil
+	}
+	names := []string{"Figaro", "Figaro " + seat}
+	if len(seat) > 8 {
+		names = append(names, "Figaro "+seat[:8])
+	}
+	if h := handle.Words(seat, handle.MinWords); h != "" {
+		names = append(names, "Figaro "+h)
+	}
+	var out []string
+	for _, a := range accounts {
+		for _, n := range names {
+			out = append(out, n+" ⟩ "+a)
+		}
+	}
+	return out
+}
+
+func withSeat(ref *model.KeelRef, seat string) *model.KeelRef {
+	r := *ref
+	r.Self = append(append([]string{}, ref.Self...), seatNametags(seat, nametagAccounts(ref))...)
+	return &r
+}
+
+func seatOf(ctx context.Context, p *poll.Poller, w *model.Critic) string {
+	f, err := p.Fig.Form(ctx, w.AlertTarget())
+	if err != nil {
+		return ""
+	}
+	id, _ := f["target-aria"].(string)
+	return id
 }
 
 func knownPrincipal(author string, ref *model.KeelRef) bool {
@@ -337,7 +387,11 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 
-	round, err := fetchRound(ctx, cl, st, w.Keel)
+	ref := w.Keel
+	if ref.Feed {
+		ref = withSeat(ref, seatOf(ctx, p, w))
+	}
+	round, err := fetchRound(ctx, cl, st, ref)
 	if err != nil {
 		if errors.Is(err, ErrGone) {
 			st.GoneStreak++
