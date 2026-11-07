@@ -25,7 +25,7 @@ type Source struct{}
 func (Source) Name() string { return "keel-threads" }
 
 func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	return pollKeel(ctx, p, w, &Client{Socket: Socket()})
+	return pollKeel(ctx, p, w, ForRef(w.Keel))
 }
 
 const (
@@ -38,6 +38,8 @@ const (
 	keelQuoteBytes = 300
 	keelGoneAfter  = 3 // consecutive "gone" answers before the repo is declared gone
 )
+
+var feedWait = 30 * time.Second
 
 // keelBlindAfter is how long the watcher may fail before it tells the seat it
 // is not hearing keel. A var so a test can shorten it.
@@ -59,9 +61,36 @@ func names(c Comment) []string {
 	return []string{c.Author, alias, c.Account, c.Alias}
 }
 
-// matches is a case-insensitive, whole-name match of any of c's names.
-func matches(c Comment, list []string) bool {
-	for _, n := range names(c) {
+func nametagAccount(n string) string {
+	if _, account, ok := strings.Cut(n, " ⟩ "); ok {
+		return account
+	}
+	return n
+}
+
+func exactly(e FeedEvent, nametags []string) bool {
+	for _, want := range nametags {
+		want = strings.TrimSpace(want)
+		if want != "" && e.Author != "" && e.Signed == want && e.Author == nametagAccount(want) {
+			return true
+		}
+	}
+	return false
+}
+
+func knownPrincipal(author string, ref *model.KeelRef) bool {
+	for _, n := range append(append([]string{}, ref.Self...), ref.WaitingOn...) {
+		if n = strings.TrimSpace(n); n != "" && nametagAccount(n) == author {
+			return true
+		}
+	}
+	return false
+}
+
+func matches(c Comment, list []string) bool { return anyMatch(names(c), list) }
+
+func anyMatch(ns, list []string) bool {
+	for _, n := range ns {
 		n = strings.TrimSpace(n)
 		if n == "" {
 			continue
@@ -113,14 +142,8 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 			if t.ID == "" {
 				continue
 			}
-			line := 0
-			if t.Anchor != nil {
-				line = t.Anchor.StartLine
-			}
-			ix := IndexEntry{Path: p, Line: line, Resolved: t.Resolved, N: len(t.Comments)}
-			if n := len(t.Comments); n > 0 {
-				ix.LastBy = t.Comments[n-1].Author
-			}
+			ix := indexEntry(p, t)
+			line := ix.Line
 			index[t.ID] = ix
 			resolved[t.ID] = t.Resolved
 			if was, known := st.Resolved[t.ID]; !first && known && was != t.Resolved {
@@ -162,6 +185,147 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 	return events, items, index
 }
 
+func indexEntry(p string, t Thread) IndexEntry {
+	ix := IndexEntry{Path: p, Resolved: t.Resolved, N: len(t.Comments)}
+	if t.Anchor != nil {
+		ix.Line = t.Anchor.StartLine
+	}
+	if n := len(t.Comments); n > 0 {
+		ix.LastBy = t.Comments[n-1].Author
+	}
+	return ix
+}
+
+func buildIndex(ref *model.KeelRef, byPath map[string][]Thread) map[string]IndexEntry {
+	index := map[string]IndexEntry{}
+	for p, ts := range byPath {
+		if !pathMatches(p, ref.Paths) {
+			continue
+		}
+		for _, t := range ts {
+			if t.ID != "" {
+				index[t.ID] = indexEntry(p, t)
+			}
+		}
+	}
+	return index
+}
+
+type keelRound struct {
+	events []model.Event
+	items  map[string]form.InboxItem
+	index  map[string]IndexEntry
+}
+
+func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model.KeelRef) (keelRound, error) {
+	if !ref.Feed {
+		byPath, err := cl.Threads(ctx, ref.Repo)
+		if err != nil {
+			return keelRound{}, err
+		}
+		ev, items, index := keelDiff(st, ref, byPath)
+		return keelRound{ev, items, index}, nil
+	}
+	if !st.FeedStarted {
+		head, err := feedHead(ctx, cl, ref.Repo)
+		if err != nil {
+			return keelRound{}, err
+		}
+		byPath, err := cl.Threads(ctx, ref.Repo)
+		if err != nil {
+			return keelRound{}, err
+		}
+		ev, items, index := keelDiff(st, ref, byPath)
+		st.Cursor, st.FeedStarted = head, true
+		st.Seen, st.Resolved = nil, nil
+		return keelRound{ev, items, index}, nil
+	}
+	evs, next, err := cl.Events(ctx, ref.Repo, st.Cursor, feedWait)
+	if err != nil {
+		return keelRound{}, err
+	}
+	if len(evs) == 0 {
+		st.Cursor = next
+		return keelRound{}, nil
+	}
+	byPath, err := cl.Threads(ctx, ref.Repo)
+	if err != nil {
+		return keelRound{}, err
+	}
+	r := feedDiff(st.Cursor, ref, evs, byPath)
+	st.Cursor = next
+	return r, nil
+}
+
+func feedHead(ctx context.Context, cl *Client, repo string) (int64, error) {
+	var after int64
+	for {
+		evs, next, err := cl.Events(ctx, repo, after, 0)
+		if err != nil {
+			return 0, err
+		}
+		if len(evs) == 0 {
+			return next, nil
+		}
+		after = next
+	}
+}
+
+func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[string][]Thread) keelRound {
+	type found struct {
+		path string
+		t    Thread
+		c    Comment
+	}
+	byComment := map[string]found{}
+	for p, ts := range byPath {
+		for _, t := range ts {
+			for _, c := range t.Comments {
+				byComment[c.ID] = found{p, t, c}
+			}
+		}
+	}
+	r := keelRound{items: map[string]form.InboxItem{}, index: buildIndex(ref, byPath)}
+	repo := model.PRKey(ref.Repo)
+	done := map[string]bool{}
+	for _, e := range evs {
+		if e.Seq <= after || !pathMatches(e.Path, ref.Paths) {
+			continue
+		}
+		switch e.Kind {
+		case "thread.resolved", "thread.reopened":
+			kind := EvKeelReopened
+			if e.Kind == "thread.resolved" {
+				kind = EvKeelResolved
+			}
+			r.events = append(r.events, model.Event{Kind: kind, Tier: model.TierRecord, PR: repo, ThreadID: e.Thread, Path: e.Path})
+		case "comment.created", "comment.edited":
+			x, ok := byComment[e.Comment]
+			if !ok || done[e.Comment] || exactly(e, ref.Self) {
+				continue
+			}
+			done[e.Comment] = true
+			kind := EvKeelNew
+			if e.Kind == "comment.edited" {
+				kind = EvKeelEdited
+			}
+			tier := model.TierRecord
+			if !x.t.Resolved && (exactly(e, ref.WaitingOn) || !knownPrincipal(e.Author, ref)) {
+				tier = model.TierWake
+			}
+			line := indexEntry(x.path, x.t).Line
+			body, cut := model.CutBody(x.c.Body, keelBodyBytes)
+			quote, _ := model.CutBody(x.t.Quote, keelQuoteBytes)
+			r.events = append(r.events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: x.t.ID, Comment: x.c.ID, Author: e.Signed,
+				Path: x.path, Detail: model.FirstLine(body)})
+			r.items["keel-"+x.c.ID] = form.InboxItem{Kind: string(kind), By: e.Signed, Time: x.c.Created.UTC().Format(time.RFC3339),
+				Thread: x.t.ID, Path: x.path, Line: line, Quote: quote, Body: body, Cut: cut,
+				Fetch: fmt.Sprintf("keel %s, thread %s: GET %s | jq '.paths[%q][] | select(.id==%q)'", ref.Repo, x.t.ID, ThreadsPath(ref.Repo), x.path, x.t.ID)}
+		}
+	}
+	return r
+}
+
 func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) error {
 	if w.Keel == nil || w.Keel.Repo == "" {
 		return fmt.Errorf("%s: keel critic without a repo", w.Name)
@@ -173,7 +337,7 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 
-	byPath, err := cl.Threads(ctx, w.Keel.Repo)
+	round, err := fetchRound(ctx, cl, st, w.Keel)
 	if err != nil {
 		if errors.Is(err, ErrGone) {
 			st.GoneStreak++
@@ -209,7 +373,7 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	events, items, index := keelDiff(st, w.Keel, byPath)
+	events, items, index := round.events, round.items, round.index
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, it := range items {
 		it.At = now
@@ -224,10 +388,12 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	if err := p.Store.SaveRound(ctx, w, nil, nil, items); err != nil {
 		return err
 	}
-	if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{"threads": model.MustJSON(index)}, nil
-	}); err != nil {
-		return fmt.Errorf("%s: write thread index: %w", w.Name, err)
+	if index != nil {
+		if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
+			return map[string]json.RawMessage{"threads": model.MustJSON(index)}, nil
+		}); err != nil {
+			return fmt.Errorf("%s: write thread index: %w", w.Name, err)
+		}
 	}
 	figaro.Renew(ctx, p.Fig, w.FormID)
 

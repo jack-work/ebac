@@ -240,7 +240,7 @@ func payload(byPath map[string][]Thread) string {
 func TestClientGetsThreadsWithoutIdentity(t *testing.T) {
 	d := newDoor(t)
 	d.set(200, payload(map[string][]Thread{"doc/a.md": {th("t1", false, cm("c1", boss, "hi"))}}))
-	got, err := (&Client{Socket: d.sock}).Threads(context.Background(), "jack-work/notes")
+	got, err := (&Client{T: Door{Socket: d.sock}}).Threads(context.Background(), "jack-work/notes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestClientGetsThreadsWithoutIdentity(t *testing.T) {
 
 func TestClientClassifiesGone(t *testing.T) {
 	d := newDoor(t)
-	cl := &Client{Socket: d.sock}
+	cl := &Client{T: Door{Socket: d.sock}}
 	ctx := context.Background()
 	d.set(404, "404 page not found")
 	if _, err := cl.Threads(ctx, "a/b"); !errors.Is(err, ErrGone) || !strings.Contains(err.Error(), "404") {
@@ -284,7 +284,7 @@ func TestClientClassifiesGone(t *testing.T) {
 	if _, err := cl.Threads(ctx, "a/b"); !errors.Is(err, ErrGone) {
 		t.Fatalf("stopped door: %v", err)
 	}
-	if _, err := (&Client{Socket: filepath.Join(t.TempDir(), "none.sock")}).Threads(ctx, "a/b"); !errors.Is(err, ErrGone) {
+	if _, err := (&Client{T: Door{Socket: filepath.Join(t.TempDir(), "none.sock")}}).Threads(ctx, "a/b"); !errors.Is(err, ErrGone) {
 		t.Fatalf("missing socket: %v", err)
 	}
 }

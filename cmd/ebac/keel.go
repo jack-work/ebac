@@ -9,6 +9,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -20,9 +21,12 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	paths := fs.String("paths", "", "comma-separated path globs (path.Match; dir/** for a subtree); empty = every path")
 	aria := fs.String("aria", "", "seat cast into the critic's own role form")
 	alert := fs.String("alert", "", "role to wake (@form) instead; its target-aria is resolved at every send")
-	waiting := fs.String("waiting-on", "", "comma-separated authors whose answer wakes the seat (name, account or alias)")
-	self := fs.String("self", "", "comma-separated authors that are the seat itself: never announced")
+	waiting := fs.String("waiting-on", "", "comma-separated authors whose answer wakes the seat; with --feed, exact nametags as /threads shows them (\"admin ⟩ admin\"), else name, account or alias")
+	self := fs.String("self", "", "comma-separated authors that are the seat itself: never announced; with --feed, exact nametags")
 	every := fs.Duration("every", 5*time.Minute, "poll interval")
+	feed := fs.Bool("feed", true, "read keel's event feed (GET /api/v1/r/<id>/events, long-poll); false diffs /threads every round")
+	keelURL := fs.String("keel-url", "", "read keel over HTTPS at this base (https://...) instead of the unix door")
+	tokenCmd := fs.String("token-cmd", "", "with --keel-url: the command that prints the bearer token, e.g. \"hush oauth get ebac\" (run without a shell)")
 	_ = fs.Parse(args)
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
@@ -30,7 +34,11 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	if err := model.ValidName(*name); err != nil {
 		return err
 	}
-	ref := &model.KeelRef{Repo: strings.TrimSpace(*repo), Paths: splitList(*paths), WaitingOn: splitList(*waiting), Self: splitList(*self), AlertRole: *alert}
+	ref := &model.KeelRef{Repo: strings.TrimSpace(*repo), Paths: splitList(*paths), WaitingOn: splitList(*waiting), Self: splitList(*self), AlertRole: *alert,
+		Feed: *feed, URL: strings.TrimSpace(*keelURL), TokenCmd: strings.Fields(*tokenCmd)}
+	if err := validTransport(ref); err != nil {
+		return err
+	}
 	if owner, nm, ok := strings.Cut(ref.Repo, "/"); !ok || owner == "" || nm == "" || strings.Contains(nm, "/") {
 		return fmt.Errorf("--repo %q: want owner/name", ref.Repo)
 	}
@@ -73,8 +81,30 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	if err := systemd.EnableTimer(*name, *every); err != nil {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
-	fmt.Printf("keel watch %q: role %s, %s paths %q, waiting on %s, alert %s, every %s\n", *name, formID, ref.Repo,
-		strings.Join(ref.Paths, ","), strings.Join(ref.WaitingOn, ","), w.AlertTarget(), *every)
+	via := "door " + keel.Socket()
+	if ref.URL != "" {
+		via = ref.URL
+	}
+	source := "threads"
+	if ref.Feed {
+		source = "feed"
+	}
+	fmt.Printf("keel watch %q: role %s, %s paths %q, waiting on %s, alert %s, every %s, %s via %s\n", *name, formID, ref.Repo,
+		strings.Join(ref.Paths, ","), strings.Join(ref.WaitingOn, ","), w.AlertTarget(), *every, source, via)
+	return nil
+}
+
+func validTransport(ref *model.KeelRef) error {
+	switch {
+	case ref.URL == "" && len(ref.TokenCmd) > 0:
+		return fmt.Errorf("--token-cmd needs --keel-url")
+	case ref.URL == "":
+		return nil
+	case !strings.HasPrefix(ref.URL, "https://"):
+		return fmt.Errorf("--keel-url %q: want https://", ref.URL)
+	case len(ref.TokenCmd) == 0:
+		return fmt.Errorf("--keel-url needs --token-cmd")
+	}
 	return nil
 }
 

@@ -317,15 +317,20 @@ type KeelRef struct {
 	// Self are the seat's own names: their comments are never announced.
 	Self      []string `json:"self,omitempty"`
 	AlertRole string   `json:"alert_role,omitempty"`
+	Feed      bool     `json:"feed,omitempty"`
+	URL       string   `json:"url,omitempty"`
+	TokenCmd  []string `json:"token_cmd,omitempty"`
 }
 
 // KeelState lives under system.ebac.runtime: the seat never sees it.
 type KeelState struct {
-	Seen       map[string]string `json:"seen,omitempty"`     // comment id -> body digest
-	Resolved   map[string]bool   `json:"resolved,omitempty"` // thread id -> resolved
-	GoneStreak int               `json:"gone_streak,omitempty"`
-	GoneSince  string            `json:"gone_since,omitempty"`
-	FailSince  string            `json:"fail_since,omitempty"`
-	Blind      bool              `json:"blind,omitempty"`
-	BlindErr   string            `json:"blind_err,omitempty"`
+	Seen        map[string]string `json:"seen,omitempty"`     // comment id -> body digest
+	Resolved    map[string]bool   `json:"resolved,omitempty"` // thread id -> resolved
+	GoneStreak  int               `json:"gone_streak,omitempty"`
+	GoneSince   string            `json:"gone_since,omitempty"`
+	FailSince   string            `json:"fail_since,omitempty"`
+	Blind       bool              `json:"blind,omitempty"`
+	BlindErr    string            `json:"blind_err,omitempty"`
+	Cursor      int64             `json:"cursor,omitempty"`
+	FeedStarted bool              `json:"feed_started,omitempty"`
 }
