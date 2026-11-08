@@ -27,7 +27,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--every 5m]
                                             watch one author's PRs: wake on a new PR or a merge
   ebac add-keel --name N --repo O/R [--paths GLOB[,GLOB]] [--aria SEAT | --alert @ROLE] --waiting-on "A[,B]"
-              [--self "A,B"] [--every 5m]   watch one keel repo's comment threads: wake when A answers
+              [--self "A,B"] [--every 45s]  watch one keel repo's comment threads: wake when A answers (5m with --feed=false)
               [--feed=false] [--keel-url https://H --token-cmd "hush oauth get ebac"]
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail

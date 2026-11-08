@@ -23,7 +23,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	alert := fs.String("alert", "", "role to wake (@form) instead; its target-aria is resolved at every send")
 	waiting := fs.String("waiting-on", "", "comma-separated authors whose answer wakes the seat; with --feed, exact nametags as /threads shows them (\"admin ⟩ admin\"), else name, account or alias")
 	self := fs.String("self", "", "comma-separated authors that are the seat itself: never announced; with --feed, exact nametags")
-	every := fs.Duration("every", 5*time.Minute, "poll interval")
+	every := fs.Duration("every", 0, "poll interval (default 45s with --feed, each round long-polls up to 30s; 5m without)")
 	feed := fs.Bool("feed", true, "read keel's event feed (GET /api/v1/r/<id>/events, long-poll); false diffs /threads every round")
 	keelURL := fs.String("keel-url", "", "read keel over HTTPS at this base (https://...) instead of the unix door")
 	tokenCmd := fs.String("token-cmd", "", "with --keel-url: the command that prints the bearer token, e.g. \"hush oauth get ebac\" (run without a shell)")
@@ -37,6 +37,10 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	ref := &model.KeelRef{Repo: strings.TrimSpace(*repo), Paths: splitList(*paths), WaitingOn: splitList(*waiting), Self: splitList(*self), AlertRole: *alert,
 		Feed: *feed, URL: strings.TrimSpace(*keelURL), TokenCmd: strings.Fields(*tokenCmd)}
 	if err := validTransport(ref); err != nil {
+		return err
+	}
+	interval, err := keelEvery(*every, ref.Feed)
+	if err != nil {
 		return err
 	}
 	if owner, nm, ok := strings.Cut(ref.Repo, "/"); !ok || owner == "" || nm == "" || strings.Contains(nm, "/") {
@@ -64,7 +68,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
 	w := &model.Critic{Name: *name, Mode: model.ModeKeel, Source: "keel-threads", CreatedAt: time.Now().UTC(),
-		FigaroSock: g.figaro, EverySec: int(every.Seconds()), Keel: ref, Stop: model.StopConditions{}}
+		FigaroSock: g.figaro, EverySec: int(interval.Seconds()), Keel: ref, Stop: model.StopConditions{}}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
 		return fmt.Errorf("mint role form: %w", err)
@@ -78,7 +82,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
 	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
+	if err := systemd.EnableTimer(*name, interval); err != nil {
 		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	via := "door " + keel.Socket()
@@ -90,8 +94,22 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 		source = "feed"
 	}
 	fmt.Printf("keel watch %q: role %s, %s paths %q, waiting on %s, alert %s, every %s, %s via %s\n", *name, formID, ref.Repo,
-		strings.Join(ref.Paths, ","), strings.Join(ref.WaitingOn, ","), w.AlertTarget(), *every, source, via)
+		strings.Join(ref.Paths, ","), strings.Join(ref.WaitingOn, ","), w.AlertTarget(), interval, source, via)
 	return nil
+}
+
+func keelEvery(every time.Duration, feed bool) (time.Duration, error) {
+	switch {
+	case every == 0 && feed:
+		return keel.FeedEvery, nil
+	case every == 0:
+		return keel.ThreadsEvery, nil
+	case every < 0:
+		return 0, fmt.Errorf("--every %s: want a positive interval", every)
+	case every < keel.MinEvery(feed):
+		return 0, fmt.Errorf("--every %s: a feed round holds its request up to %s, so the next round must start after it; want at least %s", every, keel.FeedWait, keel.MinEvery(feed))
+	}
+	return every, nil
 }
 
 func validTransport(ref *model.KeelRef) error {

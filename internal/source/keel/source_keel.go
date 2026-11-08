@@ -41,7 +41,20 @@ const (
 	keelGoneAfter  = 3 // consecutive "gone" answers before the repo is declared gone
 )
 
-var feedWait = 30 * time.Second
+var feedWait = FeedWait
+
+const (
+	FeedWait     = 30 * time.Second
+	FeedEvery    = 45 * time.Second
+	ThreadsEvery = 5 * time.Minute
+)
+
+func MinEvery(feed bool) time.Duration {
+	if feed {
+		return FeedWait + 5*time.Second
+	}
+	return 0
+}
 
 // keelBlindAfter is how long the watcher may fail before it tells the seat it
 // is not hearing keel. A var so a test can shorten it.
