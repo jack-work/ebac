@@ -212,7 +212,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 					kind = EvKeelEdited
 				}
 				tier := model.TierRecord
-				if !t.Resolved && shouldWake(who, ref) {
+				if (!t.Resolved || !had) && shouldWake(who, ref) {
 					tier = model.TierWake
 				}
 				body, cut := model.CutBody(c.Body, keelBodyBytes)
@@ -354,7 +354,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 				kind = EvKeelEdited
 			}
 			tier := model.TierRecord
-			if !x.t.Resolved && shouldWake(e, ref) {
+			if (!x.t.Resolved || e.Kind == "comment.created") && shouldWake(e, ref) {
 				tier = model.TierWake
 			}
 			line := indexEntry(x.path, x.t).Line

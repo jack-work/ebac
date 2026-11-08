@@ -137,21 +137,37 @@ func TestADeleteOrResolveNeverWakes(t *testing.T) {
 	}
 }
 
-func TestFeedSkipsSeenSeqsResolvedThreadsAndOtherPaths(t *testing.T) {
+func TestFeedSkipsSeenSeqsAndOtherPaths(t *testing.T) {
 	q := th("t1", true, cm("g", gluck, "hi"))
 	r := feedDiff(5, feedRef(), []FeedEvent{ev(5, "comment.created", "t1", "g", "admin", gluck)}, byPathOf(q))
 	if len(r.events) != 0 {
 		t.Fatalf("seq at the cursor announced: %+v", r.events)
-	}
-	r = feedDiff(4, feedRef(), []FeedEvent{ev(5, "comment.created", "t1", "g", "admin", gluck)}, byPathOf(q))
-	if len(r.events) != 1 || r.events[0].Tier != model.TierRecord {
-		t.Fatalf("resolved thread: %+v", r.events)
 	}
 	ref := feedRef()
 	ref.Paths = []string{"other/**"}
 	q.Resolved = false
 	if r := feedDiff(0, ref, []FeedEvent{ev(1, "comment.created", "t1", "g", "admin", gluck)}, byPathOf(q)); len(r.events) != 0 {
 		t.Fatalf("path filter: %+v", r.events)
+	}
+}
+
+func TestGluckReplyingInAResolvedThreadStillWakes(t *testing.T) {
+	q := th("t1", true, cm("g", gluck, "one more thing"), cm("o", other, "aside"))
+	r := feedDiff(4, feedRef(), []FeedEvent{
+		ev(5, "comment.created", "t1", "g", "admin", gluck),
+		ev(6, "comment.created", "t1", "o", "admin", other),
+		ev(7, "comment.edited", "t1", "g", "admin", gluck),
+	}, byPathOf(q))
+	got := tiers(r)
+	if got["g|"+string(EvKeelNew)] != model.TierWake {
+		t.Errorf("gluck's new comment in a resolved thread did not wake: %v", got)
+	}
+	if got["o|"+string(EvKeelNew)] != model.TierRecord {
+		t.Errorf("another figaro in a resolved thread: %v", got)
+	}
+	r = feedDiff(6, feedRef(), []FeedEvent{ev(7, "comment.edited", "t1", "g", "admin", gluck)}, byPathOf(q))
+	if got := tiers(r); got["g|"+string(EvKeelEdited)] != model.TierRecord {
+		t.Errorf("an edit in a resolved thread woke: %v", got)
 	}
 }
 

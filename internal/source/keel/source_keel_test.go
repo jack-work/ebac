@@ -112,14 +112,14 @@ func TestKeelEditWakesAndUnchangedIsSilent(t *testing.T) {
 	}
 }
 
-func TestKeelResolvedRecordsAndAnswerInResolvedThreadRecords(t *testing.T) {
+func TestKeelResolvedRecordsAndAnswerInResolvedThreadWakes(t *testing.T) {
 	q := th("t1", false, cm("c1", "figaro-seat ⟩ jack", "q"))
 	st := baseline(t, ref(), map[string][]Thread{"doc/a.md": {q}})
 	q.Resolved = true
 	q.Comments = append(q.Comments, cm("c2", boss, "done"))
 	ev, _, index := keelDiff(st, ref(), map[string][]Thread{"doc/a.md": {q}})
-	if len(ev) != 2 || wakes(ev) != 0 {
-		t.Fatalf("resolve + answer in a resolved thread: %+v; want 2 recorded, 0 woken", ev)
+	if len(ev) != 2 || wakes(ev) != 1 || ev[1].Comment != "c2" || ev[1].Tier != model.TierWake {
+		t.Fatalf("resolve + answer in a resolved thread: %+v; want the resolve recorded and the answer woken", ev)
 	}
 	if ev[0].Kind != EvKeelResolved || !index["t1"].Resolved {
 		t.Fatalf("resolve not recorded: %+v %+v", ev, index["t1"])
