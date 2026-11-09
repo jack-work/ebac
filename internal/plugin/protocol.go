@@ -12,11 +12,9 @@
 // else: it fetches, diffs, and returns events, inbox items, form keys, gone
 // markers and its own state. The core owns everything figaro: the role form
 // (one Commit per round), the trigger rules, pending events, delivery, the
-// lease, succession, archival and timers. That a plugin never dials figaro is
-// a CONVENTION, not an enforced boundary: plugins run as the same uid as the
-// core and could reach the angelus socket if they tried. The core keeps that
-// convention true for its own plugins; do not rely on it as a security
-// property until the exec is sandboxed (see Runner.command).
+// lease, succession, archival and timers. Plugins run as the core's uid, so
+// the boundary is the sandbox (Sandbox): each plugin execs under bubblewrap
+// with the angelus socket's directory hidden from its mount namespace.
 package plugin
 
 import (

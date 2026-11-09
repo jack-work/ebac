@@ -226,6 +226,7 @@ Each upstream is a separate executable next to `ebac` (one Nix output; never fou
 | `ebac-gh` | `github-pr` (review, outbox posts), `github-author` |
 | `ebac-keel` | `keel-threads` |
 | `ebac-tomb` | `teams-chat` |
+| `ebac-bandhub` | `band-hub` (the hub mirror, no seat) |
 
 Protocol (`internal/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
 stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout or bad reply is a
@@ -234,9 +235,23 @@ the critic's source fields and snapshot), `post` (posts the core has already aut
 (the wake text). The core owns everything figaro: the role form, trigger rules, pending events,
 delivery, lease, succession, archival and timers.
 
-Plugins not dialing figaro is a **convention, not enforcement**: they run as the core's uid and
-could reach the angelus socket. Sandboxing wraps `Runner.command`, the one place a plugin process
-is built.
+**Sandbox.** Each plugin execs under bubblewrap (path fixed at build time,
+`-X github.com/gluck/ebac/internal/plugin.BwrapPath=...`, never PATH): own user, pid and mount
+namespaces, no capabilities, no nested user namespaces, host network. Of the core uid's grants it
+sees only what it needs; the others are empty tmpfs dirs. The figaro socket is hidden from all.
+
+| Plugin | Sees |
+|---|---|
+| `ebac-gh`, `ebac-tomb` | band-cred socket, token cache |
+| `ebac-keel` | keel door |
+| `ebac-bandhub` | band-hub socket (default or the critic's), band-cred socket, token cache |
+
+A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=off`.
+
+**Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
+`authored`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `live`, `dupes`,
+`updated`; PR review none). A reply naming any other key (`target-aria`, `trigger`, ...) is
+refused whole and the round fails with the key and plugin named.
 
 ## Layout
 

@@ -28,7 +28,8 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		t.Fatalf("build plugins: %v\n%s", err, out)
 	}
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
-	r, err := plugin.NewRunner()
+	t.Setenv(plugin.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/plugin tests that)
+	r, err := plugin.NewRunner(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,8 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	t.Cleanup(func() { srv.Close() })
 
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
-	r, err := plugin.NewRunner()
+	t.Setenv(plugin.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/plugin tests that)
+	r, err := plugin.NewRunner(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

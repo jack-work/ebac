@@ -36,6 +36,8 @@ func fakePlugin(mode string) {
 			rep.Events[0].Inbox = []string{"k1"}
 			return rep, nil
 		})
+	case "probe":
+		Serve(func(context.Context, Request) (*Reply, error) { return &Reply{Log: probe()}, nil })
 	case "fail":
 		Serve(func(context.Context, Request) (*Reply, error) { return nil, fmt.Errorf("upstream said no") })
 	case "garbage":

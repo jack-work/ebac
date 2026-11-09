@@ -13,7 +13,6 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 )
 
 // ---------- CLI ----------
@@ -110,7 +109,7 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		fs := newFlagSet("queue promote")
 		dry := fs.Bool("dry-run", false, "decide, change nothing")
 		_ = fs.Parse(args)
-		pl, err := plugin.NewRunner()
+		pl, err := newRunner(g)
 		if err != nil {
 			return err
 		}

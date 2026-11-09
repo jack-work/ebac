@@ -45,11 +45,12 @@ func For(source string) (string, error) {
 	return "", fmt.Errorf("no plugin serves source %q", source)
 }
 
-// Runner execs plugins found in Dir as ebac-<name>.
+// Runner execs plugins found in Dir as ebac-<name>, under Sandbox when set.
 type Runner struct {
 	Dir     string
 	Timeout time.Duration
 	Stderr  io.Writer
+	Sandbox *Sandbox
 }
 
 // DefaultTimeout bounds one plugin exec: a keel feed round long-polls 30 s.
@@ -57,8 +58,13 @@ const DefaultTimeout = 120 * time.Second
 
 // NewRunner finds plugins next to the running core binary: the core and its
 // plugins are one Nix output, so this never consults PATH. EBAC_PLUGIN_DIR
-// overrides it for tests.
-func NewRunner() (*Runner, error) {
+// overrides it for tests. Plugins run in the build's sandbox (NewSandbox),
+// each seeing only the grants it needs.
+func NewRunner(grants Grants) (*Runner, error) {
+	sb, err := NewSandbox(grants)
+	if err != nil {
+		return nil, err
+	}
 	dir := os.Getenv("EBAC_PLUGIN_DIR")
 	if dir == "" {
 		exe, err := os.Executable()
@@ -70,14 +76,19 @@ func NewRunner() (*Runner, error) {
 		}
 		dir = filepath.Dir(exe)
 	}
-	return &Runner{Dir: dir, Timeout: DefaultTimeout, Stderr: os.Stderr}, nil
+	return &Runner{Dir: dir, Timeout: DefaultTimeout, Stderr: os.Stderr, Sandbox: sb}, nil
 }
 
-// command is the ONE place a plugin process is built: path, arguments and
-// environment. Sandboxing the plugins (a mount namespace without the angelus
-// socket) wraps this function and nothing else.
-func (r *Runner) command(ctx context.Context, plugin string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, filepath.Join(r.Dir, "ebac-"+plugin))
+// command is the ONE place a plugin process is built: path, sandbox,
+// arguments and environment.
+func (r *Runner) command(ctx context.Context, plugin string, c *model.Critic) *exec.Cmd {
+	exe := filepath.Join(r.Dir, "ebac-"+plugin)
+	var cmd *exec.Cmd
+	if r.Sandbox != nil {
+		cmd = exec.CommandContext(ctx, r.Sandbox.Bwrap, r.Sandbox.Args(exe, r.Sandbox.Hide(plugin, c))...)
+	} else {
+		cmd = exec.CommandContext(ctx, exe)
+	}
 	var env []string
 	for _, kv := range os.Environ() {
 		// Convention, not enforcement (see package doc): a plugin is not told
@@ -105,7 +116,7 @@ func (r *Runner) Call(ctx context.Context, plugin string, req Request) (*Reply, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := r.command(ctx, plugin)
+	cmd := r.command(ctx, plugin, &req.Critic)
 	cmd.Stdin = bytes.NewReader(in)
 	out := &capped{max: MaxReply}
 	cmd.Stdout = out

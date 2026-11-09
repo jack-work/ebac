@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
@@ -79,6 +80,9 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget())})
+	if err == nil {
+		err = SourceKeysOnly(w.SourceName(), rep)
+	}
 	if err != nil {
 		// The plugin itself failed (crash, timeout, bad reply): a failed
 		// round like any upstream failure.
@@ -88,6 +92,52 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	return p.apply(ctx, w, rep)
+}
+
+// SourceKeys are, per source, the only role-form keys its plugin may set or
+// unset (derived from every SetKey/Unset in the plugins). Every other key on
+// the form (target-aria, trigger, succession.*, post, inbox, prs, ...) is the
+// core's or the seat's, and a plugin that names one is refused before any of
+// its reply is applied.
+var SourceKeys = map[string][]string{
+	"github-pr":         nil,
+	"github-author":     {"authored"},
+	"keel-threads":      {"threads", "blind"},
+	"teams-chat":        {"blind"},
+	model.SourceBandHub: {"queues", "nodes", "live", "dupes", "updated"},
+}
+
+// SourceKeysOnly refuses a reply that writes outside its source's keys,
+// naming the key and the plugin.
+func SourceKeysOnly(source string, rep *plugin.Reply) error {
+	if source == "" {
+		source = "github-pr"
+	}
+	name, _ := plugin.For(source)
+	allowed := SourceKeys[source]
+	check := func(verb, k string) error {
+		for _, a := range allowed {
+			if a == k {
+				return nil
+			}
+		}
+		own := "none"
+		if len(allowed) > 0 {
+			own = strings.Join(allowed, ", ")
+		}
+		return fmt.Errorf("plugin %s may not %s form key %q (%s keys: %s): reply refused", name, verb, k, source, own)
+	}
+	for k := range rep.Set {
+		if err := check("set", k); err != nil {
+			return err
+		}
+	}
+	for _, k := range rep.Unset {
+		if err := check("unset", k); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // apply lands one round's reply.

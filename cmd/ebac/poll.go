@@ -8,7 +8,6 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
 )
 
@@ -24,7 +23,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	pl, err := plugin.NewRunner()
+	pl, err := newRunner(g)
 	if err != nil {
 		return err
 	}
