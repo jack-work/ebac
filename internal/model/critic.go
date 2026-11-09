@@ -290,8 +290,21 @@ type AuthorRef struct {
 	Recent int `json:"recent,omitempty"`
 }
 
+// RecentWindow is how many recent items a watch keeps on its form: an author
+// watch's PRs, and a PR critic's closed PRs within the archival grace.
+const RecentWindow = 50
+
 // DefaultAuthorRecent is an author watch's window when none is configured.
-const DefaultAuthorRecent = 50
+const DefaultAuthorRecent = RecentWindow
+
+// ArchiveGrace is how long a closed or merged PR stays: the critic's own
+// archival grace, else the default one.
+func (w *Critic) ArchiveGrace() time.Duration {
+	if w.Stop.ArchiveGraceSec > 0 {
+		return time.Duration(w.Stop.ArchiveGraceSec) * time.Second
+	}
+	return time.Duration(DefaultStop().ArchiveGraceSec) * time.Second
+}
 
 // Window is the number of recent PRs the watch follows.
 func (a *AuthorRef) Window() int {

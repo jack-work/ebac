@@ -118,6 +118,31 @@ func HelperProcess(t *testing.T) {
 		}
 		b.WriteString("]")
 		os.Stdout.WriteString(b.String())
+	case "prs-closed":
+		// FetchPR by number: #1 open, #2 merged long ago, #3 merged an hour ago; each with one thread.
+		num := ""
+		for _, a := range rest {
+			if v, ok := strings.CutPrefix(a, "number="); ok {
+				num = v
+			}
+		}
+		state, merged, updated := "OPEN", false, time.Now().UTC().Format(time.RFC3339)
+		switch num {
+		case "2":
+			state, merged, updated = "MERGED", true, "2026-01-01T00:00:00Z"
+		case "3":
+			state, merged, updated = "MERGED", true, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+		}
+		fmt.Fprintf(os.Stdout, `{"data":{"repository":{"pullRequest":{
+  "number":%s,"url":"https://x/pull/%s","title":"t%s","state":%q,"isDraft":false,"merged":%v,
+  "reviewDecision":"","updatedAt":%q,"baseRefName":"main","author":{"login":"a","__typename":"User"},"headRefOid":"sha%s",
+  "pending":{"nodes":[]},
+  "reviews":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
+  "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+  "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+    {"id":"T%s","isResolved":false,"isOutdated":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+      {"id":"C%s","url":"u","body":"finding","state":"SUBMITTED","createdAt":"1","updatedAt":"1","author":{"login":"amy","__typename":"User"}}]}}]}
+}}}}`, num, num, num, state, merged, updated, num, num, num)
 	case "pending":
 		os.Stdout.WriteString(pendingJSON)
 	case "paginate":

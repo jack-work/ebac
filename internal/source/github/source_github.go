@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -233,8 +234,68 @@ func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep
 			rep.Events[i].Inbox = append(rep.Events[i].Inbox, k)
 		}
 	}
+	if dropped := pruneClosed(w, next, time.Now()); len(dropped) > 0 {
+		rep.Logf("%s: dropped %d closed/merged PR(s) past the archival grace: %s", name, len(dropped), strings.Join(dropped, ", "))
+	}
 	rep.Snapshot = next
 	rep.Outbox, rep.Succession, rep.Archive = true, true, true
+}
+
+// pruneClosed drops a closed or merged PR from the critic and its snapshot
+// (so from the form's prs, threads included) once its last update is older
+// than the archival grace, and keeps at most the model.RecentWindow most
+// recently updated closed PRs within it. It runs after the round's diff, so
+// the next round neither fetches nor diffs what it dropped; a form written
+// before this existed is pruned on its first round. A critic whose PRs are
+// ALL closed is left alone: that is the archival path's (MaybeArchive), and
+// emptying it here would leave a critic with nothing to archive.
+func pruneClosed(w *model.Critic, snap *model.Snapshot, now time.Time) []string {
+	type closedPR struct {
+		key     model.PRKey
+		updated string
+	}
+	var closed []closedPR
+	open := 0
+	for _, ref := range w.PRs {
+		st, ok := snap.PRs[ref.Key()]
+		switch {
+		case !ok:
+			open++ // not read this round: no claim about it
+		case st.Closed():
+			closed = append(closed, closedPR{ref.Key(), st.UpdatedAt})
+		default:
+			open++
+		}
+	}
+	if open == 0 || len(closed) == 0 {
+		return nil
+	}
+	sort.Slice(closed, func(i, j int) bool { return closed[i].updated > closed[j].updated })
+	grace := w.ArchiveGrace()
+	drop := map[model.PRKey]bool{}
+	for i, c := range closed {
+		at, err := time.Parse(time.RFC3339, c.updated)
+		if i >= model.RecentWindow || (err == nil && now.Sub(at) > grace) {
+			drop[c.key] = true
+		}
+	}
+	if len(drop) == 0 {
+		return nil
+	}
+	keep := w.PRs[:0]
+	var names []string
+	for _, ref := range w.PRs {
+		if drop[ref.Key()] {
+			names = append(names, string(ref.Key()))
+			delete(snap.PRs, ref.Key())
+			delete(w.Runtime.GoneStreak, string(ref.Key()))
+			continue
+		}
+		keep = append(keep, ref)
+	}
+	w.PRs = keep
+	sort.Strings(names)
+	return names
 }
 
 func postMarker(critic, id string) string {
