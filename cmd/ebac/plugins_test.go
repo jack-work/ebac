@@ -109,10 +109,10 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rep.Done || len(rep.Events) != 0 || rep.Error != "" || len(rep.Set) != 5 {
-		t.Fatalf("reply: done %v events %d error %q keys %d", rep.Done, len(rep.Events), rep.Error, len(rep.Set))
+	if !rep.Done || len(rep.Events) != 0 || rep.Error != "" || len(rep.Set) != 4 || strings.Join(rep.Unset, ",") != "live" {
+		t.Fatalf("reply: done %v events %d error %q keys %d unset %v", rep.Done, len(rep.Events), rep.Error, len(rep.Set), rep.Unset)
 	}
-	for k, want := range map[string]string{"queues": "gate.change ready=1 leased=0", "nodes": "leob class=utility free_slots=2", "live": "7 gate.change - - "} {
+	for k, want := range map[string]string{"queues": "gate.change ready=1 leased=0 oldest_ready=7@", "nodes": "leob class=utility free_slots=2"} {
 		if !strings.Contains(string(rep.Set[k]), want) {
 			t.Fatalf("%s = %s; want %q", k, rep.Set[k], want)
 		}

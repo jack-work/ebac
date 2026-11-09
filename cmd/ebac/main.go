@@ -25,7 +25,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
               [--self "A,B"] [--every 45s]  watch one keel repo's comment threads: wake when A answers (5m with --feed=false)
               [--feed=false] [--keel-url https://H --token-cmd "hush oauth get ebac"]
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
-                                            mirror the band hub (queues, nodes, live jobs, dupes) into a studied
+                                            mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
   ebac add-roster [--name roles] [--every 1m]
                                             the role roster: roles, holders, lieutenants and live transient forks,

@@ -62,20 +62,17 @@ func TestRenderFixture(t *testing.T) {
 	if nonEmpty == 0 || len(v.Queues) != nonEmpty {
 		t.Fatalf("queues: %d lines for %d non-empty queues: %v", len(v.Queues), nonEmpty, v.Queues)
 	}
-	if !has(v.Queues, "gate.change ready=9 leased=2 oldest_ready_since=") || !has(v.Queues, "aether.decision ready=0 leased=3 oldest_ready_since=- ") {
+	if !has(v.Queues, "gate.change ready=9 leased=2 oldest_ready=") || !has(v.Queues, "aether.decision ready=0 leased=3 oldest_ready=-") || !has(v.Queues, "@") {
 		t.Fatalf("gate.change line: %v", v.Queues)
 	}
 	if len(v.Nodes) != 6 || !has(v.Nodes, "leob class=utility") || !has(v.Nodes, "barr class=heavy") || !has(v.Nodes, "running=4246") {
 		t.Fatalf("nodes: %v", v.Nodes)
 	}
-	if len(v.Live) != 16 || !has(v.Live, "4246 aether.clippy-pr -1 barr/w3 ") || !has(v.Live, "4269 gate.change 0 - ") {
-		t.Fatalf("live: %v", v.Live)
-	}
 	// No shared work in the fixture is the flake.gate/gate.change one in different queues: no dupe.
 	if len(v.Dupes) != 0 {
 		t.Fatalf("dupes in a clean fixture: %v", v.Dupes)
 	}
-	t.Logf("queues:\n%s\nnodes:\n%s\nlive[0:3]: %v", strings.Join(v.Queues, "\n"), strings.Join(v.Nodes, "\n"), v.Live[:3])
+	t.Logf("queues:\n%s\nnodes:\n%s", strings.Join(v.Queues, "\n"), strings.Join(v.Nodes, "\n"))
 }
 
 // The churn rule: the view renders instants, never ages, so re-polls a minute and an hour later (same UTC day)
@@ -96,9 +93,12 @@ func TestRenderStableAcrossPolls(t *testing.T) {
 	if c := js(); c != a {
 		t.Fatalf("view changed an hour later with nothing new:\n%s\n%s", a, c)
 	}
-	h.Live = append(h.Live, clone(h.Live[0], 9100, map[string]string{"sha": "0000000000000000000000000000000000000009"}))
+	// Control: a ready job queued before every other one becomes its queue's oldest.
+	old := clone(readyJob(t, h), 9100, map[string]string{"sha": "0000000000000000000000000000000000000009"})
+	old.Created = 0 // queued before every other job
+	h.Live = append(h.Live, old)
 	if d := js(); d == a {
-		t.Fatal("control: a new live job did not change the view")
+		t.Fatal("control: a new oldest ready job did not change the view")
 	}
 }
 
@@ -200,18 +200,6 @@ func TestSuperseded(t *testing.T) {
 	}
 }
 
-func TestLiveCap(t *testing.T) {
-	h := fixture(t)
-	base := h.Live[0]
-	for i := 0; i < 100; i++ {
-		h.Live = append(h.Live, clone(base, int64(10000+i), map[string]string{"sha": strings.Repeat("a", 39) + string(rune('0'+i%10))}))
-	}
-	v := Render(h, nil, nil)
-	if len(v.Live) != LiveCap+1 || v.Live[LiveCap] != "+56 more" {
-		t.Fatalf("cap: %d lines, last %q", len(v.Live), v.Live[len(v.Live)-1])
-	}
-}
-
 // ebac never reads a log-bearing field: a hub that still sends diagnostics, a summary, a result or a reason (the meta
 // view strips them; this is the belt) never reaches the rendered form.
 func TestNeverRendersLogFields(t *testing.T) {
@@ -227,11 +215,14 @@ func TestNeverRendersLogFields(t *testing.T) {
 	}
 	h := fixture(t)
 	h.Live = jobs
+	q := QueueStats{Queue: "q"}
+	q.Counts.Ready = 1
+	h.Stats.Queues = append(h.Stats.Queues, q)
 	out, _ := json.Marshal(Render(h, nil, nil))
 	if strings.Contains(string(out), "hunter2") {
 		t.Fatalf("a log field reached the view: %s", out)
 	}
-	if !strings.Contains(string(out), "1 q 0 - ") {
+	if !strings.Contains(string(out), "q ready=1 leased=0 oldest_ready=1@") {
 		t.Fatalf("control: the job itself was not rendered: %s", out)
 	}
 }
@@ -297,18 +288,47 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	h := fixture(t)
 	now := time.UnixMilli(h.Stats.Hub.Now)
 	r := Step(ctx, State{}, h, Config{}, now, nil)
-	if strings.Join(r.Changed, ",") != "queues,nodes,live,dupes" || len(r.Set) != 5 || r.Set["updated"] == nil {
-		t.Fatalf("first round: changed %v, %d keys", r.Changed, len(r.Set))
+	if strings.Join(r.Changed, ",") != "queues,nodes,dupes" || len(r.Set) != 4 || r.Set["updated"] == nil || strings.Join(r.Unset, ",") != "live" {
+		t.Fatalf("first round: changed %v, %d keys, unset %v", r.Changed, len(r.Set), r.Unset)
 	}
+	t.Logf("first round: %d bytes", setBytes(r.Set))
 	h.Stats.Hub.Now += 60_000
 	r2 := Step(ctx, r.State, h, Config{}, now.Add(time.Minute), nil)
-	if len(r2.Set) != 0 {
-		t.Fatalf("a quiet re-poll wrote %v", r2.Changed)
+	if len(r2.Set) != 0 || len(r2.Unset) != 0 {
+		t.Fatalf("a quiet re-poll wrote %v, unset %v", r2.Changed, r2.Unset)
 	}
-	h.Live = append(h.Live, clone(h.Live[0], 9200, map[string]string{"sha": "0000000000000000000000000000000000000007"}))
+	// A new ready job that is not the oldest: counts move (the hub's stats), nothing else.
+	j := clone(readyJob(t, h), 9200, map[string]string{"sha": "0000000000000000000000000000000000000007"})
+	j.Created = h.Stats.Hub.Now
+	h.Live = append(h.Live, j)
+	bump(h, j.Queue)
 	r3 := Step(ctx, r2.State, h, Config{}, now.Add(2*time.Minute), nil)
-	if strings.Join(r3.Changed, ",") != "live" || r3.Set["updated"] == nil || len(r3.Set) != 2 {
-		t.Fatalf("a new job: changed %v (%d keys); want live + updated", r3.Changed, len(r3.Set))
+	if strings.Join(r3.Changed, ",") != "queues" || r3.Set["updated"] == nil || len(r3.Set) != 2 {
+		t.Fatalf("a new job: changed %v (%d keys); want queues + updated", r3.Changed, len(r3.Set))
+	}
+	// The warden's budget: a typical change (a job queued, a job claimed) is under 1 KB.
+	if n := setBytes(r3.Set); n >= 1024 {
+		t.Fatalf("a new job wrote %d bytes; budget 1 KB", n)
+	}
+	// A claim: ready -> leased, and the claiming node reports it running.
+	h.Live = h.Live[:len(h.Live)-1]
+	h.Nodes[0].Snapshot.Running = append(h.Nodes[0].Snapshot.Running, struct {
+		HubJob int64 `json:"hub_job"`
+	}{HubJob: 9200})
+	for i := range h.Stats.Queues {
+		if h.Stats.Queues[i].Queue == j.Queue {
+			h.Stats.Queues[i].Counts.Ready--
+			h.Stats.Queues[i].Counts.Leased++
+		}
+	}
+	r4 := Step(ctx, r3.State, h, Config{}, now.Add(3*time.Minute), nil)
+	if strings.Join(r4.Changed, ",") != "queues,nodes" {
+		t.Fatalf("a claim: changed %v; want queues,nodes", r4.Changed)
+	}
+	if n := setBytes(r4.Set); n >= 1024 {
+		t.Fatalf("a claim wrote %d bytes; budget 1 KB", n)
+	} else {
+		t.Logf("a claim wrote %d bytes", n)
 	}
 }
 
@@ -343,15 +363,29 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 	}
 }
 
-// The hub's metaReaders view may carry no lease owner and no priority: the node comes from the nodes' reports, the
-// priority renders "-".
-func TestMetaViewWithoutLeaseOwnerOrPriority(t *testing.T) {
-	h := fixture(t)
-	for i := range h.Live {
-		h.Live[i].LeaseOwner, h.Live[i].Priority = nil, nil
+func readyJob(t *testing.T, h *Hub) Job {
+	t.Helper()
+	for _, j := range h.Live {
+		if j.State == "ready" {
+			return j
+		}
 	}
-	v := Render(h, nil, nil)
-	if !has(v.Live, "4246 aether.clippy-pr - barr ") || !has(v.Live, "4269 gate.change - - ") {
-		t.Fatalf("meta view: %v", v.Live)
+	t.Fatal("fixture has no ready job")
+	return Job{}
+}
+
+func bump(h *Hub, queue string) {
+	for i := range h.Stats.Queues {
+		if h.Stats.Queues[i].Queue == queue {
+			h.Stats.Queues[i].Counts.Ready++
+		}
 	}
+}
+
+func setBytes(set map[string]json.RawMessage) int {
+	n := 0
+	for k, v := range set {
+		n += len(k) + len(v)
+	}
+	return n
 }

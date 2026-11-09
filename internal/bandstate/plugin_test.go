@@ -40,8 +40,8 @@ func TestPluginRoundTripsItsState(t *testing.T) {
 	}
 	w := mirror()
 	r1 := call(w, now)
-	if len(r1.Set) != 5 || len(r1.Critic.Runtime.BandHub) == 0 {
-		t.Fatalf("first round: %d keys, state %d bytes", len(r1.Set), len(r1.Critic.Runtime.BandHub))
+	if len(r1.Set) != 4 || len(r1.Critic.Runtime.BandHub) == 0 || strings.Join(r1.Unset, ",") != "live" {
+		t.Fatalf("first round: %d keys, unset %v, state %d bytes", len(r1.Set), r1.Unset, len(r1.Critic.Runtime.BandHub))
 	}
 	core := w
 	plugin.Adopt(&core, r1.Critic)
@@ -49,11 +49,11 @@ func TestPluginRoundTripsItsState(t *testing.T) {
 		t.Fatal("the core does not adopt the plugin's state")
 	}
 	h.Stats.Hub.Now += 60_000
-	if r2 := call(core, now.Add(time.Minute)); len(r2.Set) != 0 {
+	if r2 := call(core, now.Add(time.Minute)); len(r2.Set) != 0 || len(r2.Unset) != 0 {
 		t.Fatalf("a quiet hub wrote %v", r2.Log)
 	}
 	// Control: without the carried state the same hub is written in full again.
-	if r3 := call(w, now.Add(time.Minute)); len(r3.Set) != 5 {
+	if r3 := call(w, now.Add(time.Minute)); len(r3.Set) != 4 {
 		t.Fatalf("control: a stateless round wrote %d keys", len(r3.Set))
 	}
 }
@@ -98,6 +98,10 @@ func TestLiveMirrorThroughTheCore(t *testing.T) {
 	if err := st.SeedTrigger(ctx, &w); err != nil {
 		t.Fatal(err)
 	}
+	// A form an earlier version wrote: its live key must go.
+	if err := f.SetJSON(ctx, id, "live", []string{"4246 old line"}); err != nil {
+		t.Fatal(err)
+	}
 	h := fixture(t)
 	var out strings.Builder
 	poll1 := func() {
@@ -120,15 +124,13 @@ func TestLiveMirrorThroughTheCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"queues", "nodes", "live", "dupes", "updated"} {
+	for _, k := range []string{"queues", "nodes", "dupes", "updated"} {
 		if _, ok := cf.Keys[k]; !ok {
 			t.Fatalf("key %s missing; keys: %v\n%s", k, keysOf(cf.Keys), out.String())
 		}
 	}
-	var live []string
-	_ = json.Unmarshal(cf.Keys["live"], &live)
-	if len(live) != 16 {
-		t.Fatalf("live: %v", live)
+	if _, ok := cf.Keys["live"]; ok {
+		t.Fatalf("the dropped key live survived round 1: %s", cf.Keys["live"])
 	}
 	c, _ := st.LoadCritic(ctx, w.Name)
 	if c.Runtime.LastError != "" || len(c.Runtime.BandHub) == 0 {
@@ -140,7 +142,7 @@ func TestLiveMirrorThroughTheCore(t *testing.T) {
 	if v2 := version(); v2 != v1 {
 		// The core saves the critic each round; a quiet round may only touch ebac's own system keys.
 		cf2, _ := st.ReadForm(ctx, id)
-		for _, k := range []string{"queues", "nodes", "live", "dupes", "updated"} {
+		for _, k := range []string{"queues", "nodes", "dupes", "updated"} {
 			if string(cf2.Keys[k]) != string(cf.Keys[k]) {
 				t.Fatalf("a quiet round rewrote %s", k)
 			}

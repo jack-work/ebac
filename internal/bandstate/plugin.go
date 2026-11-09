@@ -70,7 +70,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	r := Step(ctx, prev, h, cfg, now(), tip)
 	w.Runtime.BandHub = model.MustJSON(r.State)
-	rep.Set = r.Set
+	rep.Set, rep.Unset = r.Set, r.Unset
 	if r.State.TipErr != "" {
 		rep.Logf("%s: branch tips: %s (keeping the last ones)", w.Name, r.State.TipErr)
 	}

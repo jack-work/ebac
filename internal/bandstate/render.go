@@ -8,23 +8,24 @@ import (
 	"time"
 )
 
-// LiveCap bounds key live: studied values are mirrored whole.
-const LiveCap = 60
-
 // View is the mirror's form keys, each a list of lines. Updated is set by the
-// round, only when another key changed.
+// round, only when another key changed. It is SLIM on purpose (warden
+// 2026-11-09): a study mirrors the whole form on every change, so there is no
+// per-job list; `band-hub list` is the on-demand detail.
 type View struct {
 	Queues []string `json:"queues"`
 	Nodes  []string `json:"nodes"`
-	Live   []string `json:"live"`
 	Dupes  []string `json:"dupes"`
 }
 
 // Keys are the form keys the mirror owns, in View order.
-var Keys = []string{"queues", "nodes", "live", "dupes"}
+var Keys = []string{"queues", "nodes", "dupes"}
+
+// Dropped are keys earlier versions wrote; a round unsets them once.
+var Dropped = []string{"live"}
 
 func (v View) Map() map[string][]string {
-	return map[string][]string{"queues": v.Queues, "nodes": v.Nodes, "live": v.Live, "dupes": v.Dupes}
+	return map[string][]string{"queues": v.Queues, "nodes": v.Nodes, "dupes": v.Dupes}
 }
 
 // Since renders an instant as a time, never as an age: an age changes on
@@ -69,34 +70,6 @@ func short(sha string) string {
 	return sha
 }
 
-func (j Job) prio() int {
-	if j.Priority == nil {
-		return 0
-	}
-	return *j.Priority
-}
-
-// node is the build node a lease owner names: uid:1000:ross/w1 -> ross/w1.
-func (j Job) node() string {
-	if j.LeaseOwner == nil || *j.LeaseOwner == "" {
-		return "-"
-	}
-	o := *j.LeaseOwner
-	if i := strings.LastIndex(o, ":"); i >= 0 {
-		o = o[i+1:]
-	}
-	return o
-}
-
-// since is when a ready job was queued, or a leased one claimed.
-func (j Job) since(nowMS int64) string {
-	from := j.Created
-	if j.State == "leased" && j.Claimed != nil {
-		from = *j.Claimed
-	}
-	return Since(from, nowMS)
-}
-
 func (j Job) what() string {
 	w := j.param("branch")
 	if w == "" {
@@ -117,7 +90,7 @@ func (j Job) what() string {
 // live on node mirrors, not the forge.
 func Render(h *Hub, utility []string, tips map[string]string) View {
 	now := h.Stats.Hub.Now
-	v := View{Queues: []string{}, Nodes: []string{}, Live: []string{}, Dupes: []string{}}
+	v := View{Queues: []string{}, Nodes: []string{}, Dupes: []string{}}
 
 	qs := append([]QueueStats(nil), h.Stats.Queues...)
 	sort.Slice(qs, func(i, j int) bool { return qs[i].Queue < qs[j].Queue })
@@ -125,22 +98,19 @@ func Render(h *Hub, utility []string, tips map[string]string) View {
 		if q.Counts.Ready+q.Counts.Leased == 0 {
 			continue
 		}
-		// The oldest ready job's queue time, from the jobs themselves: exact, so it does not jitter between polls.
-		oldest, wait := "-", "-"
-		var first int64
+		// The oldest ready job, from the jobs themselves: its id and queue INSTANT (an age, or the hub's
+		// wait percentiles, would move on every poll and rewrite the studied form).
+		oldest := "-"
+		var first Job
 		for _, j := range h.Live {
-			if j.Queue == q.Queue && j.State == "ready" && (first == 0 || j.Created < first) {
-				first = j.Created
+			if j.Queue == q.Queue && j.State == "ready" && (first.ID == 0 || j.Created < first.Created || j.Created == first.Created && j.ID < first.ID) {
+				first = j
 			}
 		}
-		if first != 0 {
-			oldest = Since(first, now)
+		if first.ID != 0 {
+			oldest = fmt.Sprintf("%d@%s", first.ID, Since(first.Created, now))
 		}
-		if q.WaitS.P50 != nil {
-			wait = fmt.Sprintf("%dm", int(*q.WaitS.P50/60))
-		}
-		v.Queues = append(v.Queues, fmt.Sprintf("%s ready=%d leased=%d oldest_ready_since=%s wait_p50=%s",
-			q.Queue, q.Counts.Ready, q.Counts.Leased, oldest, wait))
+		v.Queues = append(v.Queues, fmt.Sprintf("%s ready=%d leased=%d oldest_ready=%s", q.Queue, q.Counts.Ready, q.Counts.Leased, oldest))
 	}
 
 	util := map[string]bool{}
@@ -181,40 +151,14 @@ func Render(h *Hub, utility []string, tips map[string]string) View {
 		v.Nodes = append(v.Nodes, line)
 	}
 
-	// Which node runs a job, from the nodes' own reports: the meta view may not carry a lease owner.
-	onNode := map[int64]string{}
-	for _, n := range h.Nodes {
-		for _, r := range n.Snapshot.Running {
-			onNode[r.HubJob] = n.Node
-		}
-	}
 	live := append([]Job(nil), h.Live...)
 	sort.Slice(live, func(i, j int) bool {
 		a, b := live[i], live[j]
 		if a.Queue != b.Queue {
 			return a.Queue < b.Queue
 		}
-		if pa, pb := a.prio(), b.prio(); pa != pb {
-			return pa > pb
-		}
 		return a.ID < b.ID
 	})
-	for i, j := range live {
-		if i == LiveCap {
-			v.Live = append(v.Live, fmt.Sprintf("+%d more", len(live)-LiveCap))
-			break
-		}
-		prio := "-"
-		if j.Priority != nil {
-			prio = fmt.Sprint(*j.Priority)
-		}
-		node := j.node()
-		if node == "-" && onNode[j.ID] != "" {
-			node = onNode[j.ID]
-		}
-		v.Live = append(v.Live, fmt.Sprintf("%d %s %s %s %s %s %s", j.ID, j.Queue, prio, node, j.since(now), j.what(), short(j.param("sha"))))
-	}
-
 	v.Dupes = append(append([]string{}, dupes(live)...), superseded(live, tips)...)
 	return v
 }

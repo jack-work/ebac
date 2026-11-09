@@ -45,9 +45,6 @@ type QueueStats struct {
 		Ready  int `json:"ready"`
 		Leased int `json:"leased"`
 	} `json:"counts"`
-	WaitS struct {
-		P50 *float64 `json:"p50"`
-	} `json:"wait_s"`
 }
 
 // Node is one row of GET /nodes.
@@ -76,14 +73,11 @@ type Node struct {
 
 // Job is one row of GET /jobs, reduced to metadata.
 type Job struct {
-	ID         int64   `json:"id"`
-	Queue      string  `json:"queue"`
-	State      string  `json:"state"`
-	Priority   *int    `json:"priority"`
-	Created    int64   `json:"created"`
-	Claimed    *int64  `json:"claimed"`
-	LeaseOwner *string `json:"lease_owner"`
-	Payload    struct {
+	ID      int64  `json:"id"`
+	Queue   string `json:"queue"`
+	State   string `json:"state"`
+	Created int64  `json:"created"`
+	Payload struct {
 		Template string                     `json:"template"`
 		Params   map[string]json.RawMessage `json:"params"`
 	} `json:"payload"`

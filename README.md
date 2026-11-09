@@ -251,8 +251,8 @@ sees only what it needs; the others are empty tmpfs dirs. The figaro socket is h
 A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=off`.
 
 **Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
-`authored`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `live`, `dupes`,
-`updated`; roster `role:<name>`, `forks`, `updated`; PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
+`authored`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
+`updated` (and unset of the dropped `live`); roster `role:<name>`, `forks`, `updated`; PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
 refused whole and the round fails with the key and plugin named.
 
 ## Layout

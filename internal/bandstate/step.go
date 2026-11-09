@@ -23,6 +23,7 @@ const TipEvery = 5 * time.Minute
 // opaque state): the view it last wrote, and the cached branch tips.
 type State struct {
 	View   *View             `json:"view,omitempty"`
+	Slim   bool              `json:"slim,omitempty"` // the Dropped keys have been unset
 	Tips   map[string]string `json:"tips,omitempty"` // branch -> tip sha ("" = absent upstream: unknown)
 	TipsAt time.Time         `json:"tips_at,omitempty"`
 	TipErr string            `json:"tip_err,omitempty"`
@@ -38,6 +39,7 @@ type TipFunc func(ctx context.Context, repo, branch string) (string, error)
 type Result struct {
 	State   State
 	Set     map[string]json.RawMessage
+	Unset   []string
 	Changed []string
 }
 
@@ -62,6 +64,9 @@ func Step(ctx context.Context, prev State, h *Hub, cfg Config, now time.Time, ti
 		b, _ := json.Marshal(cur[k])
 		r.Set[k] = b
 		r.Changed = append(r.Changed, k)
+	}
+	if !prev.Slim {
+		r.Unset, r.State.Slim = append([]string(nil), Dropped...), true
 	}
 	if len(r.Set) > 0 {
 		b, _ := json.Marshal(time.UnixMilli(h.Stats.Hub.Now).UTC().Format(time.RFC3339))
