@@ -2,18 +2,14 @@ package author
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/plugin"
 )
 
 // authorWatch follows one GitHub user's pull requests in a list of repos:
@@ -22,12 +18,29 @@ import (
 // NEW non-draft PR (a draft turning ready counts as new) or a MERGE. Close,
 // reopen, head moves and new drafts are recorded, never woken. Asked by the
 // Boss through the Decisions Minister, 2026-10-22.
-type Source struct{}
+//
+// It is the github-author half of ebac-gh.
+type Plugin struct {
+	// GH, when set, is used as is (tests); otherwise each request builds a
+	// client from the core's --gh/--host, retargeted to the critic's host.
+	GH *forge.GH
+}
 
-func (Source) Name() string { return "github-author" }
-
-func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	return pollAuthor(ctx, p, w)
+func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	gh := pl.GH
+	if gh == nil {
+		gh = forge.NewGH(req.GH, req.Host)
+	}
+	if req.Critic.Host != "" {
+		gh.Host = req.Critic.Host // the token follows the host
+	}
+	switch req.Op {
+	case plugin.OpRound:
+		return round(ctx, gh, &req.Critic)
+	case plugin.OpBrief:
+		return &plugin.Reply{Brief: authorBrief(&req.Critic, plugin.Unwire(req.Pending))}, nil
+	}
+	return nil, fmt.Errorf("op %q not supported", req.Op)
 }
 
 const (
@@ -88,35 +101,31 @@ func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR) []model.Event {
 	return events
 }
 
-func pollAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
+func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, error) {
+	rep := &plugin.Reply{Critic: w}
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
-		return fmt.Errorf("%s: author watch without a login or repos", w.Name)
+		return nil, fmt.Errorf("%s: author watch without a login or repos", w.Name)
 	}
 	if a.Until != nil && time.Now().After(*a.Until) {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "window ended " + a.Until.UTC().Format(time.RFC3339)
-		_ = systemd.DisableTimer(w.Name)
-		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
-		return p.Store.SaveCritic(ctx, w)
-	}
-	if w.Host != "" {
-		p.GH.Host = w.Host // the poller's client starts on its default host; the token follows the host
+		rep.DisableTimer, rep.Done = true, true
+		rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
+		return rep, nil
 	}
 	if w.Runtime.Author == nil {
 		w.Runtime.Author = &model.AuthorState{}
 	}
-	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
 
 	var prs []forge.AuthoredPR
 	for _, repo := range a.Repos {
-		got, err := p.GH.ListAuthoredPRs(ctx, repo, a.Login, a.Since)
+		got, err := gh.ListAuthoredPRs(ctx, repo, a.Login, a.Since)
 		if err != nil {
 			w.Runtime.ConsecutiveFailures++
 			w.Runtime.LastError = err.Error()
-			_ = p.Store.SaveCritic(ctx, w)
-			return fmt.Errorf("%s: %w", w.Name, err)
+			rep.Error = err.Error()
+			return rep, nil
 		}
 		prs = append(prs, got...)
 	}
@@ -124,58 +133,9 @@ func pollAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	events, _ := p.Classify(ctx, w, authorDiff(w.Runtime.Author, prs))
-	if len(events) > 0 {
-		if len(w.Runtime.PendingEvents) == 0 {
-			w.Runtime.PendingSince = time.Now().UTC()
-		}
-		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
-	}
-	authored := authoredView(prs, time.Now())
-	if err := p.Store.SaveRound(ctx, w, nil, nil, nil); err != nil {
-		return err
-	}
-	if err := p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
-		next := model.MustJSON(authored)
-		if string(cur["authored"]) == string(next) {
-			return nil, nil
-		}
-		return map[string]json.RawMessage{"authored": next}, nil
-	}); err != nil {
-		return err
-	}
-	figaro.Renew(ctx, p.Fig, w.FormID)
-	derr := deliverAuthor(ctx, p, w)
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
-	}
-	return derr
-}
-
-func deliverAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	pending := &model.Delta{Events: w.Runtime.PendingEvents}
-	if !pending.WakeWorthy() {
-		fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
-		w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-		return nil
-	}
-	target := w.AlertTarget()
-	if !p.RoleHasHolder(ctx, target) {
-		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
-		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
-		return nil
-	}
-	if err := p.Fig.Send(ctx, target, authorBrief(w, w.Runtime.PendingEvents)); err != nil {
-		w.Runtime.RetryCount++
-		w.Runtime.LastError = fmt.Sprintf("delivery attempt %d failed: %v", w.Runtime.RetryCount, err)
-		return fmt.Errorf("%s: %s", w.Name, w.Runtime.LastError)
-	}
-	fmt.Fprintf(p.Out, "%s: alerted %s — %d event(s)\n", w.Name, target, len(w.Runtime.PendingEvents))
-	w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-	w.Runtime.RetryCount = 0
-	w.Runtime.LastDelivered = time.Now().UTC()
-	w.Runtime.DeliveredRound = w.Runtime.Round
-	return nil
+	rep.Events = plugin.Wire(authorDiff(w.Runtime.Author, prs))
+	rep.SetKey("authored", authoredView(prs, time.Now()))
+	return rep, nil
 }
 
 func authorBrief(w *model.Critic, events []model.Event) string {

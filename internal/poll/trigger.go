@@ -60,3 +60,30 @@ func Rules(w *model.Critic) (trigger.Rules, string) {
 	}
 	return fallback, fmt.Sprintf("trigger rejected, %s is in force: %v", in, err)
 }
+
+// operatorName is the Boss's Teams display name, as older critics listed him
+// in chat.quiet. The default rules record him by id, so migration drops it.
+const operatorName = "Jack Kelliher"
+
+// migrateQuiet turns a pre-trigger chat.quiet list into rules on the role
+// form, once: the Teams default set with every quiet sender but the operator
+// recorded before the final default. A form that already has rules keeps
+// them. The legacy field is not written back, so it is gone after this round.
+func (p *Poller) migrateQuiet(ctx context.Context, w *model.Critic) error {
+	if len(w.LegacyQuiet) == 0 || len(w.Trigger) > 0 {
+		return nil
+	}
+	rules := trigger.MigrateQuiet(w.LegacyQuiet, operatorName)
+	raw := rules.JSON()
+	if err := p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		if len(cur[trigger.FormKey]) > 0 {
+			return nil, nil // set by the role holder since the read
+		}
+		return map[string]json.RawMessage{trigger.FormKey: raw}, nil
+	}); err != nil {
+		return fmt.Errorf("migrate quiet %v to %s: %w", w.LegacyQuiet, trigger.FormKey, err)
+	}
+	fmt.Fprintf(p.Out, "%s: migrated quiet %v to %s rules\n", w.Name, w.LegacyQuiet, trigger.FormKey)
+	w.Trigger, w.LegacyQuiet = raw, nil
+	return nil
+}

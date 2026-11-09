@@ -8,21 +8,57 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/brief"
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/plugin"
 )
 
-// githubPRs translates GitHub pull requests: threads, reviews and PR comments
-// become the critic's prs state, its inbox and its outbox.
-type Source struct{}
+// Plugin translates GitHub pull requests: threads, reviews and PR comments
+// become the critic's snapshot, its events and its inbox, and authorized
+// posts go to the forge. It is the github-pr half of ebac-gh.
+type Plugin struct {
+	// GH, when set, is used as is (tests); otherwise each request builds a
+	// client from the core's --gh/--host and the critic's host.
+	GH *forge.GH
+}
 
-func (Source) Name() string { return "github-pr" }
+func (pl Plugin) client(req plugin.Request) *forge.GH {
+	gh := pl.GH
+	if gh == nil {
+		gh = forge.NewGH(req.GH, req.Host)
+	}
+	if req.Critic.Host != "" {
+		gh.Host = req.Critic.Host
+	}
+	return gh
+}
 
-func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	return pollGitHub(ctx, p, w)
+func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	gh := pl.client(req)
+	me := req.Me
+	rep := &plugin.Reply{}
+	if me == "" {
+		if m, err := gh.Whoami(ctx); err == nil {
+			me, rep.Me = m, m
+		}
+	}
+	switch req.Op {
+	case plugin.OpRound:
+		round(ctx, gh, req, me, rep)
+	case plugin.OpPost:
+		rep.Posts = map[string]*model.Post{}
+		for id, post := range req.Posts {
+			sendPost(ctx, gh, &req.Critic, req.Snapshot, me, id, post)
+			rep.Posts[id] = post
+		}
+	case plugin.OpBrief:
+		rep.Brief = brief.BuildBrief(&req.Critic, req.Snapshot, plugin.Unwire(req.Pending), me, req.Retry)
+	default:
+		return nil, fmt.Errorf("op %q not supported", req.Op)
+	}
+	return rep, nil
 }
 
 // A PR the forge says does not exist (deleted, or its repository renamed or
@@ -32,9 +68,9 @@ const prGoneAfter = 3
 
 var prGone = regexp.MustCompile(`Could not resolve to a (PullRequest|Repository)|\bnot found\b|\(HTTP 404\)`)
 
-// retireGone marks each gone PR on the form, stops polling it and wakes the
-// seat once; a critic with no PR left stops.
-func retireGone(ctx context.Context, p *poll.Poller, w *model.Critic, gone []model.PRRef, errs map[model.PRKey]string) error {
+// retireGone marks each gone PR, stops polling it and wakes the seat once; a
+// critic with no PR left stops.
+func retireGone(rep *plugin.Reply, w *model.Critic, gone []model.PRRef, errs map[model.PRKey]string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	keep := w.PRs[:0]
 	isGone := map[model.PRKey]bool{}
@@ -56,49 +92,37 @@ func retireGone(ctx context.Context, p *poll.Poller, w *model.Critic, gone []mod
 		if len(w.PRs) == 0 {
 			action = "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge); a moved PR needs a NEW critic."
 		}
-		if err := p.MarkGone(ctx, w, "pr:"+form.PrFormKey(k), "pull request "+string(k), now, errors.New(errs[k]), action); err != nil {
-			return err
-		}
+		rep.Gone = append(rep.Gone, plugin.Gone{Key: "pr:" + form.PrFormKey(k), Resource: "pull request " + string(k),
+			Since: now, Error: errors.New(errs[k]).Error(), Action: action})
 	}
 	if len(w.PRs) == 0 {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "every pull request is gone: " + strings.Join(names, ", ")
-		_ = systemd.DisableTimer(w.Name)
+		rep.DisableTimer = true
 	}
-	p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
+	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
 		w.Name, strings.Join(names, ", "), prGoneAfter))
-	return p.Store.SaveCritic(ctx, w)
 }
 
-func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
+func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep *plugin.Reply) {
+	w := &req.Critic
+	rep.Critic = w
 	name := w.Name
-	if w.Host != "" {
-		p.GH.Host = w.Host
-	}
-
-	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
-
-	if p.Me == "" {
-		if me, err := p.GH.Whoami(ctx); err == nil {
-			p.Me = me
-		}
-	}
 
 	// --- hard stops, checked before we spend an API call ---
-	if reason := poll.HardStop(w); reason != "" {
+	if reason := w.HardStop(); reason != "" {
 		w.Runtime.Stopped, w.Runtime.StopReason = true, reason
-		_ = p.Store.SaveCritic(ctx, w)
-		fmt.Fprintf(p.Out, "%s: stopping — %s\n", name, reason)
-		return p.MaybeArchive(ctx, w, nil)
+		rep.Logf("%s: stopping — %s", name, reason)
+		rep.Done, rep.Archive = true, true
+		return
 	}
 
 	// --- discovery: keep the PR set live ---
 	if w.DiscoverRepo != "" {
-		refs, derr := p.GH.ListPRs(ctx, w.DiscoverRepo, w.DiscoverAuthor, "open", 100)
+		refs, derr := gh.ListPRs(ctx, w.DiscoverRepo, w.DiscoverAuthor, "open", 100)
 		if derr != nil {
 			// Discovery failure must not look like "no PRs match".
-			fmt.Fprintf(p.Out, "%s: discovery failed (retained %d known PRs): %v\n", name, len(w.PRs), derr)
+			rep.Logf("%s: discovery failed (retained %d known PRs): %v", name, len(w.PRs), derr)
 		} else {
 			added := 0
 			for _, r := range refs {
@@ -107,19 +131,20 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 				}
 			}
 			if added > 0 {
-				fmt.Fprintf(p.Out, "%s: discovery added %d PR(s)\n", name, added)
+				rep.Logf("%s: discovery added %d PR(s)", name, added)
 			}
 		}
 	}
 
 	if len(w.PRs) == 0 {
 		w.Runtime.LastError = "critic has no pull requests"
-		_ = p.Store.SaveCritic(ctx, w)
-		fmt.Fprintf(p.Out, "%s: no PRs in scope\n", name)
-		return nil
+		rep.Logf("%s: no PRs in scope", name)
+		rep.Done = true
+		return
 	}
 
 	// --- fetch ---
+	prev := req.Snapshot
 	next := &model.Snapshot{
 		Critic: name, Round: w.Runtime.Round, TakenAt: time.Now().UTC(),
 		PRs: map[model.PRKey]*model.PRState{}, Complete: true,
@@ -127,7 +152,7 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	var fetchErrs []string
 	var gone []model.PRRef
 	for _, ref := range w.PRs {
-		st, ferr := p.GH.FetchPR(ctx, ref.Owner, ref.Repo, ref.Number)
+		st, ferr := gh.FetchPR(ctx, ref.Owner, ref.Repo, ref.Number)
 		if ferr != nil && prGone.MatchString(ferr.Error()) {
 			if w.Runtime.GoneStreak == nil {
 				w.Runtime.GoneStreak = map[string]int{}
@@ -147,7 +172,7 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 			next.Complete = false
 			// Carry the previous state forward so the PR does not blink
 			// out of the projection.
-			if prev, _ := p.Store.LoadSnapshot(ctx, name); prev != nil {
+			if prev != nil {
 				if old, ok := prev.PRs[ref.Key()]; ok {
 					old.Complete = false
 					next.PRs[ref.Key()] = old
@@ -167,25 +192,19 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 				errs[model.PRKey(k)] = msg
 			}
 		}
-		if err := retireGone(ctx, p, w, gone, errs); err != nil {
-			return err
-		}
+		retireGone(rep, w, gone, errs)
 		if w.Runtime.Stopped {
-			return nil
+			rep.Done = true
+			return
 		}
-	}
-
-	prev, err := p.Store.LoadSnapshot(ctx, name)
-	if err != nil {
-		return fmt.Errorf("load previous snapshot: %w", err)
 	}
 
 	if len(fetchErrs) == len(w.PRs) {
 		// Total failure: change nothing, do not diff, count the failure.
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = fmt.Sprintf("all %d PR fetches failed: %s", len(w.PRs), fetchErrs[0])
-		_ = p.Store.SaveCritic(ctx, w)
-		return fmt.Errorf("%s: %s", name, w.Runtime.LastError)
+		rep.Error = w.Runtime.LastError
+		return
 	}
 
 	if len(fetchErrs) > 0 {
@@ -196,58 +215,28 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 		w.Runtime.LastSuccess = next.TakenAt
 	}
 
-	delta := Diff(prev, next, p.Me)
+	delta := Diff(prev, next, me)
 	if w.Mode == model.ModeReviewer {
-		AsReviewer(delta, p.Me)
+		AsReviewer(delta, me)
 	}
-	// The source's tiers are a suggestion; the critic's trigger rules decide.
-	delta.Events, _ = p.Classify(ctx, w, delta.Events)
+	if req.DryRun && len(delta.SuppressedDeletions) > 0 {
+		rep.Logf("%s: deletions suppressed for %v (partial scan)", name, delta.SuppressedDeletions)
+	}
 
-	if p.DryRun {
-		fmt.Fprintf(p.Out, "%s: DRY RUN round %d — %s (%d events, %d wake-worthy)\n",
-			name, w.Runtime.Round, delta.Summary(), len(delta.Events), len(delta.Tier1()))
-		for _, e := range delta.Events {
-			fmt.Fprintf(p.Out, "  [t%d] %s\n", e.Tier, e.Line())
+	// The source's tiers are a suggestion; the core's trigger rules decide.
+	now := time.Now()
+	rep.Inbox = map[string]form.InboxItem{}
+	rep.Events = plugin.Wire(delta.Events)
+	for i, e := range delta.Events {
+		for k, it := range form.InboxItems(next, []model.Event{e}, me, now) {
+			rep.Inbox[k] = it
+			rep.Events[i].Inbox = append(rep.Events[i].Inbox, k)
 		}
-		if len(delta.SuppressedDeletions) > 0 {
-			fmt.Fprintf(p.Out, "  NOTE: deletions suppressed for %v (partial scan)\n", delta.SuppressedDeletions)
-		}
-		// A dry run still persists observed state — that is what makes the
-		// FIRST armed round quiet instead of an avalanche.
-		return p.Store.Save(ctx, w, next, nil)
 	}
+	rep.Snapshot = next
+	rep.Outbox, rep.Succession, rep.Archive = true, true, true
+}
 
-	// --- outbox: what the seat wrote onto the form goes to the forge ---
-	acks := p.FlushOutbox(ctx, w, next)
-
-	// --- accumulate the debt BEFORE attempting delivery ---
-	if len(delta.Events) > 0 {
-		if len(w.Runtime.PendingEvents) == 0 {
-			w.Runtime.PendingSince = next.TakenAt
-		}
-		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, delta.Events)
-	}
-
-	// One patch: the observed PRs, the debt and the outbox receipts. It lands
-	// before delivery, so a crash mid-send leaves the debt on the form and
-	// the seat's wake finds the round's change already in its study diff.
-	if err := p.Store.SaveRound(ctx, w, next, acks, form.InboxItems(next, delta.Events, p.Me, time.Now())); err != nil {
-		return err
-	}
-	figaro.Renew(ctx, p.Fig, w.FormID)
-
-	derr := p.Deliver(ctx, w, next)
-	if derr == nil {
-		// Succession runs on the same heartbeat: the timer already fires
-		// every 5m and already knows the seat.
-		p.SuperviseSuccession(ctx, w)
-	}
-	// Runtime only, under system.ebac: invisible to the seat.
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
-	}
-	if derr != nil {
-		return derr
-	}
-	return p.MaybeArchive(ctx, w, next)
+func postMarker(critic, id string) string {
+	return fmt.Sprintf("<!-- ebac:post:%s:%s -->", critic, id)
 }

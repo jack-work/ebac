@@ -13,6 +13,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/tomb"
 	"github.com/gluck/ebac/internal/trigger"
@@ -90,7 +91,7 @@ func teamsRules(t *testing.T, ev []model.Event, rules trigger.Rules) map[string]
 func TestTeamsMigratedQuietSenderIsRecordedNotWoken(t *testing.T) {
 	st := baseline(t)
 	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("300", "liang shi", "note"), tmsg("301", "Akshay", "control")}, testChat())
-	by := teamsRules(t, ev, trigger.MigrateQuiet([]string{"Liang Shi", "Jack Kelliher"}, operatorName))
+	by := teamsRules(t, ev, trigger.MigrateQuiet([]string{"Liang Shi", "Jack Kelliher"}, "Jack Kelliher"))
 	if by["300"].Tier != model.TierRecord {
 		t.Fatalf("migrated quiet sender (case-insensitive) must be TierRecord: %+v", by["300"])
 	}
@@ -229,7 +230,7 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	}
 	var out strings.Builder
 	round := func(scenario string) error {
-		p := &poll.Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"tomb": Plugin{Tomb: fakeTomb(t, scenario)}.Handle}}
 		return p.Poll(ctx, w.Name)
 	}
 	load := func() *model.Critic {
@@ -457,7 +458,7 @@ func TestLiveTeamsTriggerMigrationAndFallback(t *testing.T) {
 	var out strings.Builder
 	round := func(scenario string) {
 		t.Helper()
-		p := &poll.Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"tomb": Plugin{Tomb: fakeTomb(t, scenario)}.Handle}}
 		if err := p.Poll(ctx, w.Name); err != nil {
 			t.Fatalf("round %s: %v\n%s", scenario, err, out.String())
 		}

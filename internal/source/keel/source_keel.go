@@ -2,7 +2,6 @@ package keel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -12,22 +11,38 @@ import (
 
 	"github.com/jack-work/figaro/api/handle"
 
-	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/plugin"
 )
 
 // Source translates one keel repo's comment threads into a critic's inbox and
 // wakes the seat when the waited-on author answers, like GitHub threads. It
 // only reads: the door forwards GET threads and nothing else.
-type Source struct{}
+//
+// It is the ebac-keel plugin.
+type Plugin struct {
+	// Client, when set, is used as is (tests); otherwise it is built from the
+	// critic's keel ref.
+	Client *Client
+}
 
-func (Source) Name() string { return "keel-threads" }
-
-func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	return pollKeel(ctx, p, w, ForRef(w.Keel))
+func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	w := &req.Critic
+	switch req.Op {
+	case plugin.OpRound:
+		if w.Keel == nil || w.Keel.Repo == "" {
+			return nil, fmt.Errorf("%s: keel critic without a repo", w.Name)
+		}
+		cl := pl.Client
+		if cl == nil {
+			cl = ForRef(w.Keel)
+		}
+		return round(ctx, cl, w, req.Seat), nil
+	case plugin.OpBrief:
+		return &plugin.Reply{Brief: keelBrief(w, plugin.Unwire(req.Pending))}, nil
+	}
+	return nil, fmt.Errorf("op %q not supported", req.Op)
 }
 
 const (
@@ -123,15 +138,6 @@ func withSeat(ref *model.KeelRef, seat string) *model.KeelRef {
 	r := *ref
 	r.Self = append(append([]string{}, ref.Self...), seatNametags(seat, nametagAccounts(ref))...)
 	return &r
-}
-
-func seatOf(ctx context.Context, p *poll.Poller, w *model.Critic) string {
-	f, err := p.Fig.Form(ctx, w.AlertTarget())
-	if err != nil {
-		return ""
-	}
-	id, _ := f["target-aria"].(string)
-	return id
 }
 
 func shouldWake(e FeedEvent, ref *model.KeelRef) bool {
@@ -370,18 +376,14 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 	return r
 }
 
-func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) error {
-	if w.Keel == nil || w.Keel.Repo == "" {
-		return fmt.Errorf("%s: keel critic without a repo", w.Name)
-	}
+func round(ctx context.Context, cl *Client, w *model.Critic, seat string) *plugin.Reply {
+	rep := &plugin.Reply{Critic: w}
 	if w.Runtime.Keel == nil {
 		w.Runtime.Keel = &model.KeelState{}
 	}
 	st := w.Runtime.Keel
-	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
 
-	round, err := fetchRound(ctx, cl, st, withSeat(w.Keel, seatOf(ctx, p, w)))
+	r, err := fetchRound(ctx, cl, st, withSeat(w.Keel, seat))
 	if err != nil {
 		if errors.Is(err, ErrGone) {
 			st.GoneStreak++
@@ -397,85 +399,39 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 			st.FailSince = time.Now().UTC().Format(time.RFC3339)
 		}
 		if st.GoneStreak >= keelGoneAfter {
-			return keelGone(ctx, p, w, err)
+			keelGone(rep, w, err)
+			return rep
 		}
-		keelBlind(ctx, p, w, err)
-		_ = p.Store.SaveCritic(ctx, w)
-		return fmt.Errorf("%s: %w", w.Name, err)
+		keelBlind(rep, w, err)
+		rep.Error = err.Error()
+		return rep
 	}
 	st.GoneStreak, st.GoneSince = 0, ""
 	if st.Blind {
-		if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-			return nil, []string{"blind"}
-		}); err != nil {
-			return fmt.Errorf("%s: clear blind marker: %w", w.Name, err)
-		}
-		fmt.Fprintf(p.Out, "%s: hearing keel again (blind since %s)\n", w.Name, st.FailSince)
+		rep.Unset = append(rep.Unset, "blind")
+		rep.Logf("%s: hearing keel again (blind since %s)", w.Name, st.FailSince)
 	}
 	st.FailSince, st.Blind, st.BlindErr = "", false, ""
 	w.Runtime.ConsecutiveFailures = 0
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	events, items, index := round.events, round.items, round.index
-	events, dropped := p.Classify(ctx, w, events)
-	for _, e := range dropped {
-		delete(items, "keel-"+e.Comment)
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	for k, it := range items {
+	for k, it := range r.items {
 		it.At = now
-		items[k] = it
+		r.items[k] = it
 	}
-	if len(events) > 0 {
-		if len(w.Runtime.PendingEvents) == 0 {
-			w.Runtime.PendingSince = time.Now().UTC()
-		}
-		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
-	}
-	if err := p.Store.SaveRound(ctx, w, nil, nil, items); err != nil {
-		return err
-	}
-	if index != nil {
-		if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-			return map[string]json.RawMessage{"threads": model.MustJSON(index)}, nil
-		}); err != nil {
-			return fmt.Errorf("%s: write thread index: %w", w.Name, err)
+	rep.Inbox = r.items
+	rep.Events = plugin.Wire(r.events)
+	for i, e := range r.events {
+		if _, ok := r.items["keel-"+e.Comment]; ok {
+			rep.Events[i].Inbox = []string{"keel-" + e.Comment}
 		}
 	}
-	figaro.Renew(ctx, p.Fig, w.FormID)
-
-	derr := deliverKeel(ctx, p, w)
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
+	if r.index != nil {
+		rep.SetKey("threads", r.index)
 	}
-	return derr
-}
-
-func deliverKeel(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	pending := &model.Delta{Events: w.Runtime.PendingEvents}
-	if !pending.WakeWorthy() {
-		fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
-		w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-		return nil
-	}
-	target := w.AlertTarget()
-	if !p.RoleHasHolder(ctx, target) {
-		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
-		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
-		return nil
-	}
-	if err := p.Fig.Send(ctx, target, keelBrief(w, w.Runtime.PendingEvents)); err != nil {
-		w.Runtime.RetryCount++
-		w.Runtime.LastError = fmt.Sprintf("delivery attempt %d failed: %v", w.Runtime.RetryCount, err)
-		return fmt.Errorf("%s: %s", w.Name, w.Runtime.LastError)
-	}
-	fmt.Fprintf(p.Out, "%s: alerted %s — %d event(s)\n", w.Name, target, len(w.Runtime.PendingEvents))
-	w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-	w.Runtime.RetryCount = 0
-	w.Runtime.LastDelivered = time.Now().UTC()
-	w.Runtime.DeliveredRound = w.Runtime.Round
-	return nil
+	return rep
 }
 
 func keelBrief(w *model.Critic, events []model.Event) string {
@@ -501,20 +457,9 @@ func keelBrief(w *model.Critic, events []model.Event) string {
 	return b.String()
 }
 
-// wake tells the alert target once; a role with nobody seated is skipped.
-func wake(ctx context.Context, p *poll.Poller, w *model.Critic, msg string) {
-	target := w.AlertTarget()
-	if !p.RoleHasHolder(ctx, target) {
-		return
-	}
-	if err := p.Fig.Send(ctx, target, msg); err != nil {
-		fmt.Fprintf(p.Out, "%s: could not deliver: %v\n", w.Name, err)
-	}
-}
-
 // keelBlind writes the form's key blind once failures outlast keelBlindAfter,
 // wakes the seat the first time, and is cleared by the first good round.
-func keelBlind(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) {
+func keelBlind(rep *plugin.Reply, w *model.Critic, cause error) {
 	st := w.Runtime.Keel
 	since, err := time.Parse(time.RFC3339, st.FailSince)
 	if err != nil || time.Since(since) < keelBlindAfter {
@@ -523,34 +468,25 @@ func keelBlind(ctx context.Context, p *poll.Poller, w *model.Critic, cause error
 	if st.Blind && st.BlindErr == cause.Error() {
 		return
 	}
-	marker := map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
-		"meaning": "ebac cannot read keel threads of " + w.Keel.Repo + ": comments since then are unseen until this key disappears"}
-	if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{"blind": model.MustJSON(marker)}, nil
-	}); err != nil {
-		fmt.Fprintf(p.Out, "%s: could not write blind marker: %v\n", w.Name, err)
-		return
-	}
+	rep.SetKey("blind", map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
+		"meaning": "ebac cannot read keel threads of " + w.Keel.Repo + ": comments since then are unseen until this key disappears"})
 	if !st.Blind {
-		wake(ctx, p, w, fmt.Sprintf("ebac %s: BLIND since %s: cannot read keel %s (%v). Comments are unseen until form %s's key blind disappears; it clears itself on recovery.",
+		rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: BLIND since %s: cannot read keel %s (%v). Comments are unseen until form %s's key blind disappears; it clears itself on recovery.",
 			w.Name, st.FailSince, w.Keel.Repo, cause, w.FormID))
-		fmt.Fprintf(p.Out, "%s: blind since %s: %v\n", w.Name, st.FailSince, cause)
+		rep.Logf("%s: blind since %s: %v", w.Name, st.FailSince, cause)
 	}
 	st.Blind, st.BlindErr = true, cause.Error()
 }
 
 // keelGone marks the repo gone on the form, wakes the seat once and stops.
-func keelGone(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) error {
+func keelGone(rep *plugin.Reply, w *model.Critic, cause error) {
 	st := w.Runtime.Keel
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("keel threads gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)
 	action := "polling stopped. If the repo is not on ebac's keel allowlist (ebacThreadRepos) or the door is down, fix that, then " +
 		"ebac resume --critic " + w.Name + " and re-arm its timer; otherwise remove it: ebac rm --critic " + w.Name
-	if err := p.MarkGone(ctx, w, "keel", "keel threads of "+w.Keel.Repo, st.GoneSince, cause, action); err != nil {
-		return err
-	}
-	wake(ctx, p, w, fmt.Sprintf("ebac %s: keel threads of %s are gone (%v). Polling stopped; form %s's key gone says what to do.", w.Name, w.Keel.Repo, cause, w.FormID))
-	_ = systemd.DisableTimer(w.Name)
-	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
-	return p.Store.SaveCritic(ctx, w)
+	rep.Gone = append(rep.Gone, plugin.Gone{Key: "keel", Resource: "keel threads of " + w.Keel.Repo, Since: st.GoneSince, Error: cause.Error(), Action: action})
+	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: keel threads of %s are gone (%v). Polling stopped; form %s's key gone says what to do.", w.Name, w.Keel.Repo, cause, w.FormID))
+	rep.DisableTimer, rep.Done = true, true
+	rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
 }

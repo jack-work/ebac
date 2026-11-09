@@ -10,6 +10,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 )
@@ -30,9 +31,11 @@ type Promoter struct {
 	Store *form.Store
 	Fig   *figaro.Figaro
 	GH    *forge.GH
-	Out   io.Writer
-	Host  string
-	Dry   bool
+	// Plugins adopts a promoted critic's current state with a dry round.
+	Plugins plugin.Caller
+	Out     io.Writer
+	Host    string
+	Dry     bool
 }
 
 type PromoteResult struct {
@@ -232,7 +235,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		return "", fmt.Errorf("cast %s into %s: %w", seat, formID, err)
 	}
 
-	poller := &poll.Poller{Store: p.Store, GH: p.GH, Fig: p.Fig, Out: io.Discard}
+	poller := &poll.Poller{Store: p.Store, Fig: p.Fig, Plugins: p.Plugins, Out: io.Discard, GH: p.GH.Bin, Host: p.GH.Host}
 
 	// Adopt current state silently, so the first armed round reports the
 	// delta since promotion rather than one wake per standing thread.

@@ -11,10 +11,9 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
 )
-
-func init() { poll.Register(Source{}) }
 
 // Live tests run against the real angelus (they mint and remove a form):
 //
@@ -53,7 +52,7 @@ func TestLiveKeelRoundsBaselineAnswerBlindGone(t *testing.T) {
 	}
 	var out strings.Builder
 	round := func() error {
-		return (&poll.Poller{Store: st, Fig: f, Out: &out}).Poll(ctx, w.Name)
+		return (&poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"keel": Plugin{}.Handle}}).Poll(ctx, w.Name)
 	}
 	load := func() *model.Critic {
 		c, err := st.LoadCritic(ctx, w.Name)
@@ -173,7 +172,9 @@ func TestLiveKeelFeedRoundsBaselineAnswerCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	round := func() error { return (&poll.Poller{Store: st, Fig: f, Out: &out}).Poll(ctx, w.Name) }
+	round := func() error {
+		return (&poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"keel": Plugin{}.Handle}}).Poll(ctx, w.Name)
+	}
 	load := func() *model.Critic {
 		c, err := st.LoadCritic(ctx, w.Name)
 		if err != nil {

@@ -3,7 +3,6 @@ package poll
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -13,11 +12,8 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 )
-
-func postMarker(critic, id string) string {
-	return fmt.Sprintf("<!-- ebac:post:%s:%s -->", critic, id)
-}
 
 // validPostID keeps an id usable as one form path segment.
 func ValidPostID(id string) error {
@@ -99,82 +95,11 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 	return ""
 }
 
-// sendPost takes one post as far as it can go this round.
-func (p *Poller) sendPost(ctx context.Context, w *model.Critic, snap *model.Snapshot, id string, post *model.Post) {
-	if why := Authorize(w, snap, p.Me, post); why != "" {
-		post.Refused = why
-		return
-	}
-	pr := snap.PRs[model.PRKey(post.PR)]
-	now := time.Now().UTC().Format(time.RFC3339)
-	tried := false
-	defer func() {
-		if tried {
-			post.Attempts++
-		}
-	}()
-	if post.HasBody() && post.Sent == nil {
-		marker := postMarker(w.Name, id)
-		if url, ok := model.FindMarker(pr, p.Me, marker); ok {
-			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now, Recovered: true}, ""
-		} else {
-			tried = true
-			url, err := p.GH.Post(ctx, pr, post, post.Body+"\n\n"+marker)
-			var pend *forge.ErrPendingReply
-			if errors.As(err, &pend) {
-				post.Refused = fmt.Sprintf("landed in pending review %d, visible only to its author; not sent and not retried (a retry would add another hidden comment): the operator must submit or delete that review", pend.ReviewID)
-				return
-			}
-			if why := forge.ClientError(err); why != "" {
-				post.Refused = "the forge refused it: " + why
-				return
-			}
-			if err != nil {
-				post.Error = err.Error()
-				return
-			}
-			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now}, ""
-		}
-	}
-	if post.React != "" && post.Reacted == "" {
-		th := pr.Threads[post.ReplyTo]
-		first := th.FirstComment()
-		if first == nil {
-			post.Error = "thread " + post.ReplyTo + " has no comment to react to"
-			return
-		}
-		tried = true
-		if err := p.GH.React(ctx, first.ID, forge.Reactions[post.React]); err != nil {
-			if why := forge.ClientError(err); why != "" {
-				post.Refused = "the forge refused the reaction: " + why
-				return
-			}
-			post.Error = err.Error()
-			return
-		}
-		post.Reacted, post.Error = now, ""
-	}
-	if post.Resolve && post.Resolved == "" {
-		if th := pr.Threads[post.ReplyTo]; th != nil && th.IsResolved {
-			post.Resolved, post.Error = now, ""
-			return
-		}
-		tried = true
-		if err := p.GH.ResolveThread(ctx, post.ReplyTo); err != nil {
-			if why := forge.ClientError(err); why != "" {
-				post.Refused = "the forge refused the resolve: " + why
-				return
-			}
-			post.Error = err.Error()
-			return
-		}
-		post.Resolved, post.Error = now, ""
-	}
-}
-
-// flushOutbox posts what the seat wrote since the watermark and returns the
-// receipts for the round's one patch, and moves the watermark
-// in w. On any read failure it moves nothing.
+// FlushOutbox posts what the seat wrote since the watermark and returns the
+// receipts for the round's one patch, and moves the watermark in w. On any
+// read failure it moves nothing. The core authorizes every post; only
+// authorized posts reach the plugin (plugin.OpPost), which takes them as far
+// as they go upstream and returns their receipt fields.
 func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.Snapshot) form.Receipts {
 	acks := form.Receipts{}
 	c, err := p.Fig.Node(ctx, w.FormID)
@@ -221,17 +146,27 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 	}
 	sort.Strings(sorted)
 
+	todo := map[string]*model.Post{}
+	hadError := map[string]bool{}
+	var order []string
 	for _, id := range sorted {
 		post := posts[id]
 		if post == nil || post.Terminal() {
 			continue
 		}
-		hadError := post.Error != ""
+		hadError[id] = post.Error != ""
 		if err := ValidPostID(id); err != nil {
 			post.Refused = err.Error()
+		} else if why := Authorize(w, snap, p.Me, post); why != "" {
+			post.Refused = why
 		} else {
-			p.sendPost(ctx, w, snap, id, post)
+			todo[id] = post
 		}
+		order = append(order, id)
+	}
+	p.post(ctx, w, snap, todo)
+	for _, id := range order {
+		post := posts[id]
 		r := map[string]json.RawMessage{}
 		if post.Sent != nil {
 			r["sent"] = model.MustJSON(post.Sent)
@@ -245,7 +180,7 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 		if post.Refused != "" {
 			r["refused"] = model.MustJSON(post.Refused)
 		}
-		if post.Error != "" || hadError {
+		if post.Error != "" || hadError[id] {
 			r["error"] = model.MustJSON(post.Error)
 		}
 		if post.Attempts > 0 {
@@ -274,4 +209,30 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 	}
 	w.Runtime.OutboxWatermark = since.Version
 	return acks
+}
+
+// post hands authorized posts to the source's plugin and merges back what it
+// did. A plugin failure is every post's error for this round: each is retried
+// on the next.
+func (p *Poller) post(ctx context.Context, w *model.Critic, snap *model.Snapshot, todo map[string]*model.Post) {
+	if len(todo) == 0 {
+		return
+	}
+	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpPost, Snapshot: snap, Posts: todo})
+	if err != nil {
+		for _, post := range todo {
+			post.Error = err.Error()
+		}
+		return
+	}
+	for _, l := range rep.Log {
+		fmt.Fprintln(p.Out, l)
+	}
+	for id, post := range todo {
+		if got := rep.Posts[id]; got != nil {
+			*post = *got
+		} else {
+			post.Error = "the plugin returned no result for this post"
+		}
+	}
 }

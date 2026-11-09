@@ -13,6 +13,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 )
 
 // ---------- CLI ----------
@@ -109,9 +110,13 @@ func cmdQueue(ctx context.Context, g globals, args []string) error {
 		fs := newFlagSet("queue promote")
 		dry := fs.Bool("dry-run", false, "decide, change nothing")
 		_ = fs.Parse(args)
-		p := &fleet.Promoter{Store: st, Fig: fig, GH: forge.NewGH(g.gh, g.host), Out: os.Stdout,
+		pl, err := plugin.NewRunner()
+		if err != nil {
+			return err
+		}
+		p := &fleet.Promoter{Store: st, Fig: fig, GH: forge.NewGH(g.gh, g.host), Plugins: pl, Out: os.Stdout,
 			Host: g.host, Dry: *dry}
-		_, err := p.Promote(ctx)
+		_, err = p.Promote(ctx)
 		return err
 
 	case "ls":

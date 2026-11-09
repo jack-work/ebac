@@ -2,33 +2,53 @@ package teams
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/tomb"
-	"github.com/gluck/ebac/internal/trigger"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
 // inbox. It has its own role form, timer and process, so a slow or dead tomb
 // never delays a PR round.
-type Source struct{}
+//
+// It is the ebac-tomb plugin.
+type Plugin struct {
+	// Tomb, when set, is used as is (tests); otherwise it is built from
+	// EBAC_TOMB and EBAC_BAND_CRED.
+	Tomb *tomb.Tomb
+}
 
-func (Source) Name() string { return "teams-chat" }
+func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	switch req.Op {
+	case plugin.OpRound:
+		tb := pl.Tomb
+		if tb == nil {
+			tb = &tomb.Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: tomb.TeamsTombWait,
+				Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}
+		}
+		return round(ctx, tb, &req.Critic)
+	case plugin.OpBrief:
+		return &plugin.Reply{Brief: teamsBrief(&req.Critic, plugin.Unwire(req.Pending))}, nil
+	}
+	return nil, fmt.Errorf("op %q not supported", req.Op)
+}
 
-func (Source) Round(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	return pollTeams(ctx, p, w)
+func env(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 const (
@@ -133,18 +153,17 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 	return events, items
 }
 
-func pollTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
+func round(ctx context.Context, tb *tomb.Tomb, w *model.Critic) (*plugin.Reply, error) {
+	rep := &plugin.Reply{Critic: w}
 	if w.Chat == nil || w.Chat.ID == "" {
-		return fmt.Errorf("%s: teams critic without a chat id", w.Name)
+		return nil, fmt.Errorf("%s: teams critic without a chat id", w.Name)
 	}
 	if w.Runtime.Teams == nil {
 		w.Runtime.Teams = &model.TeamsState{}
 	}
 	st := w.Runtime.Teams
-	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
 
-	msgs, err := p.Tomb.Messages(ctx, w.Chat.ID, teamsLimit)
+	msgs, err := tb.Messages(ctx, w.Chat.ID, teamsLimit)
 	if err != nil {
 		if errors.Is(err, tomb.ErrTombGone) {
 			st.GoneStreak++
@@ -160,84 +179,37 @@ func pollTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 			st.FailSince = time.Now().UTC().Format(time.RFC3339)
 		}
 		if st.GoneStreak >= teamsGoneAfter {
-			return teamsGone(ctx, p, w, err)
+			teamsGone(rep, w, err)
+			return rep, nil
 		}
-		teamsBlind(ctx, p, w, err)
-		_ = p.Store.SaveCritic(ctx, w)
-		return fmt.Errorf("%s: %w", w.Name, err)
+		teamsBlind(rep, w, err)
+		rep.Error = err.Error()
+		return rep, nil
 	}
 	st.GoneStreak, st.GoneSince = 0, ""
 	if st.Blind {
-		if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-			return nil, []string{"blind"}
-		}); err != nil {
-			return fmt.Errorf("%s: clear blind marker: %w", w.Name, err)
-		}
-		fmt.Fprintf(p.Out, "%s: hearing the chat again (blind since %s)\n", w.Name, st.FailSince)
+		rep.Unset = append(rep.Unset, "blind")
+		rep.Logf("%s: hearing the chat again (blind since %s)", w.Name, st.FailSince)
 	}
 	st.FailSince, st.Blind, st.BlindErr = "", false, ""
 	w.Runtime.ConsecutiveFailures = 0
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	if err := migrateQuiet(ctx, p, w); err != nil {
-		return fmt.Errorf("%s: %w", w.Name, err)
-	}
 	events, items := teamsDiff(st, msgs, w.Chat)
-	events, dropped := p.Classify(ctx, w, events)
-	for _, e := range dropped {
-		delete(items, "teams-"+e.Comment)
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, it := range items {
 		it.At = now
 		items[k] = it
 	}
-	if len(events) > 0 {
-		if len(w.Runtime.PendingEvents) == 0 {
-			w.Runtime.PendingSince = time.Now().UTC()
+	rep.Inbox = items
+	rep.Events = plugin.Wire(events)
+	for i, e := range events {
+		if _, ok := items["teams-"+e.Comment]; ok {
+			rep.Events[i].Inbox = []string{"teams-" + e.Comment}
 		}
-		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
 	}
-	if err := p.Store.SaveRound(ctx, w, nil, nil, items); err != nil {
-		return err
-	}
-	figaro.Renew(ctx, p.Fig, w.FormID)
-
-	derr := deliverTeams(ctx, p, w)
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
-	}
-	return derr
-}
-
-func deliverTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	pending := &model.Delta{Events: w.Runtime.PendingEvents}
-	if !pending.WakeWorthy() {
-		if len(w.Runtime.PendingEvents) > 0 {
-			fmt.Fprintf(p.Out, "%s: round %d quiet (%d recorded)\n", w.Name, w.Runtime.Round, len(w.Runtime.PendingEvents))
-		} else {
-			fmt.Fprintf(p.Out, "%s: round %d quiet\n", w.Name, w.Runtime.Round)
-		}
-		w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-		return nil
-	}
-	if !p.RoleHasHolder(ctx, w.FormID) {
-		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + w.FormID
-		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
-		return nil
-	}
-	if err := p.Fig.Send(ctx, w.FormID, teamsBrief(w, w.Runtime.PendingEvents)); err != nil {
-		w.Runtime.RetryCount++
-		w.Runtime.LastError = fmt.Sprintf("delivery attempt %d failed: %v", w.Runtime.RetryCount, err)
-		return fmt.Errorf("%s: %s", w.Name, w.Runtime.LastError)
-	}
-	fmt.Fprintf(p.Out, "%s: alerted %s — %d message event(s)\n", w.Name, w.FormID, len(w.Runtime.PendingEvents))
-	w.Runtime.PendingEvents, w.Runtime.PendingSince = nil, time.Time{}
-	w.Runtime.RetryCount = 0
-	w.Runtime.LastDelivered = time.Now().UTC()
-	w.Runtime.DeliveredRound = w.Runtime.Round
-	return nil
+	return rep, nil
 }
 
 func teamsBrief(w *model.Critic, events []model.Event) string {
@@ -268,7 +240,7 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 // longer than teamsBlindAfter: the form's key blind says since when and the
 // last error, refreshed only when the error changes, and is removed by the
 // first good round.
-func teamsBlind(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) {
+func teamsBlind(rep *plugin.Reply, w *model.Critic, cause error) {
 	st := w.Runtime.Teams
 	since, err := time.Parse(time.RFC3339, st.FailSince)
 	if err != nil || time.Since(since) < teamsBlindAfter {
@@ -277,61 +249,26 @@ func teamsBlind(ctx context.Context, p *poll.Poller, w *model.Critic, cause erro
 	if st.Blind && st.BlindErr == cause.Error() {
 		return
 	}
-	marker := map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
-		"meaning": "ebac cannot read the chat " + w.Chat.Topic + ": messages since then are unseen until this key disappears"}
-	if err := p.Store.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{"blind": model.MustJSON(marker)}, nil
-	}); err != nil {
-		fmt.Fprintf(p.Out, "%s: could not write blind marker: %v\n", w.Name, err)
-		return
-	}
+	rep.SetKey("blind", map[string]string{"since": st.FailSince, "last_error": cause.Error(), "updated": time.Now().UTC().Format(time.RFC3339),
+		"meaning": "ebac cannot read the chat " + w.Chat.Topic + ": messages since then are unseen until this key disappears"})
 	if !st.Blind {
-		p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: BLIND since %s: cannot read %q (%v). Messages are unseen until your form's key blind disappears; it clears itself on recovery. If it persists, the Boss may need to sign tomb in again.",
+		rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: BLIND since %s: cannot read %q (%v). Messages are unseen until your form's key blind disappears; it clears itself on recovery. If it persists, the Boss may need to sign tomb in again.",
 			w.Name, st.FailSince, w.Chat.Topic, cause))
-		fmt.Fprintf(p.Out, "%s: blind since %s: %v\n", w.Name, st.FailSince, cause)
+		rep.Logf("%s: blind since %s: %v", w.Name, st.FailSince, cause)
 	}
 	st.Blind, st.BlindErr = true, cause.Error()
 }
 
 // teamsGone marks the chat gone on the form, wakes the seat once and stops.
-func teamsGone(ctx context.Context, p *poll.Poller, w *model.Critic, cause error) error {
+func teamsGone(rep *plugin.Reply, w *model.Critic, cause error) {
 	st := w.Runtime.Teams
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("chat gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)
 	action := "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge). " +
 		"If the chat moved to a new id, make a new critic with ebac add-teams: never repoint this one."
-	if err := p.MarkGone(ctx, w, "chat", "teams chat "+w.Chat.ID+" ("+w.Chat.Topic+")", st.GoneSince, cause, action); err != nil {
-		return err
-	}
-	p.WakeOnce(ctx, w, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
-	_ = systemd.DisableTimer(w.Name)
-	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
-	return p.Store.SaveCritic(ctx, w)
-}
-
-// operatorName is the Boss's Teams display name, as older critics listed him
-// in chat.quiet. The default rules record him by id, so migration drops it.
-const operatorName = "Jack Kelliher"
-
-// migrateQuiet turns a pre-trigger chat.quiet list into rules on the role
-// form, once: the Teams default set with every quiet sender but the operator
-// recorded before the final default. A form that already has rules keeps
-// them. The legacy field is not written back, so it is gone after this round.
-func migrateQuiet(ctx context.Context, p *poll.Poller, w *model.Critic) error {
-	if len(w.LegacyQuiet) == 0 || len(w.Trigger) > 0 {
-		return nil
-	}
-	rules := trigger.MigrateQuiet(w.LegacyQuiet, operatorName)
-	raw := rules.JSON()
-	if err := p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
-		if len(cur[trigger.FormKey]) > 0 {
-			return nil, nil // set by the role holder since the read
-		}
-		return map[string]json.RawMessage{trigger.FormKey: raw}, nil
-	}); err != nil {
-		return fmt.Errorf("migrate quiet %v to %s: %w", w.LegacyQuiet, trigger.FormKey, err)
-	}
-	fmt.Fprintf(p.Out, "%s: migrated quiet %v to %s rules\n", w.Name, w.LegacyQuiet, trigger.FormKey)
-	w.Trigger, w.LegacyQuiet = raw, nil
-	return nil
+	rep.Gone = append(rep.Gone, plugin.Gone{Key: "chat", Resource: "teams chat " + w.Chat.ID + " (" + w.Chat.Topic + ")",
+		Since: st.GoneSince, Error: cause.Error(), Action: action})
+	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
+	rep.DisableTimer, rep.Done = true, true
+	rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
 }

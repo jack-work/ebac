@@ -13,6 +13,8 @@ import (
 	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/internal/source/github"
 )
 
 func outboxCritic() (*model.Critic, *model.Snapshot) {
@@ -208,7 +210,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = forgetest.FakeGH(t, scenario)
+		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
 		acks := p.FlushOutbox(ctx, w, snap)
 		if err := st.Save(ctx, w, snap, acks); err != nil {
 			t.Fatal(err)
@@ -242,7 +244,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	// A post that reached the forge but was never acked is found by its marker.
 	writePost(t, st, w, "p2", model.Post{PR: "acme/widget#1", Body: "again"})
 	snap.PRs["acme/widget#1"].Comments["IC9"] = &model.Comment{ID: "IC9", Author: "jack", URL: "https://x/pull/1#ic9",
-		Body: "again\n\n" + postMarker(w.Name, "p2")}
+		Body: "again\n\n" + "<!-- ebac:post:" + w.Name + ":p2 -->"}
 	round("post-ok")
 	if got := readPost(t, f, w, "p2"); got.Sent == nil || !got.Sent.Recovered || got.Sent.URL != "https://x/pull/1#ic9" {
 		t.Fatalf("marker not recovered: %+v", got)
@@ -281,7 +283,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = forgetest.FakeGH(t, scenario)
+		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
@@ -349,7 +351,7 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = forgetest.FakeGH(t, scenario)
+		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
@@ -395,7 +397,7 @@ func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
 	}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
-		p.GH = forgetest.FakeGH(t, scenario)
+		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
 		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}

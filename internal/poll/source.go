@@ -7,41 +7,29 @@ import (
 
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 )
 
-// A Source translates one upstream (GitHub pull requests, a Teams chat, later
-// ADO pipelines or mail) into a critic's role form. Each source owns its
-// fetch, its diff, its inbox items and its wake-ups; the core owns the form,
-// its budget and lease, the ack, the outbox and the timers. Each critic has
-// its own timer and process, so one slow upstream never delays another.
-type Source interface {
-	Name() string
-	Round(ctx context.Context, p *Poller, w *model.Critic) error
-}
-
-var sources = map[string]Source{}
-
-// Register makes a source reachable by its Name. The binary registers every
-// source at start-up, before any round runs.
-func Register(s Source) { sources[s.Name()] = s }
-
-// markGone writes the gone marker for one resource of a critic: what is gone,
-// since when, the last error, and what to do. Every source uses it, so a seat
-// reads the same shape whatever went away.
-func (p *Poller) MarkGone(ctx context.Context, w *model.Critic, key, resource, since string, cause error, action string) error {
-	marker := map[string]string{"resource": resource, "since": since, "error": cause.Error(), "action": action}
+// MarkGone writes the gone marker for one resource of a critic: what is gone,
+// since when, the last error, and what to do. Every source's plugin reports
+// it the same way, so a seat reads the same shape whatever went away.
+func (p *Poller) MarkGone(ctx context.Context, w *model.Critic, g plugin.Gone) error {
+	marker := map[string]string{"resource": g.Resource, "since": g.Since, "error": g.Error, "action": g.Action}
 	return p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
 		gone := model.ObjectOf(cur["gone"])
-		gone[key] = model.MustJSON(marker)
+		gone[g.Key] = model.MustJSON(marker)
 		return map[string]json.RawMessage{"gone": model.MustJSON(gone)}, nil
 	})
 }
 
+// WakeOnce tells the critic's alert target one thing; a role with nobody
+// seated is skipped.
 func (p *Poller) WakeOnce(ctx context.Context, w *model.Critic, msg string) {
-	if !p.RoleHasHolder(ctx, w.FormID) {
+	target := w.AlertTarget()
+	if !p.RoleHasHolder(ctx, target) {
 		return
 	}
-	if err := p.Fig.Send(ctx, w.FormID, msg); err != nil {
+	if err := p.Fig.Send(ctx, target, msg); err != nil {
 		fmt.Fprintf(p.Out, "%s: could not deliver: %v\n", w.Name, err)
 	}
 }

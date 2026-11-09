@@ -216,6 +216,28 @@ ebac selfcheck --strict
 have warned about — a check that cannot tell "not evaluable" from "failing"
 trains an operator to ignore warnings, and that costs more than any defect.
 
+## Plugins
+
+Each upstream is a separate executable next to `ebac` (one Nix output; never found via PATH,
+`EBAC_PLUGIN_DIR` overrides it for tests):
+
+| Plugin | Sources |
+|---|---|
+| `ebac-gh` | `github-pr` (review, outbox posts), `github-author` |
+| `ebac-keel` | `keel-threads` |
+| `ebac-tomb` | `teams-chat` |
+
+Protocol (`internal/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
+stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout or bad reply is a
+failed round. Ops: `round` (fetch and diff: events, inbox items, source form keys, gone markers,
+the critic's source fields and snapshot), `post` (posts the core has already authorized), `brief`
+(the wake text). The core owns everything figaro: the role form, trigger rules, pending events,
+delivery, lease, succession, archival and timers.
+
+Plugins not dialing figaro is a **convention, not enforcement**: they run as the core's uid and
+could reach the angelus socket. Sandboxing wraps `Runner.command`, the one place a plugin process
+is built.
+
 ## Layout
 
 | Path | What |

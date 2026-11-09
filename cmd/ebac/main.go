@@ -10,11 +10,6 @@ import (
 	"strings"
 
 	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/source/author"
-	"github.com/gluck/ebac/internal/source/github"
-	"github.com/gluck/ebac/internal/source/keel"
-	"github.com/gluck/ebac/internal/source/teams"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta
@@ -66,12 +61,6 @@ type globals struct {
 	gh     string
 	figaro string
 	host   string
-}
-
-func init() {
-	for _, s := range []poll.Source{github.Source{}, teams.Source{}, author.Source{}, keel.Source{}} {
-		poll.Register(s)
-	}
 }
 
 func main() {

@@ -7,10 +7,9 @@ import (
 	"os"
 
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/tomb"
 )
 
 // ---------- poll ----------
@@ -25,7 +24,11 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &poll.Poller{Store: st, GH: forge.NewGH(g.gh, g.host), Tomb: &tomb.Tomb{Bin: env("EBAC_TOMB", "tomb"), Timeout: tomb.TeamsTombWait, Cred: forge.NewCred(env("EBAC_BAND_CRED", ""), forge.CredTeams)}, Fig: st.Fig, Out: os.Stdout, DryRun: *dry}
+	pl, err := plugin.NewRunner()
+	if err != nil {
+		return err
+	}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, DryRun: *dry, GH: g.gh, Host: g.host}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {

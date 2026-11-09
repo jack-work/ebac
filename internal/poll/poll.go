@@ -2,18 +2,17 @@ package poll
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"time"
 
-	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/systemd"
-	"github.com/gluck/ebac/internal/tomb"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -26,18 +25,36 @@ const (
 )
 
 type Poller struct {
-	Store  *form.Store
-	GH     *forge.GH
-	Tomb   *tomb.Tomb
-	Fig    *figaro.Figaro
-	Out    io.Writer
-	DryRun bool
-	Me     string
+	Store *form.Store
+	Fig   *figaro.Figaro
+	// Plugins runs the source plugins: a plugin.Runner in production, a
+	// plugin.InProc in tests.
+	Plugins plugin.Caller
+	Out     io.Writer
+	DryRun  bool
+	Me      string
+	// GH and Host are the --gh and --host flags, passed through to plugins.
+	GH   string
+	Host string
+}
+
+func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
+	name, err := plugin.For(w.SourceName())
+	if err != nil {
+		return nil, err
+	}
+	req.Critic = *w
+	req.Me, req.GH, req.Host, req.DryRun = p.Me, p.GH, p.Host, p.DryRun
+	return p.Plugins.Call(ctx, name, req)
 }
 
 // Poll runs exactly one reconciliation round. It is written to be safe to
 // call at any cadence, from any number of overlapping invocations (systemd
 // guarantees only one per instance), and to exit 0 on "nothing to do".
+//
+// The source plugin does the upstream half of the round (plugin.OpRound);
+// everything else here is the core's: trigger rules, pending events, the
+// one form patch, the outbox, delivery, succession and archival.
 func (p *Poller) Poll(ctx context.Context, name string) error {
 	w, err := p.Store.LoadCritic(ctx, name)
 	if err != nil {
@@ -51,13 +68,210 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		fmt.Fprintf(p.Out, "%s: stopped (%s)\n", name, w.Runtime.StopReason)
 		return nil
 	}
-	src, ok := sources[w.SourceName()]
-	if !ok {
-		return fmt.Errorf("%s: unknown source %q", name, w.SourceName())
+	if err := p.migrateQuiet(ctx, w); err != nil {
+		return fmt.Errorf("%s: %w", w.Name, err)
 	}
-	return src.Round(ctx, p, w)
+	prev, err := p.Store.LoadSnapshot(ctx, name)
+	if err != nil {
+		return fmt.Errorf("load previous snapshot: %w", err)
+	}
+
+	w.Runtime.Round++
+	w.Runtime.LastPolled = time.Now().UTC()
+	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget())})
+	if err != nil {
+		// The plugin itself failed (crash, timeout, bad reply): a failed
+		// round like any upstream failure.
+		w.Runtime.ConsecutiveFailures++
+		w.Runtime.LastError = err.Error()
+		_ = p.Store.SaveCritic(ctx, w)
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return p.apply(ctx, w, rep)
 }
 
+// apply lands one round's reply.
+func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) error {
+	for _, l := range rep.Log {
+		fmt.Fprintln(p.Out, l)
+	}
+	if rep.Me != "" {
+		p.Me = rep.Me
+	}
+	plugin.Adopt(w, rep.Critic)
+	for _, g := range rep.Gone {
+		if err := p.MarkGone(ctx, w, g); err != nil {
+			return err
+		}
+	}
+	// One-off wakes go out after the keys they point at are written.
+	wake := func() {
+		for _, msg := range rep.Wake {
+			p.WakeOnce(ctx, w, msg)
+		}
+	}
+	if rep.DisableTimer {
+		_ = systemd.DisableTimer(w.Name)
+	}
+
+	events, inbox := p.classify(ctx, w, rep)
+
+	if rep.Done || rep.Error != "" {
+		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
+			return fmt.Errorf("%s: %w", w.Name, err)
+		}
+		wake()
+		if err := p.Store.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		if rep.Error != "" {
+			return fmt.Errorf("%s: %s", w.Name, rep.Error)
+		}
+		if rep.Archive {
+			return p.MaybeArchive(ctx, w, rep.Snapshot)
+		}
+		return nil
+	}
+
+	if p.DryRun {
+		d := &model.Delta{Events: events}
+		fmt.Fprintf(p.Out, "%s: DRY RUN round %d — %s (%d events, %d wake-worthy)\n",
+			w.Name, w.Runtime.Round, d.Summary(), len(events), len(d.Tier1()))
+		for _, e := range events {
+			fmt.Fprintf(p.Out, "  [t%d] %s\n", e.Tier, e.Line())
+		}
+		// A dry run still persists observed state: that is what makes the
+		// FIRST armed round quiet instead of an avalanche.
+		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
+			return fmt.Errorf("%s: %w", w.Name, err)
+		}
+		return p.Store.Save(ctx, w, rep.Snapshot, nil)
+	}
+
+	// --- outbox: what the seat wrote onto the form goes upstream ---
+	var acks form.Receipts
+	if rep.Outbox {
+		acks = p.FlushOutbox(ctx, w, rep.Snapshot)
+	}
+
+	// --- accumulate the debt BEFORE attempting delivery ---
+	if len(events) > 0 {
+		if len(w.Runtime.PendingEvents) == 0 {
+			w.Runtime.PendingSince = time.Now().UTC()
+		}
+		w.Runtime.PendingEvents = MergeEvents(w.Runtime.PendingEvents, events)
+	}
+
+	// The observed state, the debt, the receipts and the inbox land before
+	// delivery, so a crash mid-send leaves the debt on the form and the
+	// seat's wake finds the round's change already in its study diff.
+	if err := p.Store.SaveRound(ctx, w, rep.Snapshot, acks, inbox); err != nil {
+		return err
+	}
+	if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
+		return fmt.Errorf("%s: %w", w.Name, err)
+	}
+	wake()
+	figaro.Renew(ctx, p.Fig, w.FormID)
+
+	derr := p.Deliver(ctx, w, rep.Snapshot)
+	if derr == nil && rep.Succession {
+		// Succession runs on the same heartbeat: the timer already fires
+		// and already knows the seat.
+		p.SuperviseSuccession(ctx, w)
+	}
+	if err := p.Store.SaveCritic(ctx, w); err != nil {
+		return err
+	}
+	if derr != nil {
+		return derr
+	}
+	if rep.Archive {
+		return p.MaybeArchive(ctx, w, rep.Snapshot)
+	}
+	return nil
+}
+
+// classify runs the trigger rules over the round's events and drops the
+// inbox items of every dropped event (unless a kept event shares them).
+func (p *Poller) classify(ctx context.Context, w *model.Critic, rep *plugin.Reply) ([]model.Event, map[string]form.InboxItem) {
+	inbox := rep.Inbox
+	if inbox == nil {
+		inbox = map[string]form.InboxItem{}
+	}
+	evs := plugin.Unwire(rep.Events)
+	keysOf := map[string][]string{}
+	for i, e := range rep.Events {
+		keysOf[eventKey(evs[i])] = e.Inbox
+	}
+	kept, dropped := p.Classify(ctx, w, evs)
+	keep := map[string]bool{}
+	for _, e := range kept {
+		for _, k := range keysOf[eventKey(e)] {
+			keep[k] = true
+		}
+	}
+	for _, e := range dropped {
+		for _, k := range keysOf[eventKey(e)] {
+			if !keep[k] {
+				delete(inbox, k)
+			}
+		}
+	}
+	return kept, inbox
+}
+
+func eventKey(e model.Event) string {
+	return string(e.Kind) + "|" + string(e.PR) + "|" + e.ThreadID + "|" + e.Comment + "|" + e.ReviewID
+}
+
+// commitKeys writes the source's own form keys, skipping any whose value is
+// unchanged so a quiet round does not move the form version.
+func (p *Poller) commitKeys(ctx context.Context, w *model.Critic, set map[string]json.RawMessage, unset []string) error {
+	if len(set) == 0 && len(unset) == 0 {
+		return nil
+	}
+	return p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		out := map[string]json.RawMessage{}
+		for k, v := range set {
+			if !jsonEqual(cur[k], v) {
+				out[k] = v
+			}
+		}
+		var gone []string
+		for _, k := range unset {
+			if _, ok := cur[k]; ok {
+				gone = append(gone, k)
+			}
+		}
+		return out, gone
+	})
+}
+
+func jsonEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return string(a) == string(b)
+	}
+	return string(model.MustJSON(x)) == string(model.MustJSON(y))
+}
+
+// seat is the aria holding a role form, or "".
+func (p *Poller) seat(ctx context.Context, formID string) string {
+	f, err := p.Fig.Form(ctx, formID)
+	if err != nil {
+		return ""
+	}
+	id, _ := f["target-aria"].(string)
+	return id
+}
+
+// Deliver wakes the critic's alert target with the pending events, rendered
+// by the source's plugin (plugin.OpBrief). Background-only news is forgiven;
+// a failed send backs off and gives up after maxRetries.
 func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
 	pending := &model.Delta{Events: w.Runtime.PendingEvents}
 	if !pending.WakeWorthy() {
@@ -77,15 +291,18 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 		return nil
 	}
 
-	target := w.FormID
-	if !p.RoleHasHolder(ctx, w.FormID) {
-		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + w.FormID
+	target := w.AlertTarget()
+	if !p.RoleHasHolder(ctx, target) {
+		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
 		return nil // not an error exit: an empty seat is an operator condition
 	}
 
-	brief := brief.BuildBrief(w, snap, w.Runtime.PendingEvents, p.Me, w.Runtime.RetryCount)
-	if err := p.Fig.Send(ctx, target, brief); err != nil {
+	msg, err := p.brief(ctx, w, snap)
+	if err == nil {
+		err = p.Fig.Send(ctx, target, msg)
+	}
+	if err != nil {
 		w.Runtime.RetryCount++
 		if w.Runtime.RetryCount >= maxRetries {
 			w.Runtime.LastError = fmt.Sprintf("delivery failed %d times, giving up on this batch: %v",
@@ -109,6 +326,18 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 	w.Runtime.LastDelivered = time.Now().UTC()
 	w.Runtime.DeliveredRound = w.Runtime.Round
 	return nil
+}
+
+func (p *Poller) brief(ctx context.Context, w *model.Critic, snap *model.Snapshot) (string, error) {
+	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpBrief, Snapshot: snap,
+		Pending: plugin.Wire(w.Runtime.PendingEvents), Retry: w.Runtime.RetryCount})
+	if err != nil {
+		return "", err
+	}
+	if rep.Brief == "" {
+		return "", fmt.Errorf("plugin rendered an empty brief")
+	}
+	return rep.Brief, nil
 }
 
 func (p *Poller) RoleHasHolder(ctx context.Context, formID string) bool {
@@ -159,19 +388,6 @@ func MergeEvents(pending, fresh []model.Event) []model.Event {
 		out = out[len(out)-cap:]
 	}
 	return out
-}
-
-func HardStop(w *model.Critic) string {
-	if w.Stop.MaxRounds > 0 && w.Runtime.Round > w.Stop.MaxRounds {
-		return fmt.Sprintf("max rounds (%d) reached", w.Stop.MaxRounds)
-	}
-	if w.Stop.Deadline != nil && time.Now().After(*w.Stop.Deadline) {
-		return "deadline " + w.Stop.Deadline.UTC().Format(time.RFC3339) + " passed"
-	}
-	if w.Stop.MaxConsecutiveFailures > 0 && w.Runtime.ConsecutiveFailures >= w.Stop.MaxConsecutiveFailures {
-		return fmt.Sprintf("%d consecutive failures (last: %s)", w.Runtime.ConsecutiveFailures, w.Runtime.LastError)
-	}
-	return ""
 }
 
 // maybeArchive retires a critic whose PRs are all finished. The grace period

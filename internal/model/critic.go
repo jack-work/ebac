@@ -346,3 +346,17 @@ type KeelState struct {
 	Cursor      int64             `json:"cursor,omitempty"`
 	FeedStarted bool              `json:"feed_started,omitempty"`
 }
+
+// HardStop says why a critic must stop before it spends an upstream call, or "".
+func (w *Critic) HardStop() string {
+	if w.Stop.MaxRounds > 0 && w.Runtime.Round > w.Stop.MaxRounds {
+		return fmt.Sprintf("max rounds (%d) reached", w.Stop.MaxRounds)
+	}
+	if w.Stop.Deadline != nil && time.Now().After(*w.Stop.Deadline) {
+		return "deadline " + w.Stop.Deadline.UTC().Format(time.RFC3339) + " passed"
+	}
+	if w.Stop.MaxConsecutiveFailures > 0 && w.Runtime.ConsecutiveFailures >= w.Stop.MaxConsecutiveFailures {
+		return fmt.Sprintf("%d consecutive failures (last: %s)", w.Runtime.ConsecutiveFailures, w.Runtime.LastError)
+	}
+	return ""
+}
