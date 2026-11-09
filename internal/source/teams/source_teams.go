@@ -74,12 +74,15 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 			}
 		}
 	}
-	quiet := map[string]bool{}
+	// The operator (the Boss) never wakes a teams seat: his messages are recorded in the inbox only (cheroot order
+	// 2026-11-09). This replaces the per-critic --quiet flag; a stored Quiet list (older critics) still adds to it.
+	quiet := map[string]bool{strings.ToLower(OperatorSender): true}
 	for _, q := range chat.Quiet {
 		quiet[strings.ToLower(q)] = true
 	}
 	// A quiet sender is matched by name, by sender id, or by the bare orgid guid.
 	isQuiet := func(m tomb.TeamsMsg, who string) bool {
+		// "8:orgid:<guid>" is stored lower-cased above; match the full id, or the bare guid an old --quiet used.
 		id := strings.ToLower(m.SenderID())
 		return quiet[strings.ToLower(who)] || (id != "" && (quiet[id] || quiet[strings.TrimPrefix(id, "8:orgid:")]))
 	}
@@ -307,3 +310,6 @@ func teamsGone(ctx context.Context, p *poll.Poller, w *model.Critic, cause error
 	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 	return p.Store.SaveCritic(ctx, w)
 }
+
+// OperatorSender is the Boss's Teams sender id: quiet in every teams critic, by default.
+const OperatorSender = "8:orgid:bc3cb0f4-1239-4ec7-a528-4913522f79c5"

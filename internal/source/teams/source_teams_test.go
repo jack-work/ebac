@@ -353,3 +353,33 @@ func TestTeamsTokenNameFallback(t *testing.T) {
 		t.Fatalf("token name not used: %+v", ev)
 	}
 }
+
+// The operator never wakes a teams seat, with NO per-critic quiet list (cheroot order 2026-11-09): his message is recorded
+// in the inbox; a non-operator message still wakes.
+func TestTeamsOperatorQuietByDefault(t *testing.T) {
+	chat := &model.ChatRef{ID: "19:abc@thread.v2", Topic: "t"} // no Quiet at all
+	st := &model.TeamsState{}
+	teamsDiff(st, nil, chat)
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{
+		from(tmsg("900", "Jack Kelliher", "boss note"), OperatorSender),
+		from(tmsg("901", "Liang Shi", "please look"), "8:orgid:00000000-0000-0000-0000-000000000009"),
+	}, chat)
+	byID := map[string]model.Event{}
+	for _, e := range ev {
+		byID[e.Comment] = e
+	}
+	if e := byID["900"]; e.Tier != model.TierRecord {
+		t.Fatalf("operator message tier %v; want TierRecord (no wake)", e.Tier)
+	}
+	if _, ok := items["teams-900"]; !ok {
+		t.Fatal("operator message missing from the inbox")
+	}
+	if e := byID["901"]; e.Tier != model.TierWake {
+		t.Fatalf("control: a non-operator message must still wake, tier %v", e.Tier) // control
+	}
+	// Mixed case in the stored id must not matter.
+	ev, _ = teamsDiff(st, []tomb.TeamsMsg{from(tmsg("902", "", "x"), strings.ToUpper(OperatorSender))}, chat)
+	if len(ev) != 1 || ev[0].Tier != model.TierRecord {
+		t.Fatalf("upper-cased operator id woke: %+v", ev)
+	}
+}

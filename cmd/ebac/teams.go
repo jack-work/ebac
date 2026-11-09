@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
@@ -19,7 +18,6 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	chat := fs.String("chat", "", "Teams conversation id (19:...@thread.v2)")
 	topic := fs.String("topic", "", "chat topic, used to find it again")
 	aria := fs.String("aria", "", "seat: the aria cast into the role")
-	quiet := fs.String("quiet", "", "comma-separated senders that never wake the seat: display names or sender ids (8:orgid:<guid> or the bare guid)")
 	every := fs.Duration("every", 60*time.Second, "poll interval")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {
@@ -37,11 +35,6 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	}
 	w := &model.Critic{Name: *name, Mode: model.ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
 		Chat: &model.ChatRef{ID: *chat, Topic: *topic}, Stop: model.StopConditions{}}
-	for _, q := range strings.Split(*quiet, ",") {
-		if q = strings.TrimSpace(q); q != "" {
-			w.Chat.Quiet = append(w.Chat.Quiet, q)
-		}
-	}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
 		return fmt.Errorf("mint role form: %w", err)
