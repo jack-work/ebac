@@ -575,6 +575,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		return err
 	}
 	s.remember(w.FormID, written)
+	adoptWritten(w, written)
 	if len(conflicts) > 0 {
 		warn := s.Warn
 		if warn == nil {
@@ -737,4 +738,19 @@ func (s *Store) Archive(ctx context.Context, w *model.Critic, snap *model.Snapsh
 		}
 	}
 	return dir, nil
+}
+
+// adoptWritten brings w's config in line with the critic just written, so a
+// value the merge took from the form is not mistaken for a round change by
+// the next save of the same w (base would equal the form, mine the stale
+// value). A fresh decode, so a field the merge dropped is really gone; what
+// the critic key does not carry (form id, runtime, trigger, legacy quiet)
+// stays w's.
+func adoptWritten(w *model.Critic, written json.RawMessage) {
+	var fresh model.Critic
+	if len(written) == 0 || json.Unmarshal(written, &fresh) != nil {
+		return
+	}
+	fresh.FormID, fresh.Runtime, fresh.Trigger, fresh.LegacyQuiet = w.FormID, w.Runtime, w.Trigger, w.LegacyQuiet
+	*w = fresh
 }

@@ -124,6 +124,30 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 		t.Fatalf("a different-field race warned: %s", warn.String())
 	}
 
+	// Two saves of one w in one round (poll.go saves the critic, then saves the round): the set survives both.
+	c, err := st.LoadCritic(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	figaroSet(t, id, "critic.approve", "true")
+	c.Runtime.Round++
+	if err := st.SaveCritic(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Approve {
+		t.Fatal("the saved w did not adopt the value the merge took from the form")
+	}
+	c.EverySec = 20
+	if err := st.SaveCritic(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if m := critic(); m["approve"] != true || m["every_sec"] != float64(20) {
+		t.Fatalf("second save of the same w lost the set (or the round's change): %v", m)
+	}
+	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 3 {
+		t.Fatalf("runtime after two saves: round %d", c.Runtime.Round)
+	}
+
 	// Same field: the form's value wins, and the conflict is reported with its field.
 	round(15, func() {
 		figaroSet(t, id, "critic.every_sec", "99")
