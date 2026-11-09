@@ -521,3 +521,58 @@ func TestLiveTeamsTriggerMigrationAndFallback(t *testing.T) {
 		t.Fatalf("fixed set not in force: pending %+v err %q", c.Runtime.PendingEvents, c.Runtime.LastError)
 	}
 }
+
+// ---------- live: collect mode (W7 item 2) ----------
+
+// Through the core on a real role form: in collect mode a message lands in the inbox at once while the ping waits
+// for its tick (no delivery attempt, so no error even with no seat); control: without a ping cadence the same news
+// is delivered at once (attempted: no seat, so the empty-seat error).
+func TestLiveTeamsCollectModeCollectsWithoutPinging(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name    string
+		ping    int
+		attempt bool
+	}{{"collect", 1800, false}, {"control", 0, true}} {
+		st, err := form.NewStore(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Root = t.TempDir()
+		id, err := f.FormNew(ctx, "ebac-livetest-collect")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		w := &model.Critic{Name: "livetest-" + c.name + "-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
+			CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat(), PingEverySec: c.ping}
+		w.Runtime.LastPing = time.Now().UTC() // a ping just went out: the next is 30 minutes away
+		if err := st.SaveCritic(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+		round := func(scenario string) {
+			t.Helper()
+			var out strings.Builder
+			p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"tomb": Plugin{Tomb: fakeTomb(t, scenario)}.Handle}}
+			if err := p.Poll(ctx, w.Name); err != nil {
+				t.Fatalf("%s %s: %v\n%s", c.name, scenario, err, out.String())
+			}
+		}
+		round("ok")
+		round("ok2")
+		fm, err := f.Form(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbox, _ := json.Marshal(fm["inbox"])
+		if !strings.Contains(string(inbox), "please look") {
+			t.Fatalf("%s: the message is not in the inbox: %s", c.name, inbox)
+		}
+		got, _ := st.LoadCritic(ctx, w.Name)
+		attempted := strings.Contains(got.Runtime.LastError, "no reachable target-aria")
+		if attempted != c.attempt || len(got.Runtime.PendingEvents) != 1 {
+			t.Fatalf("%s: delivery attempted %v (want %v), pending %d, error %q", c.name, attempted, c.attempt, len(got.Runtime.PendingEvents), got.Runtime.LastError)
+		}
+	}
+}

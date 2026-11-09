@@ -178,6 +178,7 @@ func Adopt(core, from *model.Critic) {
 	r.Keel = f.Keel
 	r.BandHub = f.BandHub
 	r.Roster = f.Roster
+	r.Releases = f.Releases
 	r.Stopped = f.Stopped
 	r.StopReason = f.StopReason
 }

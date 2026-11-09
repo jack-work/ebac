@@ -17,7 +17,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
-  ebac add-teams --name N --chat ID --topic T --aria SEAT [--every 60s]
+  ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--recent 50] [--every 5m]
                                             watch one author's N most recent PRs: wake on a new PR or a merge
@@ -31,6 +31,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             the role roster: roles, holders, lieutenants and live transient forks,
                                             derived from the aria store into a studied form (plugin ebac-roster);
                                             no seat, never a wake, writes only on change
+  ebac add-releases --name N --repo O/R [--alert @ROLE | --aria SEAT] [--every 15m]
+                                            watch a github.com repo's releases: one wake per new tag, with its bump
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -97,6 +99,8 @@ func main() {
 		err = cmdAddAuthor(ctx, g, args)
 	case "add-keel":
 		err = cmdAddKeel(ctx, g, args)
+	case "add-releases":
+		err = cmdAddReleases(ctx, g, args)
 	case "add-band-hub":
 		err = cmdAddBandHub(ctx, g, args)
 	case "add-roster":

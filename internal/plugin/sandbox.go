@@ -44,6 +44,9 @@ const (
 // Needs is what one plugin may use for one critic. The network is shared by
 // every plugin (each reaches its upstream through the host's egress rules).
 func Needs(plugin string, c *model.Critic) []Grant {
+	if c != nil && c.SourceName() == model.SourceReleases {
+		return nil // public github.com releases, read without a credential
+	}
 	switch plugin {
 	case "gh", "tomb":
 		return []Grant{GrantBandCred, GrantCredCache}

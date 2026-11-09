@@ -15,10 +15,11 @@ import (
 func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("add-teams")
 	name := fs.String("name", "", "critic name, e.g. teams-md1-cowork")
-	chat := fs.String("chat", "", "Teams conversation id (19:...@thread.v2)")
+	chat := fs.String("chat", "", "Teams conversation id (19:...@thread.v2), or 48:notes for the Boss's saved messages")
 	topic := fs.String("topic", "", "chat topic, used to find it again")
 	aria := fs.String("aria", "", "seat: the aria cast into the role")
-	every := fs.Duration("every", 60*time.Second, "poll interval")
+	every := fs.Duration("every", 60*time.Second, "poll interval (in collect mode, the collect cadence)")
+	pingEvery := fs.Duration("ping-every", 0, "COLLECT mode: gather every message each round, ping the seat at most this often (e.g. 30m), one line, only when something new woke; 0 wakes on every round with news")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {
 		return err
@@ -33,8 +34,11 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
+	if *pingEvery < 0 || (*pingEvery > 0 && *pingEvery < *every) {
+		return fmt.Errorf("--ping-every %s: want 0 or at least --every (%s)", *pingEvery, *every)
+	}
 	w := &model.Critic{Name: *name, Mode: model.ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
-		Chat: &model.ChatRef{ID: *chat, Topic: *topic}, Stop: model.StopConditions{}}
+		Chat: &model.ChatRef{ID: *chat, Topic: *topic}, Stop: model.StopConditions{}, PingEverySec: int(pingEvery.Seconds())}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
 		return fmt.Errorf("mint role form: %w", err)

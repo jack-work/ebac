@@ -37,6 +37,11 @@ type Poller struct {
 	// GH and Host are the --gh and --host flags, passed through to plugins.
 	GH   string
 	Host string
+	// Send and Holder replace delivery's figaro send and seat check in tests
+	// (nil: the real ones), so a delivery cadence can be counted without
+	// waking an aria.
+	Send   func(ctx context.Context, target, msg string) error
+	Holder func(ctx context.Context, target string) bool
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
@@ -116,6 +121,7 @@ var SourceKeys = map[string][]string{
 	"keel-threads":      {"threads", "blind"},
 	"teams-chat":        {"blind"},
 	model.SourceBandHub: {"queues", "nodes", "live", "dupes", "updated"},
+	"github-releases":   {"releases"},
 	// role:<name> is one key per role ("*" is a prefix pattern: one more
 	// segment, no dots, so it cannot reach a nested key).
 	model.SourceRoster: {"role:*", "forks", "updated"},
@@ -358,21 +364,41 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 		return nil
 	}
 
+	if PingHeld(w, time.Now()) {
+		fmt.Fprintf(p.Out, "%s: collect: %d wake-worthy held for the ping due %s\n", w.Name, len(pending.Tier1()),
+			w.Runtime.LastPing.Add(w.PingEvery()).Format(time.RFC3339))
+		return nil
+	}
+
 	if !w.Runtime.NextRetryAt.IsZero() && time.Now().Before(w.Runtime.NextRetryAt) {
 		fmt.Fprintf(p.Out, "%s: delivery backoff until %s\n", w.Name, w.Runtime.NextRetryAt.Format(time.RFC3339))
 		return nil
 	}
 
 	target := w.AlertTarget()
-	if !p.RoleHasHolder(ctx, target) {
+	holder := p.RoleHasHolder
+	if p.Holder != nil {
+		holder = p.Holder
+	}
+	if !holder(ctx, target) {
 		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
 		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
 		return nil // not an error exit: an empty seat is an operator condition
 	}
 
-	msg, err := p.brief(ctx, w, snap)
+	var msg string
+	var err error
+	if w.PingEvery() > 0 {
+		msg = PingLine(w)
+	} else {
+		msg, err = p.brief(ctx, w, snap)
+	}
 	if err == nil {
-		err = p.Fig.Send(ctx, target, msg)
+		if p.Send != nil {
+			err = p.Send(ctx, target, msg)
+		} else {
+			err = p.Fig.Send(ctx, target, msg)
+		}
 	}
 	if err != nil {
 		w.Runtime.RetryCount++
@@ -397,7 +423,30 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 	w.Runtime.NextRetryAt = time.Time{}
 	w.Runtime.LastDelivered = time.Now().UTC()
 	w.Runtime.DeliveredRound = w.Runtime.Round
+	if w.PingEvery() > 0 {
+		w.Runtime.LastPing = w.Runtime.LastDelivered
+	}
 	return nil
+}
+
+// PingHeld says a collect-mode critic must keep its wake-worthy events for
+// a later ping: the last ping was less than PingEvery ago. Collection does not
+// wait; only the ping does (W7 item 2: wake means "include in the next ping").
+func PingHeld(w *model.Critic, now time.Time) bool {
+	every := w.PingEvery()
+	return every > 0 && !w.Runtime.LastPing.IsZero() && now.Sub(w.Runtime.LastPing) < every
+}
+
+// PingLine is a collect-mode wake: one line, the count and since when; the
+// seat reads the inbox on the form it studies.
+func PingLine(w *model.Critic) string {
+	since := w.Runtime.LastPing
+	if since.IsZero() {
+		since = w.Runtime.PendingSince
+	}
+	n := len((&model.Delta{Events: w.Runtime.PendingEvents}).Tier1())
+	return fmt.Sprintf("ebac %s: %d new since %s, in your studied form %s key inbox. When finished: ebac ack --critic %s --round %d",
+		w.Name, n, since.UTC().Format(time.RFC3339), w.FormID, w.Name, w.Runtime.Round)
 }
 
 func (p *Poller) brief(ctx context.Context, w *model.Critic, snap *model.Snapshot) (string, error) {

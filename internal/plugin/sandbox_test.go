@@ -276,3 +276,17 @@ func TestNewSandboxFailsClosed(t *testing.T) {
 		t.Fatalf("explicit off: %v %v", sb, err)
 	}
 }
+
+// A release watch reads public github.com releases: its gh exec gets no credential grant, while a PR critic on the
+// same plugin keeps band-cred.
+func TestReleasesNeedNoGrant(t *testing.T) {
+	if g := Needs("gh", &model.Critic{Source: model.SourceReleases}); len(g) != 0 {
+		t.Fatalf("release watch grants: %v", g)
+	}
+	if g := Needs("gh", &model.Critic{Source: "github-pr"}); len(g) == 0 || g[0] != GrantBandCred {
+		t.Fatalf("control: a PR critic lost band-cred: %v", g)
+	}
+	if name, err := For(model.SourceReleases); err != nil || name != "gh" {
+		t.Fatalf("For(github-releases) = %q, %v", name, err)
+	}
+}

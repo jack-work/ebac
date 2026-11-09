@@ -65,6 +65,11 @@ type Runtime struct {
 	TriggerGood json.RawMessage `json:"trigger_good,omitempty"`
 	TriggerErr  string          `json:"trigger_err,omitempty"`
 
+	// Releases is a release watch's state: the tags already seen.
+	Releases *ReleasesState `json:"releases,omitempty"`
+	// LastPing is when a collect-mode critic last pinged its seat.
+	LastPing time.Time `json:"last_ping,omitempty"`
+
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
 	BandHub json.RawMessage `json:"band_hub,omitempty"`
@@ -157,6 +162,12 @@ type Critic struct {
 	Keel *KeelRef `json:"keel,omitempty"`
 	// Band is a band-hub mirror's configuration (source band-hub).
 	Band *BandRef `json:"band_hub,omitempty"`
+	// Releases is a release watch's configuration (source github-releases).
+	Releases *ReleasesRef `json:"releases_watch,omitempty"`
+	// PingEverySec, when set, is COLLECT mode: events are gathered every
+	// round, and the seat is pinged at most this often, one line, only when
+	// something wake-worthy arrived since the last ping (W7 item 2).
+	PingEverySec int `json:"ping_every_sec,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`
@@ -225,6 +236,9 @@ func (w *Critic) AlertTarget() string {
 	}
 	if w.Keel != nil && w.Keel.AlertRole != "" {
 		return w.Keel.AlertRole
+	}
+	if w.Releases != nil && w.Releases.AlertRole != "" {
+		return w.Releases.AlertRole
 	}
 	return w.FormID
 }
@@ -442,3 +456,26 @@ type BandRef struct {
 	// Repo is where the jobs' branch params live, for the superseded check.
 	Repo string `json:"repo,omitempty"`
 }
+
+// SourceReleases watches one GitHub repo's releases (served by ebac-gh).
+const SourceReleases = "github-releases"
+
+// ReleasesRef is a release watch's configuration.
+type ReleasesRef struct {
+	Repo string `json:"repo"` // owner/name on github.com
+	// AlertRole, when set, is the role woken instead of the critic's own.
+	AlertRole string `json:"alert_role,omitempty"`
+	// API is the REST base, https://api.github.com unless set (tests).
+	API string `json:"api,omitempty"`
+}
+
+// ReleasesState lists the tags seen, newest first, bounded.
+type ReleasesState struct {
+	Seen []string `json:"seen,omitempty"`
+	// Armed is set by the first round, which only records: a repo with no
+	// release yet must still announce its first one.
+	Armed bool `json:"armed,omitempty"`
+}
+
+// PingEvery is the collect-mode ping cadence; 0 is ordinary delivery.
+func (w *Critic) PingEvery() time.Duration { return time.Duration(w.PingEverySec) * time.Second }
