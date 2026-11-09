@@ -99,6 +99,8 @@ func Reconcile(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 		form, _ := fig.Form(ctx, c.FormID)
 		seat, _ := form["target-aria"].(string)
 		switch {
+		case seat == "" && !c.NeedsSeat():
+			// a mirror (band-hub) wakes nobody: no seat is the design
 		case seat == "":
 			add("R5-seat", c.Name, "role has no target-aria", "cast one: ebac cast --critic "+c.Name+" --aria <id>", false)
 		case !fig.AriaExists(ctx, seat):

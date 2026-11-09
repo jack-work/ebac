@@ -152,6 +152,10 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		}
 		return nil
 	}
+	if b := w.Band; b != nil {
+		fmt.Printf("band-hub  socket %s, utility %s, repo %s\n", b.Socket, strings.Join(b.Utility, ","), b.Repo)
+		return nil
+	}
 	if w.Chat != nil {
 		fmt.Printf("chat      %s (%s)\n", w.Chat.Topic, w.Chat.ID)
 		if t := w.Runtime.Teams; t != nil {

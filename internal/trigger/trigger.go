@@ -293,6 +293,9 @@ func DefaultFor(source string) Rules {
 	if source == "teams-chat" {
 		return Teams()
 	}
+	if source == "band-hub" {
+		return Rules{{Default: true, Action: Drop}} // a mirror: studiers see the form, nobody is woken
+	}
 	return SourceDefault()
 }
 

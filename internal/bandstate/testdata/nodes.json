@@ -1,0 +1,292 @@
+[
+ {
+  "age_s": 2.576,
+  "node": "barr",
+  "received": 1794261960519,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 255999148032,
+    "guard": {
+     "tier": 1,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 1.25,
+   "mem": {
+    "available_bytes": 42828713984,
+    "total_bytes": 58970689536
+   },
+   "node": "barr",
+   "psi_io": {
+    "full_avg10": 0.0,
+    "full_avg60": 0.0,
+    "some_avg10": 0.0,
+    "some_avg60": 0.0
+   },
+   "running": [
+    {
+     "hub_job": 4246,
+     "instance": "barr.job.20261109T202808-be7f",
+     "sha": "1c93d0cbdb78231be750c9e188777b9b47124a9d"
+    }
+   ],
+   "uptime_s": 83861,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/hpbjgq8br0siy5vxanwrplg8g05r2was-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 1,
+    "total": 4
+   }
+  },
+  "stale": false
+ },
+ {
+  "age_s": 0.13,
+  "node": "leob",
+  "received": 1794261962965,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 839817883648,
+    "guard": {
+     "tier": 0,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 0.11,
+   "mem": {
+    "available_bytes": 30330417152,
+    "total_bytes": 33651798016
+   },
+   "node": "leob",
+   "psi_io": {
+    "full_avg10": 0.0,
+    "full_avg60": 0.0,
+    "some_avg10": 0.0,
+    "some_avg60": 0.0
+   },
+   "running": [],
+   "uptime_s": 40193,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/3jahb462ads47avvksx1kmr8r58r2xbj-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 0,
+    "total": 2
+   }
+  },
+  "stale": false
+ },
+ {
+  "age_s": 2.241,
+  "node": "pucc",
+  "received": 1794261960854,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 226554679296,
+    "guard": {
+     "tier": 1,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 1.44,
+   "mem": {
+    "available_bytes": 42682032128,
+    "total_bytes": 58970685440
+   },
+   "node": "pucc",
+   "psi_io": {
+    "full_avg10": 0.0,
+    "full_avg60": 0.0,
+    "some_avg10": 0.0,
+    "some_avg60": 0.0
+   },
+   "running": [
+    {
+     "hub_job": 4191,
+     "instance": "pucc.job.20261109T210631-21b3",
+     "sha": "36c88da8b3c3383b13dfe67d2ebf2d34a9e84e47"
+    }
+   ],
+   "services": {
+    "artifacts": [],
+    "units": []
+   },
+   "uptime_s": 83043,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/1n3d3y5wrrp2ar69mjwpbf7xy1ypq15z-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 1,
+    "total": 4
+   }
+  },
+  "stale": false
+ },
+ {
+  "age_s": 0.287,
+  "node": "ross",
+  "received": 1794261962808,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 977400926208,
+    "guard": {
+     "tier": 0,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 1.46,
+   "mem": {
+    "available_bytes": 56344432640,
+    "total_bytes": 58971734016
+   },
+   "node": "ross",
+   "psi_io": {
+    "full_avg10": 0.0,
+    "full_avg60": 0.0,
+    "some_avg10": 0.0,
+    "some_avg60": 0.0
+   },
+   "running": [
+    {
+     "hub_job": 4276,
+     "instance": "ross.job.20261109T215706-505e",
+     "sha": "c45070c13cc537cf7f8a0f6e2afc4cfedfca5320"
+    }
+   ],
+   "uptime_s": 39613,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/vg5dj7y2s8s8i3qlbv7flcblxz7sg7ag-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 1,
+    "total": 4
+   }
+  },
+  "stale": false
+ },
+ {
+  "age_s": 3.282,
+  "node": "sego",
+  "received": 1794261959813,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 270754320384,
+    "guard": {
+     "tier": 0,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 1.51,
+   "mem": {
+    "available_bytes": 54846128128,
+    "total_bytes": 58968375296
+   },
+   "node": "sego",
+   "psi_io": {
+    "full_avg10": 0.69,
+    "full_avg60": 0.45,
+    "some_avg10": 0.69,
+    "some_avg60": 0.45
+   },
+   "running": [
+    {
+     "hub_job": 4259,
+     "instance": "sego.job.20261109T220430-1cad",
+     "sha": "1b898872934d314fd4eca5baf399855fb0c6a51a"
+    }
+   ],
+   "uptime_s": 83306,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/crab1qz3ac2n3w5axs8v2k9bj29vlrcc-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 1,
+    "total": 4
+   }
+  },
+  "stale": false
+ },
+ {
+  "age_s": 3.132,
+  "node": "verd",
+  "received": 1794261959963,
+  "reporter": "uid:1000",
+  "snapshot": {
+   "cores": 16,
+   "disk": {
+    "free_bytes": 197469315072,
+    "guard": {
+     "tier": 1,
+     "drained": false
+    }
+   },
+   "draining": null,
+   "load1": 1.46,
+   "mem": {
+    "available_bytes": 43388833792,
+    "total_bytes": 58970693632
+   },
+   "node": "verd",
+   "psi_io": {
+    "full_avg10": 0.05,
+    "full_avg60": 0.28,
+    "some_avg10": 0.05,
+    "some_avg60": 0.28
+   },
+   "running": [
+    {
+     "hub_job": 4168,
+     "instance": "verd.job.20261109T210529-fa95",
+     "sha": "01f0e48d56f9e890038b2466b1e8df72a3a4d257"
+    }
+   ],
+   "services": {
+    "artifacts": [],
+    "units": []
+   },
+   "uptime_s": 83580,
+   "v": 1,
+   "version": {
+    "commit": "52bd16f01837e83e3dcd5a0158d1f10d11003a03",
+    "config": "/nix/store/rkwzddmj17g83l7127h0m2ami53ay241-band-work.json",
+    "py": "/nix/store/r3mizj3d4f8mq70lzyqnhcni20yicf5m-band-work.py"
+   },
+   "workers": {
+    "busy": 1,
+    "total": 4
+   }
+  },
+  "stale": false
+ }
+]

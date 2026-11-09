@@ -148,6 +148,8 @@ type Critic struct {
 	Author *AuthorRef `json:"author_watch,omitempty"`
 	// Keel is a keel-threads watch's configuration (source keel-threads).
 	Keel *KeelRef `json:"keel,omitempty"`
+	// Band is a band-hub mirror's configuration (source band-hub).
+	Band *BandRef `json:"band_hub,omitempty"`
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`
@@ -359,4 +361,22 @@ func (w *Critic) HardStop() string {
 		return fmt.Sprintf("%d consecutive failures (last: %s)", w.Runtime.ConsecutiveFailures, w.Runtime.LastError)
 	}
 	return ""
+}
+
+// SourceBandHub mirrors the band hub into a studied form. It never wakes
+// anyone, so its role needs no seat.
+const SourceBandHub = "band-hub"
+
+// NeedsSeat says whether an empty role is a fault: a mirror is read by its
+// studiers and wakes nobody.
+func (w *Critic) NeedsSeat() bool { return w.SourceName() != SourceBandHub }
+
+// BandRef is a band-hub mirror's configuration.
+type BandRef struct {
+	// Socket is the hub's unix socket (metadata-only reader access).
+	Socket string `json:"socket"`
+	// Utility names the hub's utility nodes; every other node is heavy.
+	Utility []string `json:"utility,omitempty"`
+	// Repo is where the jobs' branch params live, for the superseded check.
+	Repo string `json:"repo,omitempty"`
 }

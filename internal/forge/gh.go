@@ -509,3 +509,15 @@ func isBot(a gqlAuthor) bool {
 	}
 	return false
 }
+
+// BranchTip is the sha a branch points at, or "" when the branch is gone.
+func (g *GH) BranchTip(ctx context.Context, repo, branch string) (string, error) {
+	out, err := g.run(ctx, []string{"api", "repos/" + repo + "/git/ref/heads/" + branch, "-q", ".object.sha"}, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}

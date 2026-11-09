@@ -85,7 +85,7 @@ func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 	dead := []string{}
 	checked := 0
 	for _, w := range critics {
-		if w.Runtime.Archived {
+		if w.Runtime.Archived || !w.NeedsSeat() {
 			continue
 		}
 		form, e := fig.Form(ctx, w.FormID)

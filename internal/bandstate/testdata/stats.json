@@ -1,0 +1,844 @@
+{
+ "hub": {
+  "commit": "6d5cbfc3b3ff8c34a9cdb234ae9b10ea7e304ca0",
+  "db_bytes": 7389184,
+  "node_stale_s": 30,
+  "now": 1794261963101,
+  "uptime_s": 26553.009,
+  "version": "0.1.0",
+  "wal_bytes": 4185952,
+  "window_s": 86400
+ },
+ "queues": [
+  {
+   "counts": {
+    "dead": 0,
+    "done": 46,
+    "failed": 25,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 3,
+   "oldest_ready_age_s": null,
+   "preemptions": 19,
+   "queue": "aether.build",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 22,
+    "failed": 26,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 1,
+   "oldest_ready_age_s": null,
+   "preemptions": 40,
+   "queue": "aether.check",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 258,
+    "failed": 612,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 22
+   },
+   "leases": [],
+   "node_lost": 3,
+   "oldest_ready_age_s": null,
+   "preemptions": 942,
+   "queue": "aether.check-ni",
+   "run_s": {
+    "n": 17,
+    "p50": 1308.122,
+    "p95": 1856.457
+   },
+   "wait_s": {
+    "n": 17,
+    "p50": 9780.241,
+    "p95": 12730.135
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 41,
+    "failed": 101,
+    "leased": 1,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 1,
+    "24h": 58
+   },
+   "leases": [
+    {
+     "holder": "uid:1000:barr/w3",
+     "id": 4246,
+     "lease_left_s": 290.729,
+     "running_s": 5874.642
+    }
+   ],
+   "node_lost": 1,
+   "oldest_ready_age_s": null,
+   "preemptions": 15,
+   "queue": "aether.clippy-pr",
+   "run_s": {
+    "n": 27,
+    "p50": 3875.679,
+    "p95": 8309.46
+   },
+   "wait_s": {
+    "n": 28,
+    "p50": 9720.725,
+    "p95": 69712.547
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 129,
+    "failed": 99,
+    "leased": 3,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 3,
+    "24h": 9
+   },
+   "leases": [
+    {
+     "holder": "uid:1000:verd/w0",
+     "id": 4168,
+     "lease_left_s": 297.077,
+     "running_s": 3633.165
+    },
+    {
+     "holder": "uid:1000:pucc/w3",
+     "id": 4191,
+     "lease_left_s": 290.608,
+     "running_s": 3571.462
+    },
+    {
+     "holder": "uid:1000:sego/w2",
+     "id": 4259,
+     "lease_left_s": 292.811,
+     "running_s": 92.639
+    }
+   ],
+   "node_lost": 19,
+   "oldest_ready_age_s": null,
+   "preemptions": 5779,
+   "queue": "aether.decision",
+   "run_s": {
+    "n": 7,
+    "p50": 4543.396,
+    "p95": 24904.788
+   },
+   "wait_s": {
+    "n": 9,
+    "p50": 54104.896,
+    "p95": 83386.981
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 261,
+    "failed": 478,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 29
+   },
+   "leases": [],
+   "node_lost": 4,
+   "oldest_ready_age_s": null,
+   "preemptions": 69,
+   "queue": "aether.decision-build",
+   "run_s": {
+    "n": 20,
+    "p50": 1075.755,
+    "p95": 3043.368
+   },
+   "wait_s": {
+    "n": 20,
+    "p50": 1041.51,
+    "p95": 9580.489
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 129,
+    "failed": 151,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 3,
+   "oldest_ready_age_s": null,
+   "preemptions": 24,
+   "queue": "aether.decision-clippy",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 1,
+    "failed": 7,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 8,
+   "queue": "aether.decision-exp",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 175,
+    "failed": 223,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 38
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 22,
+   "queue": "aether.gate-ext",
+   "run_s": {
+    "n": 32,
+    "p50": 4722.386,
+    "p95": 7203.47
+   },
+   "wait_s": {
+    "n": 28,
+    "p50": 2269.605,
+    "p95": 14360.031
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 181,
+    "failed": 94,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 11
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 5,
+   "queue": "aether.gate-kit",
+   "run_s": {
+    "n": 10,
+    "p50": 112.527,
+    "p95": 166.744
+   },
+   "wait_s": {
+    "n": 10,
+    "p50": 426.388,
+    "p95": 12914.504
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 48,
+    "failed": 52,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 4
+   },
+   "leases": [],
+   "node_lost": 1,
+   "oldest_ready_age_s": null,
+   "preemptions": 1031,
+   "queue": "aether.gate-services",
+   "run_s": {
+    "n": 3,
+    "p50": 3628.23,
+    "p95": 3782.75
+   },
+   "wait_s": {
+    "n": 3,
+    "p50": 3188.691,
+    "p95": 11848.578
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 16,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "aether.gate-tokens",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 66,
+    "failed": 49,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 20,
+   "queue": "aether.orch",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 4,
+    "failed": 2,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 4,
+   "queue": "aether.orch-build",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 4,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "aether.pilot",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 1,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "aether.repo-gates",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 40,
+    "failed": 2,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 2
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "binjob.dreval-pull",
+   "run_s": {
+    "n": 2,
+    "p50": 2.499,
+    "p95": 36.147
+   },
+   "wait_s": {
+    "n": 2,
+    "p50": 0.615,
+    "p95": 2.981
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 3,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "binjob.kusto-pull-orch-prod-uk",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 3,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 1,
+   "queue": "binjob.kusto-pull-orch-prod-us",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 7,
+    "failed": 1,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "binjob.kusto-pull-prod-uk",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 12,
+    "failed": 3,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 1,
+   "queue": "binjob.kusto-pull-prod-wus",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 3,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "binjob.probe",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 33,
+    "failed": 2,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 1,
+    "24h": 6
+   },
+   "leases": [],
+   "node_lost": 1,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "cowork.build",
+   "run_s": {
+    "n": 6,
+    "p50": 257.423,
+    "p95": 335.226
+   },
+   "wait_s": {
+    "n": 6,
+    "p50": 0.625,
+    "p95": 4.138
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 2,
+    "failed": 1,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "effort.session-fetch",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 9,
+    "failed": 0,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 6,
+    "24h": 9
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "flake.check",
+   "run_s": {
+    "n": 9,
+    "p50": 300.044,
+    "p95": 1247.267
+   },
+   "wait_s": {
+    "n": 9,
+    "p50": 1.295,
+    "p95": 149.129
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 419,
+    "failed": 99,
+    "leased": 1,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 2,
+    "24h": 15
+   },
+   "leases": [
+    {
+     "holder": "uid:1000:ross/w1",
+     "id": 4276,
+     "lease_left_s": 291.466,
+     "running_s": 536.275
+    }
+   ],
+   "node_lost": 1,
+   "oldest_ready_age_s": null,
+   "preemptions": 11,
+   "queue": "flake.gate",
+   "run_s": {
+    "n": 15,
+    "p50": 1208.169,
+    "p95": 2553.104
+   },
+   "wait_s": {
+    "n": 16,
+    "p50": 1.414,
+    "p95": 3.894
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 271,
+    "failed": 49,
+    "leased": 2,
+    "ready": 9
+   },
+   "finished": {
+    "1h": 2,
+    "24h": 19
+   },
+   "leases": [
+    {
+     "holder": "uid:1000:gluk/gate-runner",
+     "id": 4258,
+     "lease_left_s": 763.611,
+     "running_s": 2784.506
+    },
+    {
+     "holder": "uid:1000:gluk/gate-runner",
+     "id": 4264,
+     "lease_left_s": 763.62,
+     "running_s": 2784.499
+    }
+   ],
+   "node_lost": 0,
+   "oldest_ready_age_s": 5204.066,
+   "preemptions": 352,
+   "queue": "gate.change",
+   "run_s": {
+    "n": 14,
+    "p50": 1836.192,
+    "p95": 3373.683
+   },
+   "wait_s": {
+    "n": 17,
+    "p50": 224.95,
+    "p95": 3203.486
+   }
+  },
+  {
+   "counts": {
+    "dead": 0,
+    "done": 0,
+    "failed": 2,
+    "leased": 0,
+    "ready": 0
+   },
+   "finished": {
+    "1h": 0,
+    "24h": 0
+   },
+   "leases": [],
+   "node_lost": 0,
+   "oldest_ready_age_s": null,
+   "preemptions": 0,
+   "queue": "aether.oomprobe",
+   "run_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   },
+   "wait_s": {
+    "n": 0,
+    "p50": null,
+    "p95": null
+   }
+  }
+ ]
+}

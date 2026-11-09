@@ -143,7 +143,7 @@ func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason
-	case row.Seat == "(empty)":
+	case row.Seat == "(empty)" && w.NeedsSeat():
 		return "no seat cast"
 	case strings.HasSuffix(row.Seat, "(unreachable)"):
 		return "seat aria is gone; re-cast"
