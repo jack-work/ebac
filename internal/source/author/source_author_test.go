@@ -3,6 +3,7 @@ package author
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func authorKinds(ev []model.Event) map[string]model.Tier {
 
 func TestAuthorDiff(t *testing.T) {
 	st := &model.AuthorState{}
-	if ev := authorDiff(st, []forge.AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}); len(ev) != 0 {
+	if ev := authorDiff(st, []forge.AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}, time.Time{}); len(ev) != 0 {
 		t.Fatalf("first round must only record: %+v", ev)
 	}
 	ev := authorDiff(st, []forge.AuthoredPR{
@@ -40,7 +41,7 @@ func TestAuthorDiff(t *testing.T) {
 		apr(4, "OPEN", false, "d"),   // new -> wake
 		apr(5, "OPEN", true, "e"),    // new draft -> record
 		apr(6, "MERGED", false, "f"), // opened and merged between rounds -> wake merged
-	})
+	}, time.Time{})
 	got := authorKinds(ev)
 	want := map[string]model.Tier{
 		"bic/aether#1 author_pr_merged": model.TierWake,
@@ -60,7 +61,7 @@ func TestAuthorDiff(t *testing.T) {
 	ev = authorDiff(st, []forge.AuthoredPR{
 		apr(1, "MERGED", false, "a"), apr(2, "OPEN", false, "b2"), apr(3, "MERGED", false, "c"),
 		apr(4, "CLOSED", false, "d"), apr(5, "OPEN", true, "e"), apr(6, "MERGED", false, "f"),
-	})
+	}, time.Time{})
 	got = authorKinds(ev)
 	if got["bic/aether#2 author_pr_head_moved"] != model.TierRecord || got["bic/aether#4 author_pr_closed"] != model.TierRecord || len(got) != 2 {
 		t.Fatalf("head move + close must be recorded only: %v", got)
@@ -68,7 +69,7 @@ func TestAuthorDiff(t *testing.T) {
 	if (&model.Delta{Events: ev}).WakeWorthy() {
 		t.Fatal("a round of closes and head moves woke the seat")
 	}
-	ev = authorDiff(st, []forge.AuthoredPR{apr(4, "OPEN", false, "d")})
+	ev = authorDiff(st, []forge.AuthoredPR{apr(4, "OPEN", false, "d")}, time.Time{})
 	if authorKinds(ev)["bic/aether#4 author_pr_reopened"] != model.TierRecord {
 		t.Fatalf("reopen: %v", authorKinds(ev))
 	}
@@ -78,7 +79,7 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 	t.Setenv("EBAC_FAKE_LOG", t.TempDir()+"/calls")
 	g := forgetest.FakeGH(t, "author")
 	since := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-	prs, err := g.ListAuthoredPRs(context.Background(), "bic/aether", "Chiqun-Zhang", since)
+	prs, err := g.ListAuthoredPRs(context.Background(), "bic/aether", "Chiqun-Zhang", since, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 	}
 	b, _ := os.ReadFile(os.Getenv("EBAC_FAKE_LOG"))
 	args := string(b)
-	for _, want := range []string{"--author Chiqun-Zhang", "--state all", "updated:>=2026-10-15T00:00:00Z", "--repo bic/aether"} {
+	for _, want := range []string{"--author Chiqun-Zhang", "--state all", "updated:>=2026-10-15T00:00:00Z sort:updated-desc", "--limit 50", "--repo bic/aether"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("gh args lack %q: %s", want, args)
 		}
@@ -163,18 +164,167 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	}
 }
 
-// A busy author passed the old 200 limit; the form keeps open PRs + those updated in the last week, the rest leave it.
-func TestAuthoredViewKeepsOpenAndRecent(t *testing.T) {
-	now := time.Date(2026, 11, 9, 20, 0, 0, 0, time.UTC)
-	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
-	prs := []forge.AuthoredPR{
-		{Repo: "r", Number: 1, State: "OPEN", Updated: ago(60 * 24 * time.Hour)},   // old but open: kept
-		{Repo: "r", Number: 2, State: "MERGED", Updated: ago(2 * 24 * time.Hour)},  // recent merge: kept
-		{Repo: "r", Number: 3, State: "MERGED", Updated: ago(10 * 24 * time.Hour)}, // old merge: dropped
-		{Repo: "r", Number: 4, State: "CLOSED", Updated: ago(30 * 24 * time.Hour)}, // old close: dropped
+// An unseen PR that re-entered the window (updated again, created before the previous good round) is adopted
+// silently; one created after it is NEW. Control: with no previous round known, unseen is news (as before).
+func TestAuthorDiffReentryIsNotNews(t *testing.T) {
+	prev := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	old := apr(10, "OPEN", false, "x")
+	old.Created = "2026-09-01T00:00:00Z"
+	fresh := apr(11, "OPEN", false, "y")
+	fresh.Created = "2026-11-09T12:30:00Z"
+	oldMerge := apr(12, "MERGED", false, "z")
+	oldMerge.Created, oldMerge.Merged = "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z"
+	st := &model.AuthorState{Seen: map[string]model.AuthorSeen{"bic/aether#1": {State: "OPEN"}}}
+	got := authorKinds(authorDiff(st, []forge.AuthoredPR{old, fresh, oldMerge}, prev))
+	if len(got) != 1 || got["bic/aether#11 author_pr_new"] != model.TierWake {
+		t.Fatalf("re-entry: %v; want only #11 new", got)
 	}
-	got := authoredView(prs, now)
-	if len(got) != 2 || got["r#1"].Number != 1 || got["r#2"].Number != 2 {
-		t.Fatalf("authoredView = %v; want r#1 (open) + r#2 (recent)", got)
+	if _, ok := st.Seen["bic/aether#10"]; !ok {
+		t.Fatal("a re-entered PR must still be adopted into seen")
+	}
+	st = &model.AuthorState{Seen: map[string]model.AuthorSeen{"bic/aether#1": {State: "OPEN"}}}
+	if got := authorKinds(authorDiff(st, []forge.AuthoredPR{old}, time.Time{})); got["bic/aether#10 author_pr_new"] != model.TierWake {
+		t.Fatalf("control: with no cutoff an unseen PR is news: %v", got)
+	}
+}
+
+func authorRound(t *testing.T, w *model.Critic, scenario string) *plugin.Reply {
+	t.Helper()
+	rep, err := plugin.InProc{"gh": Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}.Call(context.Background(), "gh",
+		plugin.Request{Op: plugin.OpRound, Critic: *w})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rep
+}
+
+func authoredLen(t *testing.T, raw json.RawMessage) int {
+	t.Helper()
+	var m map[string]forge.AuthoredPR
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("authored %s: %v", raw, err)
+	}
+	return len(m)
+}
+
+// author-chiqun: 200 PRs is a window of 50 and no failure; the fetch asks for the newest 50; an unchanged window
+// writes no key. A form written before the window existed (200 seen, no digest) is pruned on its first round.
+func TestAuthorRecentWindow(t *testing.T) {
+	log := t.TempDir() + "/calls"
+	t.Setenv("EBAC_FAKE_LOG", log)
+	w := &model.Critic{Name: "author-x", FormID: "@x", Source: "github-author", Host: "microsoft.ghe.com",
+		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Repos: []string{"bic/aether"}}}
+	// Before rollout: every PR seen, the old 200-entry form.
+	w.Runtime.Author = &model.AuthorState{Seen: map[string]model.AuthorSeen{}}
+	for i := 0; i < 200; i++ {
+		state := "OPEN"
+		if i%3 == 0 {
+			state = "MERGED"
+		}
+		w.Runtime.Author.Seen[fmt.Sprintf("bic/aether#%d", 70000+i)] = model.AuthorSeen{State: state, Head: fmt.Sprintf("%040d", i)[:12]}
+	}
+	w.Runtime.LastSuccess = time.Date(2026, 11, 9, 13, 0, 0, 0, time.UTC)
+
+	rep := authorRound(t, w, "author200")
+	if rep.Error != "" {
+		t.Fatalf("a 200-PR author failed the round: %s", rep.Error)
+	}
+	if n := authoredLen(t, rep.Set["authored"]); n != model.DefaultAuthorRecent {
+		t.Fatalf("authored holds %d PRs; want the newest %d", n, model.DefaultAuthorRecent)
+	}
+	if !strings.Contains(string(rep.Set["authored"]), `"bic/aether#70000"`) || strings.Contains(string(rep.Set["authored"]), `"bic/aether#70050"`) {
+		t.Fatal("the window is not the 50 most recently updated")
+	}
+	if n := len(rep.Critic.Runtime.Author.Seen); n != model.DefaultAuthorRecent {
+		t.Fatalf("seen-state not pruned to the window: %d", n)
+	}
+	if len(rep.Events) != 0 {
+		t.Fatalf("long-known PRs announced as news: %d events", len(rep.Events))
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "--limit 50") || !strings.Contains(string(calls), "sort:updated-desc") {
+		t.Fatalf("the fetch is not the newest 50: %s", calls)
+	}
+
+	// Control: the same window next round writes no key.
+	again := authorRound(t, rep.Critic, "author200")
+	if _, ok := again.Set["authored"]; ok || again.Error != "" {
+		t.Fatalf("an unchanged window wrote authored again (error %q)", again.Error)
+	}
+	// A configured window is honoured.
+	w2 := *rep.Critic
+	w2.Author = &model.AuthorRef{Login: "Chiqun-Zhang", Since: w.Author.Since, Repos: []string{"bic/aether"}, Recent: 7}
+	if n := authoredLen(t, authorRound(t, &w2, "author200").Set["authored"]); n != 7 {
+		t.Fatalf("--recent 7 gave %d", n)
+	}
+}
+
+// Live, through the core: a form written before the window (authored holds 200 entries, seen 200) is pruned to the
+// newest 50 by its first round; the next round leaves the key as it is.
+func TestLiveAuthoredFormPrunedOnFirstRound(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-author-prune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &model.Critic{Name: "livetest-authprune-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeAuthor, Source: "github-author",
+		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), FormID: id,
+		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Repos: []string{"bic/aether"}}}
+	w.Runtime.Author = &model.AuthorState{Seen: map[string]model.AuthorSeen{}}
+	old := map[string]forge.AuthoredPR{}
+	for i := 0; i < 200; i++ {
+		k := fmt.Sprintf("bic/aether#%d", 70000+i)
+		state := "OPEN"
+		if i%3 == 0 {
+			state = "MERGED" // as the fixture has it: no transitions, so no news on the first round
+		}
+		w.Runtime.Author.Seen[k] = model.AuthorSeen{State: state, Head: fmt.Sprintf("%040d", i)[:12]}
+		old[k] = forge.AuthoredPR{Repo: "bic/aether", Number: 70000 + i, Title: strings.Repeat("t", 80), State: "OPEN"}
+	}
+	w.Runtime.LastSuccess = time.Now().UTC()
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Commit(ctx, id, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
+		return map[string]json.RawMessage{"authored": model.MustJSON(old)}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	authored := func() json.RawMessage {
+		t.Helper()
+		cf, err := st.ReadForm(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cf.Keys["authored"]
+	}
+	if n := authoredLen(t, authored()); n != 200 {
+		t.Fatalf("setup: authored holds %d", n)
+	}
+	var out strings.Builder
+	p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"gh": Plugin{GH: forgetest.FakeGH(t, "author200")}.Handle}}
+	if err := p.Poll(ctx, w.Name); err != nil {
+		t.Fatalf("round: %v\n%s", err, out.String())
+	}
+	first := authored()
+	if n := authoredLen(t, first); n != model.DefaultAuthorRecent {
+		t.Fatalf("after the first round authored holds %d; want %d", n, model.DefaultAuthorRecent)
+	}
+	c, _ := st.LoadCritic(ctx, w.Name)
+	if len(c.Runtime.Author.Seen) != model.DefaultAuthorRecent || c.Runtime.LastError != "" {
+		t.Fatalf("seen %d, error %q", len(c.Runtime.Author.Seen), c.Runtime.LastError)
+	}
+	if err := p.Poll(ctx, w.Name); err != nil {
+		t.Fatal(err)
+	}
+	if string(authored()) != string(first) {
+		t.Fatal("an unchanged window rewrote authored")
 	}
 }

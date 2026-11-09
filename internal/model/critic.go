@@ -285,11 +285,28 @@ type AuthorRef struct {
 	// own role form; its target-aria is resolved at every send, so the
 	// alert follows that role's succession without a recast.
 	AlertRole string `json:"alert_role,omitempty"`
+	// Recent is how many of the author's most recently updated PRs the watch
+	// follows (ebac add-author --recent); 0 is DefaultAuthorRecent.
+	Recent int `json:"recent,omitempty"`
 }
 
-// AuthorState lives under system.ebac.runtime: what each PR looked like last round.
+// DefaultAuthorRecent is an author watch's window when none is configured.
+const DefaultAuthorRecent = 50
+
+// Window is the number of recent PRs the watch follows.
+func (a *AuthorRef) Window() int {
+	if a.Recent > 0 {
+		return a.Recent
+	}
+	return DefaultAuthorRecent
+}
+
+// AuthorState lives under system.ebac.runtime: what each PR in the recent
+// window looked like last round, and a digest of the authored key as last
+// set, so an unchanged window is not written again.
 type AuthorState struct {
-	Seen map[string]AuthorSeen `json:"seen,omitempty"`
+	Seen   map[string]AuthorSeen `json:"seen,omitempty"`
+	Window string                `json:"window,omitempty"`
 }
 
 type AuthorSeen struct {

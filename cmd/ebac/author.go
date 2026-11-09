@@ -25,6 +25,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	aria := fs.String("aria", "", "seat cast into the critic's own role form (optional)")
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 5*time.Minute, "poll interval")
+	recent := fs.Int("recent", model.DefaultAuthorRecent, "follow only the author's N most recently updated PRs (all repos together)")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {
 		return err
@@ -32,7 +33,10 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if *login == "" || *repos == "" || *since == "" {
 		return fmt.Errorf("--login, --repo and --since are required")
 	}
-	ref := &model.AuthorRef{Login: *login, AlertRole: *alert}
+	if *recent < 1 {
+		return fmt.Errorf("--recent %d: want at least 1", *recent)
+	}
+	ref := &model.AuthorRef{Login: *login, AlertRole: *alert, Recent: *recent}
 	var err error
 	if ref.Since, err = time.Parse(time.RFC3339, *since); err != nil {
 		return fmt.Errorf("--since: %w", err)

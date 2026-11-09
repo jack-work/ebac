@@ -2,6 +2,9 @@ package author
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,8 +16,9 @@ import (
 )
 
 // authorWatch follows one GitHub user's pull requests in a list of repos:
-// it records every PR created or updated since the window start on the form
-// (key authored, ids and short fields only) and wakes the alert role on a
+// it records the author's most recently updated PRs since the window start
+// (at most AuthorRef.Window(), default 50, across all repos) on the form (key
+// authored, ids and short fields only) and wakes the alert role on a
 // NEW non-draft PR (a draft turning ready counts as new) or a MERGE. Close,
 // reopen, head moves and new drafts are recorded, never woken. Asked by the
 // Boss through the Decisions Minister, 2026-10-22.
@@ -54,7 +58,12 @@ const (
 
 // authorDiff compares this round's PRs with what was seen. The first round
 // only records: a watch that starts by announcing a week of PRs is noise.
-func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR) []model.Event {
+//
+// Seen covers only the recent window, so a PR may be unseen because it
+// re-entered the window (updated again) rather than because it is new: an
+// unseen PR is NEW, or a fresh MERGE, only if it happened after the previous
+// good round (prevGood); otherwise it is adopted silently.
+func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR, prevGood time.Time) []model.Event {
 	first := st.Seen == nil
 	if first {
 		st.Seen = map[string]model.AuthorSeen{}
@@ -71,6 +80,9 @@ func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR) []model.Event {
 			continue
 		}
 		if !seen {
+			if !after(pr.Created, prevGood) && !(pr.State == "MERGED" && after(pr.Merged, prevGood)) {
+				continue // re-entered the recent window: not news
+			}
 			switch {
 			case pr.State == "MERGED":
 				ev(EvAuthorMerged, model.TierWake, pr) // opened and merged between two rounds
@@ -118,9 +130,10 @@ func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, e
 		w.Runtime.Author = &model.AuthorState{}
 	}
 
+	n := a.Window()
 	var prs []forge.AuthoredPR
 	for _, repo := range a.Repos {
-		got, err := gh.ListAuthoredPRs(ctx, repo, a.Login, a.Since)
+		got, err := gh.ListAuthoredPRs(ctx, repo, a.Login, a.Since, n)
 		if err != nil {
 			w.Runtime.ConsecutiveFailures++
 			w.Runtime.LastError = err.Error()
@@ -129,13 +142,61 @@ func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, e
 		}
 		prs = append(prs, got...)
 	}
-	sort.Slice(prs, func(i, j int) bool { return prs[i].Key() < prs[j].Key() })
+	prs = recentWindow(prs, n)
+	prevGood := w.Runtime.LastSuccess
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	rep.Events = plugin.Wire(authorDiff(w.Runtime.Author, prs))
-	rep.SetKey("authored", authoredView(prs, time.Now()))
+	st := w.Runtime.Author
+	rep.Events = plugin.Wire(authorDiff(st, prs, prevGood))
+	// Seen and the authored key hold the window and nothing else: what left it (older, or merged/closed long ago)
+	// is dropped, which also prunes a form written before the window existed on its first round.
+	keep := map[string]bool{}
+	for _, pr := range prs {
+		keep[pr.Key()] = true
+	}
+	for k := range st.Seen {
+		if !keep[k] {
+			delete(st.Seen, k)
+		}
+	}
+	view := authoredView(prs)
+	raw := model.MustJSON(view)
+	if d := digest(raw); d != st.Window {
+		rep.Set = map[string]json.RawMessage{"authored": raw}
+		st.Window = d
+	}
 	return rep, nil
+}
+
+// recentWindow is the n most recently updated PRs across every repo, sorted by key.
+func recentWindow(prs []forge.AuthoredPR, n int) []forge.AuthoredPR {
+	sort.SliceStable(prs, func(i, j int) bool {
+		if prs[i].Updated != prs[j].Updated {
+			return prs[i].Updated > prs[j].Updated // RFC 3339 UTC sorts as text
+		}
+		return prs[i].Key() < prs[j].Key()
+	})
+	if len(prs) > n {
+		prs = prs[:n]
+	}
+	sort.Slice(prs, func(i, j int) bool { return prs[i].Key() < prs[j].Key() })
+	return prs
+}
+
+// after says whether ts is at or after t. With no cutoff, or a time that
+// cannot be read, it says yes: an unseen PR is news unless shown otherwise.
+func after(ts string, t time.Time) bool {
+	if t.IsZero() || ts == "" {
+		return true
+	}
+	at, err := time.Parse(time.RFC3339, ts)
+	return err != nil || !at.Before(t)
+}
+
+func digest(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:8])
 }
 
 func authorBrief(w *model.Critic, events []model.Event) string {
@@ -169,18 +230,10 @@ func countWake(events []model.Event) int {
 	return n
 }
 
-// authoredRecent: merged/closed PRs stay in key authored this long after their last update, then leave the form (they
-// stay in the runtime Seen map for diffing). Open PRs always stay. Keeps the form under its budget for a busy author.
-const authoredRecent = 7 * 24 * time.Hour
-
-func authoredView(prs []forge.AuthoredPR, now time.Time) map[string]forge.AuthoredPR {
+// authoredView is the authored key: the recent window, by PR key.
+func authoredView(prs []forge.AuthoredPR) map[string]forge.AuthoredPR {
 	out := map[string]forge.AuthoredPR{}
 	for _, pr := range prs {
-		if pr.State != "OPEN" {
-			if t, err := time.Parse(time.RFC3339, pr.Updated); err == nil && now.Sub(t) > authoredRecent {
-				continue
-			}
-		}
 		out[pr.Key()] = pr
 	}
 	return out

@@ -93,6 +93,31 @@ func HelperProcess(t *testing.T) {
 			// The merge is stamped relative to now: the form's authored key keeps a closed PR only while it was
 			// updated in the last week, so a fixed date aged this fixture out of the view (2026-11-09).
 			`"headRefOid":"ce1bd297dddd","createdAt":"2026-10-22T19:29:02Z","updatedAt":"` + recent + `","mergedAt":"` + recent + `"}]`)
+	case "author200":
+		// 200 PRs, newest update first as `sort:updated-desc` returns them; it ignores --limit, so the caller's own
+		// cap is what is tested. Every one was created and merged long ago: none is news after the baseline.
+		if p := os.Getenv("EBAC_FAKE_LOG"); p != "" {
+			f, _ := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			fmt.Fprintf(f, "CALL %s\n", strings.Join(rest, " "))
+			f.Close()
+		}
+		base := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+		var b strings.Builder
+		b.WriteString("[")
+		for i := 0; i < 200; i++ {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			at := base.Add(-time.Duration(i) * time.Hour).Format(time.RFC3339)
+			state, merged := "OPEN", "0001-01-01T00:00:00Z"
+			if i%3 == 0 {
+				state, merged = "MERGED", at
+			}
+			fmt.Fprintf(&b, `{"number":%d,"url":"https://x/pull/%d","title":"pr %d","state":"%s","isDraft":false,"headRefOid":"%040d",`+
+				`"createdAt":"2026-09-01T00:00:00Z","updatedAt":"%s","mergedAt":"%s"}`, 70000+i, 70000+i, i, state, i, at, merged)
+		}
+		b.WriteString("]")
+		os.Stdout.WriteString(b.String())
 	case "pending":
 		os.Stdout.WriteString(pendingJSON)
 	case "paginate":

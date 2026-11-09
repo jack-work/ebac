@@ -10,11 +10,7 @@ import (
 	"github.com/gluck/ebac/internal/model"
 )
 
-const (
-	authorTitleBytes = 120
-	// gh paginates; a busy author passed 200 PRs in under four weeks (author-chiqun, 2026-11-09: 209).
-	authorListLimit = 1000
-)
+const authorTitleBytes = 120
 
 // AuthoredPR is one PR on the form: short fields only.
 type AuthoredPR struct {
@@ -32,11 +28,13 @@ type AuthoredPR struct {
 
 func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number) }
 
-// ListAuthoredPRs lists one author's PRs in a repo updated since a time,
-// every state.
-func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time.Time) ([]AuthoredPR, error) {
+// ListAuthoredPRs lists one author's most recently updated PRs in a repo,
+// at most limit, updated since a time, every state. A busy author's older PRs
+// are simply not fetched: the window is the newest limit, never a failure
+// (author-chiqun passed 200 PRs on 2026-11-09).
+func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time.Time, limit int) ([]AuthoredPR, error) {
 	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", "all",
-		"--search", "updated:>=" + since.UTC().Format(time.RFC3339), "--limit", fmt.Sprint(authorListLimit),
+		"--search", "updated:>=" + since.UTC().Format(time.RFC3339) + " sort:updated-desc", "--limit", fmt.Sprint(limit),
 		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt"}
 	out, err := g.run(ctx, args, nil)
 	if err != nil {
@@ -55,9 +53,6 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 	}
 	if err := json.Unmarshal(out, &rows); err != nil {
 		return nil, fmt.Errorf("decode pr list: %w", err)
-	}
-	if len(rows) >= authorListLimit {
-		return nil, fmt.Errorf("%s: %d PRs hit the list limit; narrow the window", repo, len(rows))
 	}
 	prs := make([]AuthoredPR, 0, len(rows))
 	for _, r := range rows {
