@@ -68,11 +68,19 @@ type Event struct {
 	// otherwise byte-for-byte identical Events and collapse to one.
 	ReviewID string `json:"review_id,omitempty"`
 	Author   string `json:"author,omitempty"`
+	// AuthorID is the sender's stable id where the source has one (Teams:
+	// 8:orgid:<guid>), so a trigger rule can match a person whose display
+	// name is blank or changes.
+	AuthorID string `json:"author_id,omitempty"`
 	IsBot    bool   `json:"is_bot,omitempty"`
 	Stamped  bool   `json:"stamped,omitempty"`
 	Path     string `json:"path,omitempty"`
 	URL      string `json:"url,omitempty"`
 	Detail   string `json:"detail,omitempty"`
+	// Text is the full message text, for trigger rules only (contains,
+	// regex): never persisted, because pending events are stored and the
+	// body already lives in the inbox.
+	Text string `json:"-"`
 }
 
 func (e Event) Line() string {

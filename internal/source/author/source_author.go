@@ -124,7 +124,7 @@ func pollAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	events := authorDiff(w.Runtime.Author, prs)
+	events, _ := p.Classify(ctx, w, authorDiff(w.Runtime.Author, prs))
 	if len(events) > 0 {
 		if len(w.Runtime.PendingEvents) == 0 {
 			w.Runtime.PendingSince = time.Now().UTC()

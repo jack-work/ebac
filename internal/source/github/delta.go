@@ -173,7 +173,7 @@ func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 				ev := model.Event{
 					Kind: model.EvCommentNew, Tier: model.TierWake, PR: key, ThreadID: id,
 					Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body),
+					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body), Text: nc.Body,
 				}
 				// Our own words never wake us.
 				if strings.EqualFold(nc.Author, me) || nc.IsBot || nt.IsResolved {
@@ -186,7 +186,7 @@ func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 				ev := model.Event{
 					Kind: model.EvCommentEdited, Tier: model.TierWake, PR: key, ThreadID: id,
 					Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body),
+					Path: nt.Path, URL: nc.URL, Detail: model.FirstLine(nc.Body), Text: nc.Body,
 				}
 				if strings.EqualFold(nc.Author, me) || nc.IsBot || nt.IsResolved {
 					ev.Tier = model.TierRecord
@@ -280,7 +280,7 @@ func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 			ev := model.Event{
 				Kind: model.EvPRCommentNew, Tier: model.TierWake, PR: key,
 				Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-				URL: nc.URL, Detail: model.FirstLine(nc.Body),
+				URL: nc.URL, Detail: model.FirstLine(nc.Body), Text: nc.Body,
 			}
 			if strings.EqualFold(nc.Author, me) || nc.IsBot || isAutomatonAck(nc.Body) {
 				ev.Tier = model.TierRecord
@@ -292,7 +292,7 @@ func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 			ev := model.Event{
 				Kind: model.EvPRCommentEdited, Tier: model.TierWake, PR: key,
 				Comment: nc.ID, Author: nc.Author, IsBot: nc.IsBot,
-				URL: nc.URL, Detail: model.FirstLine(nc.Body),
+				URL: nc.URL, Detail: model.FirstLine(nc.Body), Text: nc.Body,
 			}
 			if strings.EqualFold(nc.Author, me) || nc.IsBot || isAutomatonAck(nc.Body) {
 				ev.Tier = model.TierRecord

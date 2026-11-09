@@ -347,7 +347,7 @@ func teamsCharge(w *model.Critic) string {
 	return "YOUR JOB — TEAMS WATCH\n" +
 		"  You are told of every new or edited message in the Teams chat " + fmt.Sprintf("%q", topic) + ". Each delivery names\n" +
 		"  the round; the messages are in key inbox (sender, time, kind, text cut at 1.5 KB, has_image, and the exact\n" +
-		"  tomb command for the full text and images). Messages from quiet senders are recorded but do not wake you.\n" +
+		"  tomb command for the full text and images). Your form key trigger decides who wakes you (first match wins; edit it with figaro set); recorded messages are in the inbox but do not wake you.\n" +
 		"  ebac only reads this chat; it never posts to it. If key gone appears, the chat is unreadable: polling has\n" +
 		"  stopped and the form says what to do.\n"
 }

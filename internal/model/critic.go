@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -57,6 +58,12 @@ type Runtime struct {
 	DeliveredRound int       `json:"delivered_round,omitempty"`
 
 	AllClosedSince *time.Time `json:"all_closed_since,omitempty"`
+
+	// TriggerGood is the last rule set that parsed: what stays in force while
+	// the form's trigger key is broken. TriggerErr is the error last written
+	// to the form's trigger_error key ("" when that key is absent).
+	TriggerGood json.RawMessage `json:"trigger_good,omitempty"`
+	TriggerErr  string          `json:"trigger_err,omitempty"`
 
 	// Succession bookkeeping. Generation counts completed hand-overs, so a
 	// critic can say how many seats it has burned through.
@@ -144,6 +151,13 @@ type Critic struct {
 
 	Stop    StopConditions `json:"stop"`
 	Runtime Runtime        `json:"runtime"`
+
+	// Trigger is the role form's key trigger as read with the critic: the
+	// rules, owned by whoever holds the role, never part of the config.
+	Trigger json.RawMessage `json:"-"`
+	// LegacyQuiet is a pre-trigger chat.quiet list, read only so the first
+	// round of a trigger-aware binary can turn it into rules.
+	LegacyQuiet []string `json:"-"`
 }
 
 type Worktree struct {
@@ -281,8 +295,6 @@ type AuthorSeen struct {
 type ChatRef struct {
 	ID    string `json:"id"`
 	Topic string `json:"topic,omitempty"`
-	// Quiet senders go to the inbox but never wake the seat.
-	Quiet []string `json:"quiet,omitempty"`
 }
 
 const ModeAuthor Mode = "author"

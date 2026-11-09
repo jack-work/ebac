@@ -17,6 +17,7 @@ import (
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/tomb"
+	"github.com/gluck/ebac/internal/trigger"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
@@ -74,15 +75,6 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 			}
 		}
 	}
-	quiet := map[string]bool{}
-	for _, q := range chat.Quiet {
-		quiet[strings.ToLower(q)] = true
-	}
-	// A quiet sender is matched by name, by sender id, or by the bare orgid guid.
-	isQuiet := func(m tomb.TeamsMsg, who string) bool {
-		id := strings.ToLower(m.SenderID())
-		return quiet[strings.ToLower(who)] || (id != "" && (quiet[id] || quiet[strings.TrimPrefix(id, "8:orgid:")]))
-	}
 	for _, m := range msgs {
 		if !m.IsMessage() || m.ID == "" {
 			continue
@@ -105,14 +97,16 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		case d == "deleted":
 			continue // created and deleted between two rounds
 		}
+		// The source only translates: who wakes is the core's trigger rules.
 		tier := model.TierWake
-		who := m.Sender(st.Names)
-		if kind == "teams_deleted" || isQuiet(m, who) {
+		if kind == "teams_deleted" {
 			tier = model.TierRecord
 		}
-		body, cut := model.CutBody(teamsText(m.Content), teamsBodyBytes)
+		who := m.Sender(st.Names)
+		text := teamsText(m.Content)
+		body, cut := model.CutBody(text, teamsBodyBytes)
 		events = append(events, model.Event{Kind: model.EventKind(kind), Tier: tier, PR: model.PRKey(chat.Topic), Comment: m.ID, Author: who,
-			Detail: model.FirstLine(body)})
+			AuthorID: m.SenderID(), Detail: model.FirstLine(body), Text: text})
 		it := form.InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.SenderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(),
 			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
 		if it.HasImage {
@@ -186,7 +180,14 @@ func pollTeams(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
+	if err := migrateQuiet(ctx, p, w); err != nil {
+		return fmt.Errorf("%s: %w", w.Name, err)
+	}
 	events, items := teamsDiff(st, msgs, w.Chat)
+	events, dropped := p.Classify(ctx, w, events)
+	for _, e := range dropped {
+		delete(items, "teams-"+e.Comment)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, it := range items {
 		it.At = now
@@ -306,4 +307,31 @@ func teamsGone(ctx context.Context, p *poll.Poller, w *model.Critic, cause error
 	_ = systemd.DisableTimer(w.Name)
 	fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.StopReason)
 	return p.Store.SaveCritic(ctx, w)
+}
+
+// operatorName is the Boss's Teams display name, as older critics listed him
+// in chat.quiet. The default rules record him by id, so migration drops it.
+const operatorName = "Jack Kelliher"
+
+// migrateQuiet turns a pre-trigger chat.quiet list into rules on the role
+// form, once: the Teams default set with every quiet sender but the operator
+// recorded before the final default. A form that already has rules keeps
+// them. The legacy field is not written back, so it is gone after this round.
+func migrateQuiet(ctx context.Context, p *poll.Poller, w *model.Critic) error {
+	if len(w.LegacyQuiet) == 0 || len(w.Trigger) > 0 {
+		return nil
+	}
+	rules := trigger.MigrateQuiet(w.LegacyQuiet, operatorName)
+	raw := rules.JSON()
+	if err := p.Store.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		if len(cur[trigger.FormKey]) > 0 {
+			return nil, nil // set by the role holder since the read
+		}
+		return map[string]json.RawMessage{trigger.FormKey: raw}, nil
+	}); err != nil {
+		return fmt.Errorf("migrate quiet %v to %s: %w", w.LegacyQuiet, trigger.FormKey, err)
+	}
+	fmt.Fprintf(p.Out, "%s: migrated quiet %v to %s rules\n", w.Name, w.LegacyQuiet, trigger.FormKey)
+	w.Trigger, w.LegacyQuiet = raw, nil
+	return nil
 }

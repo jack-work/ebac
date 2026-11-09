@@ -15,6 +15,7 @@ import (
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/trigger"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/rpc"
 )
@@ -305,6 +306,15 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 	}
 	w.FormID = f.ID
 	w.Runtime = f.ebac().Runtime
+	w.Trigger = f.Keys[trigger.FormKey]
+	var legacy struct {
+		Chat *struct {
+			Quiet []string `json:"quiet"`
+		} `json:"chat"`
+	}
+	if json.Unmarshal(raw, &legacy) == nil && legacy.Chat != nil {
+		w.LegacyQuiet = legacy.Chat.Quiet
+	}
 	return &w, nil
 }
 
@@ -441,6 +451,19 @@ func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// SeedTrigger writes the source's default trigger rules onto a new critic's
+// role form, so the holder sees, and can edit, the rules in force.
+func (s *Store) SeedTrigger(ctx context.Context, w *model.Critic) error {
+	raw := trigger.DefaultFor(w.SourceName()).JSON()
+	if err := s.Commit(ctx, w.FormID, func(map[string]json.RawMessage, EbacState) (map[string]json.RawMessage, []string) {
+		return map[string]json.RawMessage{trigger.FormKey: raw}, nil
+	}); err != nil {
+		return fmt.Errorf("seed %s rules on %s: %w", trigger.FormKey, w.FormID, err)
+	}
+	w.Trigger = raw
+	return nil
 }
 
 // SaveCritic writes config and runtime.

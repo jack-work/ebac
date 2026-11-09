@@ -15,7 +15,9 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/trigger"
 )
 
 // ---------- ls / show ----------
@@ -130,6 +132,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	if w.Runtime.LastError != "" {
 		fmt.Printf("error     %s\n", w.Runtime.LastError)
 	}
+	fmt.Printf("trigger   %s\n", describeTrigger(w))
 	if n := len(w.Runtime.PendingEvents); n > 0 {
 		fmt.Printf("pending   %d undelivered event(s), retry %d, next %s\n",
 			n, w.Runtime.RetryCount, stamp(w.Runtime.NextRetryAt))
@@ -150,7 +153,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		return nil
 	}
 	if w.Chat != nil {
-		fmt.Printf("chat      %s (%s), quiet: %s\n", w.Chat.Topic, w.Chat.ID, strings.Join(w.Chat.Quiet, ", "))
+		fmt.Printf("chat      %s (%s)\n", w.Chat.Topic, w.Chat.ID)
 		if t := w.Runtime.Teams; t != nil {
 			fmt.Printf("seen      %d message(s), gone streak %d\n", len(t.Seen), t.GoneStreak)
 		}
@@ -197,4 +200,19 @@ func stamp(t time.Time) string {
 		return "never"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// describeTrigger is the rule set in force, compact, and why it is not the
+// form's own value when it is not.
+func describeTrigger(w *model.Critic) string {
+	rules, errText := poll.Rules(w)
+	from := "form key " + trigger.FormKey
+	if len(w.Trigger) == 0 {
+		from = "source default (no " + trigger.FormKey + " key)"
+	}
+	out := fmt.Sprintf("%s: %s", from, rules.JSON())
+	if errText != "" {
+		out += "\n          ERROR " + errText
+	}
+	return out
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/tomb"
+	"github.com/gluck/ebac/internal/trigger"
 )
 
 func tmsg(id, from, content string) tomb.TeamsMsg {
@@ -22,7 +23,7 @@ func tmsg(id, from, content string) tomb.TeamsMsg {
 }
 
 func testChat() *model.ChatRef {
-	return &model.ChatRef{ID: "19:abc@thread.v2", Topic: "MD1 + Cowork", Quiet: []string{"Jack Kelliher"}}
+	return &model.ChatRef{ID: "19:abc@thread.v2", Topic: "MD1 + Cowork"}
 }
 
 func baseline(t *testing.T, msgs ...tomb.TeamsMsg) *model.TeamsState {
@@ -70,17 +71,34 @@ func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
 	}
 }
 
-func TestTeamsQuietSenderIsRecordedNotWoken(t *testing.T) {
+// teamsRules is what the core does to a teams round: the default set, or a
+// migrated legacy quiet list.
+func teamsRules(t *testing.T, ev []model.Event, rules trigger.Rules) map[string]model.Event {
+	t.Helper()
+	kept, dropped := rules.Apply(ev)
+	if len(dropped) != 0 {
+		t.Fatalf("teams defaults dropped %+v", dropped)
+	}
+	out := map[string]model.Event{}
+	for _, e := range kept {
+		out[e.Comment] = e
+	}
+	return out
+}
+
+// A legacy quiet sender, migrated, is recorded (any case) and still reaches the inbox.
+func TestTeamsMigratedQuietSenderIsRecordedNotWoken(t *testing.T) {
 	st := baseline(t)
-	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("300", "jack kelliher", "note to self")}, testChat())
-	if len(ev) != 1 || ev[0].Tier != model.TierRecord {
-		t.Fatalf("quiet sender (case-insensitive) must be TierRecord: %+v", ev)
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{tmsg("300", "liang shi", "note"), tmsg("301", "Akshay", "control")}, testChat())
+	by := teamsRules(t, ev, trigger.MigrateQuiet([]string{"Liang Shi", "Jack Kelliher"}, operatorName))
+	if by["300"].Tier != model.TierRecord {
+		t.Fatalf("migrated quiet sender (case-insensitive) must be TierRecord: %+v", by["300"])
+	}
+	if by["301"].Tier != model.TierWake {
+		t.Fatalf("control: a sender not in the quiet list must wake: %+v", by["301"])
 	}
 	if _, ok := items["teams-300"]; !ok {
 		t.Fatal("quiet sender's message must still reach the inbox")
-	}
-	if (&model.Delta{Events: ev}).WakeWorthy() {
-		t.Fatal("a quiet-only round is wake-worthy")
 	}
 }
 
@@ -167,6 +185,12 @@ func TestTombHelperProcess(t *testing.T) {
 	case "ok2":
 		os.Stdout.WriteString(`{"messages":[{"id":"1","messagetype":"RichText/Html","imdisplayname":"A","content":"<p>x</p>"},` +
 			`{"id":"2","messagetype":"RichText/Html","imdisplayname":"Akshay","content":"<p>please look</p>"}]}`)
+		os.Exit(0)
+	case "ok3", "ok4":
+		n := scenario[2:]
+		os.Stdout.WriteString(`{"messages":[{"id":"1","messagetype":"RichText/Html","imdisplayname":"A","content":"<p>x</p>"},` +
+			`{"id":"2","messagetype":"RichText/Html","imdisplayname":"Akshay","content":"<p>please look</p>"},` +
+			`{"id":"` + n + `","messagetype":"RichText/Html","imdisplayname":"Akshay","content":"<p>again ` + n + `</p>"}]}`)
 		os.Exit(0)
 	case "gone404":
 		os.Stderr.WriteString("Error: chat API returned 404\n")
@@ -315,7 +339,7 @@ func from(m tomb.TeamsMsg, id string) tomb.TeamsMsg {
 func TestTeamsBlankNameUsesLearnedNameAndStaysQuiet(t *testing.T) {
 	st := baseline(t, from(tmsg("600", "Jack Kelliher", "named row"), jackID))
 	ev, items := teamsDiff(st, []tomb.TeamsMsg{from(tmsg("601", "", "blank row"), jackID)}, testChat())
-	if len(ev) != 1 || ev[0].Author != "Jack Kelliher" || ev[0].Tier != model.TierRecord {
+	if len(ev) != 1 || ev[0].Author != "Jack Kelliher" || teamsRules(t, ev, trigger.Teams())["601"].Tier != model.TierRecord {
 		t.Fatalf("blank-name row from a quiet sender: %+v", ev)
 	}
 	if it := items["teams-601"]; it.By != "Jack Kelliher" || it.FromID != jackID {
@@ -323,9 +347,8 @@ func TestTeamsBlankNameUsesLearnedNameAndStaysQuiet(t *testing.T) {
 	}
 }
 
-func TestTeamsUnknownBlankSenderShowsIDAndQuietMatchesByID(t *testing.T) {
+func TestTeamsUnknownBlankSenderShowsIDAndOperatorMatchesByID(t *testing.T) {
 	chat := testChat()
-	chat.Quiet = []string{"bc3cb0f4-1239-4ec7-a528-4913522f79c5"} // bare guid
 	st := &model.TeamsState{}
 	teamsDiff(st, nil, chat)
 	ev, _ := teamsDiff(st, []tomb.TeamsMsg{
@@ -335,13 +358,13 @@ func TestTeamsUnknownBlankSenderShowsIDAndQuietMatchesByID(t *testing.T) {
 	if len(ev) != 2 {
 		t.Fatalf("events: %+v", ev)
 	}
-	byID := map[string]model.Event{ev[0].Comment: ev[0], ev[1].Comment: ev[1]}
+	byID := teamsRules(t, ev, trigger.Teams())
 	if e := byID["700"]; e.Author != jackID || e.Tier != model.TierRecord {
-		t.Fatalf("quiet by guid with no name: %+v", e)
+		t.Fatalf("operator by id with no name: %+v", e)
 	}
-	// Control: an id that is not quiet still wakes, and is named by its id.
+	// Control: an id that is not the operator still wakes, and is named by its id.
 	if e := byID["701"]; e.Author != "8:orgid:00000000-0000-0000-0000-000000000001" || e.Tier != model.TierWake {
-		t.Fatalf("non-quiet unknown sender: %+v", e)
+		t.Fatalf("non-operator unknown sender: %+v", e)
 	}
 }
 
@@ -351,5 +374,149 @@ func TestTeamsTokenNameFallback(t *testing.T) {
 	m.TokenName = "Liang Shi"
 	if ev, _ := teamsDiff(st, []tomb.TeamsMsg{m}, testChat()); len(ev) != 1 || ev[0].Author != "Liang Shi" {
 		t.Fatalf("token name not used: %+v", ev)
+	}
+}
+
+// The operator never wakes a teams seat under the default rules, with no per-critic list (cheroot 2026-11-09): his
+// message is recorded in the inbox; a non-operator message still wakes; and a figaro-sent message, which goes out
+// under the operator's account carrying the disclosure footer, wakes (cheroot 2026-11-09: the secretary relies on it).
+func TestTeamsOperatorRecordedButDisclosureWakes(t *testing.T) {
+	chat := testChat()
+	st := &model.TeamsState{}
+	teamsDiff(st, nil, chat)
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{
+		from(tmsg("900", "Jack Kelliher", "boss note"), trigger.OperatorSender),
+		from(tmsg("901", "Liang Shi", "please look"), "8:orgid:00000000-0000-0000-0000-000000000009"),
+		from(tmsg("902", "Jack Kelliher", "<p>build is red</p><hr><p>Agent-Authored on behalf of Jack Kelliher.</p>"), trigger.OperatorSender),
+		from(tmsg("903", "", "x"), strings.ToUpper(trigger.OperatorSender)),
+	}, chat)
+	by := teamsRules(t, ev, trigger.Teams())
+	if e := by["900"]; e.Tier != model.TierRecord {
+		t.Fatalf("operator message tier %v; want TierRecord (no wake)", e.Tier)
+	}
+	if _, ok := items["teams-900"]; !ok {
+		t.Fatal("operator message missing from the inbox")
+	}
+	if e := by["901"]; e.Tier != model.TierWake {
+		t.Fatalf("control: a non-operator message must still wake, tier %v", e.Tier)
+	}
+	if e := by["902"]; e.Tier != model.TierWake {
+		t.Fatalf("a figaro-sent message (disclosure footer, operator account) must wake, tier %v", e.Tier)
+	}
+	if e := by["903"]; e.Tier != model.TierRecord {
+		t.Fatalf("upper-cased operator id woke: %+v", e)
+	}
+}
+
+// A deletion is recorded, never a wake, under the default rules.
+func TestTeamsDeletionRecordedByDefault(t *testing.T) {
+	st := baseline(t, tmsg("950", "Akshay", "v1"))
+	d := tmsg("950", "Akshay", "")
+	d.Properties = map[string]any{"deletetime": "1"}
+	ev, _ := teamsDiff(st, []tomb.TeamsMsg{d}, testChat())
+	if len(ev) != 1 || ev[0].Kind != "teams_deleted" {
+		t.Fatalf("no deletion event: %+v", ev)
+	}
+	if e := teamsRules(t, ev, trigger.Teams())["950"]; e.Tier != model.TierRecord {
+		t.Fatalf("deletion woke: %+v", e)
+	}
+}
+
+// ---------- live: trigger rules on a real role form ----------
+
+// One teams critic through: a legacy quiet list migrated to rules on its first round; a migrated quiet sender
+// recorded, not woken; a broken rule set that keeps the last good set and says so in trigger_error; and a fixed set
+// that clears the error and is in force on the same round.
+func TestLiveTeamsTriggerMigrationAndFallback(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-trigger")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &model.Critic{Name: "livetest-trigger-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
+		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	// What a pre-trigger binary left on the form: chat.quiet in the critic config.
+	if err := st.Commit(ctx, id, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		var cfg map[string]any
+		_ = json.Unmarshal(cur["critic"], &cfg)
+		cfg["chat"].(map[string]any)["quiet"] = []string{"Jack Kelliher", "Akshay"}
+		return map[string]json.RawMessage{"critic": model.MustJSON(cfg)}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	round := func(scenario string) {
+		t.Helper()
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Tomb: fakeTomb(t, scenario)}
+		if err := p.Poll(ctx, w.Name); err != nil {
+			t.Fatalf("round %s: %v\n%s", scenario, err, out.String())
+		}
+	}
+	keys := func() map[string]json.RawMessage {
+		t.Helper()
+		cf, err := st.ReadForm(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cf.Keys
+	}
+	load := func() *model.Critic {
+		t.Helper()
+		c, err := st.LoadCritic(ctx, w.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	round("ok") // baseline + migration
+	k := keys()
+	if !strings.Contains(string(k["trigger"]), "Akshay") || strings.Contains(string(k["trigger"]), "Jack") {
+		t.Fatalf("migrated trigger = %s; want Akshay recorded and the operator name dropped", k["trigger"])
+	}
+	if strings.Contains(string(k["critic"]), "quiet") {
+		t.Fatalf("legacy quiet still in the critic config: %s", k["critic"])
+	}
+
+	// Akshay is a migrated quiet sender: recorded, so nothing pending and no seat needed.
+	round("ok2")
+	if c := load(); len(c.Runtime.PendingEvents) != 0 || c.Runtime.LastError != "" {
+		t.Fatalf("migrated quiet sender woke: pending %+v err %q", c.Runtime.PendingEvents, c.Runtime.LastError)
+	}
+
+	// A broken set: the last good one (Akshay recorded) stays in force, and the form says why.
+	if err := f.SetJSON(ctx, id, "trigger", json.RawMessage(`[{"from":"x","action":"wake"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	round("ok3")
+	k = keys()
+	if c := load(); len(c.Runtime.PendingEvents) != 0 {
+		t.Fatalf("broken set: Akshay woke, so the last good set was not kept: %+v", c.Runtime.PendingEvents)
+	}
+	if !strings.Contains(string(k["trigger_error"]), "last good set") || !strings.Contains(string(k["trigger_error"]), "last rule must be") {
+		t.Fatalf("trigger_error = %s", k["trigger_error"])
+	}
+
+	// Fixed: in force on this round (Akshay wakes; nobody is seated, so the wake is refused loudly), error removed.
+	if err := f.SetJSON(ctx, id, "trigger", json.RawMessage(`[{"default":true,"action":"wake"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	round("ok4")
+	k = keys()
+	if _, ok := k["trigger_error"]; ok {
+		t.Fatalf("trigger_error survived a good set: %s", k["trigger_error"])
+	}
+	if c := load(); len(c.Runtime.PendingEvents) != 1 || !strings.Contains(c.Runtime.LastError, "no reachable target-aria") {
+		t.Fatalf("fixed set not in force: pending %+v err %q", c.Runtime.PendingEvents, c.Runtime.LastError)
 	}
 }

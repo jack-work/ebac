@@ -22,7 +22,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
-  ebac add-teams --name N --chat ID --topic T --aria SEAT [--quiet "A,B"] [--every 60s]
+  ebac add-teams --name N --chat ID --topic T --aria SEAT [--every 60s]
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--every 5m]
                                             watch one author's PRs: wake on a new PR or a merge
@@ -47,6 +47,17 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
   ebac reconcile [--dry-run]                rectify drift between critics/, forms and timers
+
+Trigger rules (every critic): its role form's key trigger, an ordered JSON list, first match wins; the holder edits
+it with figaro set and ebac reads it every round. add-* writes the source's default set.
+  [{"contains": ["Agent-Authored on behalf of", "Sent by Figaro"], "action": "wake"},
+   {"from": "operator", "action": "record"},
+   {"default": true, "action": "wake"}]
+  match: from | not_from (display name, sender id, bare guid, or "operator" = the Boss), contains (case-insensitive,
+         full text), regex (Go), kind; all given fields must match, a list matches on any entry
+  action: wake | record (inbox only) | drop (neither) | keep (the tier the source chose; PR, author and keel defaults)
+  the last rule must be {"default": true, "action": ...}. A set that does not parse is never applied: the last good
+  set stays in force and the form key trigger_error says why. ebac show prints the set in force.
 
 Global flags: --gh <path> --socket <angelus.sock> --host <ghe host>
 `

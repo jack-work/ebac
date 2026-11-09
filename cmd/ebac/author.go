@@ -75,6 +75,9 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
 	}
+	if err := st.SeedTrigger(ctx, w); err != nil {
+		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
+	}
 	if *aria != "" {
 		if err := model.ValidAriaID(*aria); err != nil {
 			return fmt.Errorf("critic created (role %s), but --aria is bad: %w", formID, err)

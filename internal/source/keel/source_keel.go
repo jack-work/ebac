@@ -218,7 +218,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 				body, cut := model.CutBody(c.Body, keelBodyBytes)
 				quote, _ := model.CutBody(t.Quote, keelQuoteBytes)
 				events = append(events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: t.ID, Comment: c.ID, Author: c.Author,
-					Path: p, Detail: model.FirstLine(body)})
+					Path: p, Detail: model.FirstLine(body), Text: c.Body})
 				items["keel-"+c.ID] = form.InboxItem{Kind: string(kind), By: c.Author, Time: c.Created.UTC().Format(time.RFC3339),
 					Thread: t.ID, Path: p, Line: line, Quote: quote, Body: body, Cut: cut,
 					Fetch: fmt.Sprintf("keel %s, thread %s: GET %s | jq '.paths[%q][] | select(.id==%q)'", ref.Repo, t.ID, ThreadsPath(ref.Repo), p, t.ID)}
@@ -361,7 +361,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 			body, cut := model.CutBody(x.c.Body, keelBodyBytes)
 			quote, _ := model.CutBody(x.t.Quote, keelQuoteBytes)
 			r.events = append(r.events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: x.t.ID, Comment: x.c.ID, Author: e.Signed,
-				Path: x.path, Detail: model.FirstLine(body)})
+				Path: x.path, Detail: model.FirstLine(body), Text: x.c.Body})
 			r.items["keel-"+x.c.ID] = form.InboxItem{Kind: string(kind), By: e.Signed, Time: x.c.Created.UTC().Format(time.RFC3339),
 				Thread: x.t.ID, Path: x.path, Line: line, Quote: quote, Body: body, Cut: cut,
 				Fetch: fmt.Sprintf("keel %s, thread %s: GET %s | jq '.paths[%q][] | select(.id==%q)'", ref.Repo, x.t.ID, ThreadsPath(ref.Repo), x.path, x.t.ID)}
@@ -418,6 +418,10 @@ func pollKeel(ctx context.Context, p *poll.Poller, w *model.Critic, cl *Client) 
 	w.Runtime.LastSuccess = time.Now().UTC()
 
 	events, items, index := round.events, round.items, round.index
+	events, dropped := p.Classify(ctx, w, events)
+	for _, e := range dropped {
+		delete(items, "keel-"+e.Comment)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, it := range items {
 		it.At = now

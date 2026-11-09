@@ -200,6 +200,8 @@ func pollGitHub(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 	if w.Mode == model.ModeReviewer {
 		AsReviewer(delta, p.Me)
 	}
+	// The source's tiers are a suggestion; the critic's trigger rules decide.
+	delta.Events, _ = p.Classify(ctx, w, delta.Events)
 
 	if p.DryRun {
 		fmt.Fprintf(p.Out, "%s: DRY RUN round %d — %s (%d events, %d wake-worthy)\n",

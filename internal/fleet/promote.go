@@ -217,6 +217,9 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 	if err := p.Store.SaveCritic(ctx, c); err != nil {
 		return "", err
 	}
+	if err := p.Store.SeedTrigger(ctx, c); err != nil {
+		return "", err
+	}
 
 	seat, err := p.Fig.NewAria(ctx, cfg.Outfit)
 	if err != nil {
