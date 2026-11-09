@@ -190,8 +190,9 @@ func TestSuperseded(t *testing.T) {
 	if v := Render(h, nil, map[string]string{br: "ffffffffffffffffffffffffffffffffffffffff"}); !has(v.Dupes, "superseded 4246 aether.clippy-pr") || !has(v.Dupes, "tip=ffffffff") {
 		t.Fatalf("moved tip not flagged: %v", v.Dupes)
 	}
-	if v := Render(h, nil, map[string]string{br: ""}); !has(v.Dupes, "tip=gone") {
-		t.Fatalf("deleted branch not flagged: %v", v.Dupes)
+	// absent upstream is unknown (mirror-only branches, e.g. jobs 4378-4401): never flagged.
+	if v := Render(h, nil, map[string]string{br: ""}); len(v.Dupes) != 0 {
+		t.Fatalf("branch absent upstream flagged: %v", v.Dupes)
 	}
 	// main moving under a pinned eval is not supersession.
 	if v := Render(h, nil, map[string]string{"main": "ffffffffffffffffffffffffffffffffffffffff"}); has(v.Dupes, "superseded") {

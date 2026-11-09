@@ -23,7 +23,7 @@ const TipEvery = 5 * time.Minute
 // opaque state): the view it last wrote, and the cached branch tips.
 type State struct {
 	View   *View             `json:"view,omitempty"`
-	Tips   map[string]string `json:"tips,omitempty"` // branch -> tip sha ("" = branch gone)
+	Tips   map[string]string `json:"tips,omitempty"` // branch -> tip sha ("" = absent upstream: unknown)
 	TipsAt time.Time         `json:"tips_at,omitempty"`
 	TipErr string            `json:"tip_err,omitempty"`
 }

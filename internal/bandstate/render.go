@@ -112,8 +112,9 @@ func (j Job) what() string {
 	return w
 }
 
-// Render builds the view. tips maps branch -> tip sha ("" = gone); a branch
-// absent from tips is not checked (no claim either way).
+// Render builds the view. tips maps branch -> tip sha; "" (absent upstream) or
+// a branch missing from tips is UNKNOWN, never flagged: mirror-only branches
+// live on node mirrors, not the forge.
 func Render(h *Hub, utility []string, tips map[string]string) View {
 	now := h.Stats.Hub.Now
 	v := View{Queues: []string{}, Nodes: []string{}, Live: []string{}, Dupes: []string{}}
@@ -272,8 +273,9 @@ func dupes(live []Job) []string {
 // (a nightly eval) is not superseded by the move: never flagged.
 var trunk = map[string]bool{"main": true, "master": true}
 
-// superseded names live jobs whose branch tip has moved off their sha (or
-// whose branch is gone).
+// superseded names live jobs whose branch tip exists upstream and has moved
+// off their sha. A branch absent upstream is unknown (it may be mirror-only),
+// never superseded.
 func superseded(live []Job, tips map[string]string) []string {
 	var out []string
 	for _, j := range live {
@@ -281,15 +283,11 @@ func superseded(live []Job, tips map[string]string) []string {
 		if br == "" || sha == "" || trunk[br] {
 			continue
 		}
-		tip, known := tips[br]
-		if !known || tip == sha {
+		tip := tips[br]
+		if tip == "" || tip == sha {
 			continue
 		}
-		t := "gone"
-		if tip != "" {
-			t = short(tip)
-		}
-		out = append(out, fmt.Sprintf("superseded %d %s %s %s tip=%s", j.ID, j.Queue, j.what(), short(sha), t))
+		out = append(out, fmt.Sprintf("superseded %d %s %s %s tip=%s", j.ID, j.Queue, j.what(), short(sha), short(tip)))
 	}
 	return out
 }
