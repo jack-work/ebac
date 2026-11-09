@@ -2,6 +2,7 @@ package form
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -17,6 +18,11 @@ type Store struct {
 	Fig    *figaro.Figaro
 	Me     string            // the forge login, for protocol text
 	formOf map[string]string // critic name -> form id, for this process
+	// loaded is each critic key as this process last read or wrote it, by
+	// form id: the base of SaveRound's merge (critic_merge.go).
+	loaded map[string]json.RawMessage
+	// Warn receives merge conflicts; nil is os.Stderr.
+	Warn io.Writer
 }
 
 func NewStore(fig *figaro.Figaro) (*Store, error) {
@@ -60,4 +66,16 @@ func ReadJSON(path string, v any) error {
 		return err
 	}
 	return json.Unmarshal(b, v)
+}
+
+// remember records a critic key as this process saw it: the next save merges
+// against it.
+func (s *Store) remember(id string, raw json.RawMessage) {
+	if id == "" || len(raw) == 0 {
+		return
+	}
+	if s.loaded == nil {
+		s.loaded = map[string]json.RawMessage{}
+	}
+	s.loaded[id] = append(json.RawMessage(nil), raw...)
 }

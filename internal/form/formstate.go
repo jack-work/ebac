@@ -417,7 +417,11 @@ func (s *Store) LoadCritic(ctx context.Context, name string) (*model.Critic, err
 	if err != nil {
 		return nil, err
 	}
-	return f.Critic()
+	w, err := f.Critic()
+	if err == nil {
+		s.remember(f.ID, f.Keys["critic"])
+	}
+	return w, err
 }
 
 func (s *Store) LoadSnapshot(ctx context.Context, name string) (*model.Snapshot, error) {
@@ -447,6 +451,7 @@ func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
 		}
 		seen[w.Name] = f.ID
 		s.formOf[w.Name] = f.ID
+		s.remember(f.ID, f.Keys["critic"])
 		out = append(out, w)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -501,7 +506,17 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	}
 	set["harness"] = harness
 	s.formOf[w.Name] = w.FormID
-	return s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
+	// The critic key is merged, never overwritten: a `figaro set critic.<field>` that landed after this process
+	// loaded the critic survives (critic_merge.go).
+	base := s.loaded[w.FormID]
+	var written json.RawMessage
+	var conflicts []string
+	err = s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
+		merged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])
+		if merr != nil {
+			merged, c = cfgRaw, nil // an unreadable form critic: ours is the only sound one
+		}
+		set["critic"], written, conflicts = merged, merged, c
 		sys.Runtime = w.Runtime
 		view := snap
 		if snap != nil {
@@ -556,6 +571,19 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		}
 		return set, remove
 	})
+	if err != nil {
+		return err
+	}
+	s.remember(w.FormID, written)
+	if len(conflicts) > 0 {
+		warn := s.Warn
+		if warn == nil {
+			warn = os.Stderr
+		}
+		fmt.Fprintf(warn, "ebac: critic %s: %s changed on the form during the round; kept the form's value (the round recomputes its own next time)\n",
+			w.Name, strings.Join(conflicts, ", "))
+	}
+	return nil
 }
 
 // retireKeys renames an archived critic's form out of enumeration and frees
