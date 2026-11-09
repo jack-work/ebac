@@ -65,6 +65,10 @@ type Runtime struct {
 	TriggerGood json.RawMessage `json:"trigger_good,omitempty"`
 	TriggerErr  string          `json:"trigger_err,omitempty"`
 
+	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
+	// bandstate.State): the view it last wrote and its cached branch tips.
+	BandHub json.RawMessage `json:"band_hub,omitempty"`
+
 	// Succession bookkeeping. Generation counts completed hand-overs, so a
 	// critic can say how many seats it has burned through.
 	Generation      int    `json:"generation,omitempty"`

@@ -24,6 +24,9 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-keel --name N --repo O/R [--paths GLOB[,GLOB]] [--aria SEAT | --alert @ROLE] --waiting-on "A[,B]"
               [--self "A,B"] [--every 45s]  watch one keel repo's comment threads: wake when A answers (5m with --feed=false)
               [--feed=false] [--keel-url https://H --token-cmd "hush oauth get ebac"]
+  ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
+                                            mirror the band hub (queues, nodes, live jobs, dupes) into a studied
+                                            form (plugin ebac-bandhub); no seat, never a wake, writes only on change
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -90,6 +93,8 @@ func main() {
 		err = cmdAddAuthor(ctx, g, args)
 	case "add-keel":
 		err = cmdAddKeel(ctx, g, args)
+	case "add-band-hub":
+		err = cmdAddBandHub(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
 	case "set-write":

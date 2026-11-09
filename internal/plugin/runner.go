@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 func sprintf(format string, args ...any) string { return fmt.Sprintf(format, args...) }
@@ -37,6 +39,8 @@ func For(source string) (string, error) {
 		return "keel", nil
 	case "teams-chat":
 		return "tomb", nil
+	case model.SourceBandHub:
+		return "bandhub", nil
 	}
 	return "", fmt.Errorf("no plugin serves source %q", source)
 }

@@ -175,6 +175,7 @@ func Adopt(core, from *model.Critic) {
 	r.Teams = f.Teams
 	r.Author = f.Author
 	r.Keel = f.Keel
+	r.BandHub = f.BandHub
 	r.Stopped = f.Stopped
 	r.StopReason = f.StopReason
 }
