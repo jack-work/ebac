@@ -131,10 +131,7 @@ func pollAuthor(ctx context.Context, p *poll.Poller, w *model.Critic) error {
 		}
 		w.Runtime.PendingEvents = poll.MergeEvents(w.Runtime.PendingEvents, events)
 	}
-	authored := map[string]forge.AuthoredPR{}
-	for _, pr := range prs {
-		authored[pr.Key()] = pr
-	}
+	authored := authoredView(prs, time.Now())
 	if err := p.Store.SaveRound(ctx, w, nil, nil, nil); err != nil {
 		return err
 	}
@@ -210,4 +207,21 @@ func countWake(events []model.Event) int {
 		}
 	}
 	return n
+}
+
+// authoredRecent: merged/closed PRs stay in key authored this long after their last update, then leave the form (they
+// stay in the runtime Seen map for diffing). Open PRs always stay. Keeps the form under its budget for a busy author.
+const authoredRecent = 7 * 24 * time.Hour
+
+func authoredView(prs []forge.AuthoredPR, now time.Time) map[string]forge.AuthoredPR {
+	out := map[string]forge.AuthoredPR{}
+	for _, pr := range prs {
+		if pr.State != "OPEN" {
+			if t, err := time.Parse(time.RFC3339, pr.Updated); err == nil && now.Sub(t) > authoredRecent {
+				continue
+			}
+		}
+		out[pr.Key()] = pr
+	}
+	return out
 }

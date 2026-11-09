@@ -161,3 +161,19 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 		t.Fatalf("not stopped at the window end: %+v", c.Runtime)
 	}
 }
+
+// A busy author passed the old 200 limit; the form keeps open PRs + those updated in the last week, the rest leave it.
+func TestAuthoredViewKeepsOpenAndRecent(t *testing.T) {
+	now := time.Date(2026, 11, 9, 20, 0, 0, 0, time.UTC)
+	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
+	prs := []forge.AuthoredPR{
+		{Repo: "r", Number: 1, State: "OPEN", Updated: ago(60 * 24 * time.Hour)},   // old but open: kept
+		{Repo: "r", Number: 2, State: "MERGED", Updated: ago(2 * 24 * time.Hour)},  // recent merge: kept
+		{Repo: "r", Number: 3, State: "MERGED", Updated: ago(10 * 24 * time.Hour)}, // old merge: dropped
+		{Repo: "r", Number: 4, State: "CLOSED", Updated: ago(30 * 24 * time.Hour)}, // old close: dropped
+	}
+	got := authoredView(prs, now)
+	if len(got) != 2 || got["r#1"].Number != 1 || got["r#2"].Number != 2 {
+		t.Fatalf("authoredView = %v; want r#1 (open) + r#2 (recent)", got)
+	}
+}

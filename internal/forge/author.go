@@ -12,7 +12,8 @@ import (
 
 const (
 	authorTitleBytes = 120
-	authorListLimit  = 200
+	// gh paginates; a busy author passed 200 PRs in under four weeks (author-chiqun, 2026-11-09: 209).
+	authorListLimit = 1000
 )
 
 // AuthoredPR is one PR on the form: short fields only.
