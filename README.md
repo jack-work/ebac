@@ -227,6 +227,7 @@ Each upstream is a separate executable next to `ebac` (one Nix output; never fou
 | `ebac-keel` | `keel-threads` |
 | `ebac-tomb` | `teams-chat` |
 | `ebac-bandhub` | `band-hub` (the hub mirror, no seat) |
+| `ebac-roster` | `aria-roster` (roles, holders, lieutenants, live forks from the aria store; no seat) |
 
 Protocol (`internal/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
 stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout or bad reply is a
@@ -245,12 +246,13 @@ sees only what it needs; the others are empty tmpfs dirs. The figaro socket is h
 | `ebac-gh`, `ebac-tomb` | band-cred socket, token cache |
 | `ebac-keel` | keel door |
 | `ebac-bandhub` | band-hub socket (default or the critic's), band-cred socket, token cache |
+| `ebac-roster` | nothing: the core reads the aria store and passes it on stdin |
 
 A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=off`.
 
 **Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
 `authored`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `live`, `dupes`,
-`updated`; PR review none). A reply naming any other key (`target-aria`, `trigger`, ...) is
+`updated`; roster `role:<name>`, `forks`, `updated`; PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
 refused whole and the round fails with the key and plugin named.
 
 ## Layout

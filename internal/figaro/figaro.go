@@ -15,6 +15,8 @@ import (
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/message"
 	"github.com/jack-work/figaro/api/rpc"
+
+	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/transport"
 	"github.com/jack-work/figaro/sdk"
 )
@@ -556,3 +558,26 @@ func IsRefused(err error) bool {
 
 // MintHint is the operator's way round a refused mint: create the seat as its owner, then cast it.
 const MintHint = "ebac holds no grant to mint an aria: create the seat as gluck (figaro new -O default -j), then ebac cast --critic <name> --aria <id>"
+
+// ListArias is the aria store (conversations and forms; the null and outfit
+// anchors are skipped), each row copied field by field into model.Aria.
+func (f *Figaro) ListArias(ctx context.Context) ([]model.Aria, error) {
+	ang, err := f.Angelus()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.Aria, 0, len(resp.Figaros))
+	for _, r := range resp.Figaros {
+		if r.Kind == "null" || r.Kind == "outfit" {
+			continue
+		}
+		out = append(out, model.Aria{ID: r.ID, Handle: r.Handle, Kind: r.Kind, State: r.State, Model: r.Model,
+			Mantra: r.Mantra, Parent: r.Parent, ContextTokens: r.ContextTokens, ContextLimit: r.ContextLimit,
+			TTLMS: r.TTLMS, ExpiresAt: r.ExpiresAt, Name: r.Name, TargetAria: r.TargetAria})
+	}
+	return out, nil
+}

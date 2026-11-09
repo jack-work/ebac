@@ -52,6 +52,9 @@ func Needs(plugin string, c *model.Critic) []Grant {
 	case "bandhub":
 		// The hub, and GHE for the superseded check's branch tips.
 		return []Grant{GrantBandHub, GrantBandCred, GrantCredCache}
+	case "roster":
+		// Its whole input arrives on stdin (Request.Arias): no grant at all.
+		return nil
 	}
 	return nil
 }

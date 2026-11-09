@@ -89,6 +89,9 @@ type Request struct {
 	GH   string `json:"gh,omitempty"`
 	Host string `json:"host,omitempty"`
 
+	// Arias is the aria store, read by the core (roster plugin only).
+	Arias []model.Aria `json:"arias,omitempty"`
+
 	Posts   map[string]*model.Post `json:"posts,omitempty"`   // OpPost
 	Pending []Event                `json:"pending,omitempty"` // OpBrief
 	Retry   int                    `json:"retry,omitempty"`   // OpBrief
@@ -174,6 +177,7 @@ func Adopt(core, from *model.Critic) {
 	r.Author = f.Author
 	r.Keel = f.Keel
 	r.BandHub = f.BandHub
+	r.Roster = f.Roster
 	r.Stopped = f.Stopped
 	r.StopReason = f.StopReason
 }

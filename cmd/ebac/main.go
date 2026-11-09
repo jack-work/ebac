@@ -27,6 +27,10 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
                                             mirror the band hub (queues, nodes, live jobs, dupes) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
+  ebac add-roster [--name roles] [--every 1m]
+                                            the role roster: roles, holders, lieutenants and live transient forks,
+                                            derived from the aria store into a studied form (plugin ebac-roster);
+                                            no seat, never a wake, writes only on change
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -95,6 +99,8 @@ func main() {
 		err = cmdAddKeel(ctx, g, args)
 	case "add-band-hub":
 		err = cmdAddBandHub(ctx, g, args)
+	case "add-roster":
+		err = cmdAddRoster(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
 	case "set-write":

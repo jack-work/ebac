@@ -68,6 +68,9 @@ type Runtime struct {
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
 	BandHub json.RawMessage `json:"band_hub,omitempty"`
+	// Roster is the roster plugin's state, opaque to the core: the keys it
+	// last wrote.
+	Roster json.RawMessage `json:"roster,omitempty"`
 
 	// Succession bookkeeping. Generation counts completed hand-overs, so a
 	// critic can say how many seats it has burned through.
@@ -403,7 +406,32 @@ const SourceBandHub = "band-hub"
 
 // NeedsSeat says whether an empty role is a fault: a mirror is read by its
 // studiers and wakes nobody.
-func (w *Critic) NeedsSeat() bool { return w.SourceName() != SourceBandHub }
+func (w *Critic) NeedsSeat() bool {
+	return w.SourceName() != SourceBandHub && w.SourceName() != SourceRoster
+}
+
+// SourceRoster derives the figaro family's role registry (roles, holders,
+// lieutenants, live transient forks) from the aria store into a studied
+// form. Like the band-hub mirror it has no seat and never wakes anyone.
+const SourceRoster = "aria-roster"
+
+// Aria is one row of the aria store as the core hands it to the roster
+// plugin: the fields the roster reads, copied by name from figaro's list.
+type Aria struct {
+	ID            string `json:"id"`
+	Handle        string `json:"handle,omitempty"`
+	Kind          string `json:"kind,omitempty"` // conversation | form
+	State         string `json:"state,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Mantra        string `json:"mantra,omitempty"`
+	Parent        string `json:"parent,omitempty"`
+	ContextTokens int    `json:"context_tokens,omitempty"`
+	ContextLimit  int    `json:"context_limit,omitempty"`
+	TTLMS         int64  `json:"ttl_ms,omitempty"`
+	ExpiresAt     int64  `json:"expires_at,omitempty"`  // unix millis
+	Name          string `json:"name,omitempty"`        // forms
+	TargetAria    string `json:"target_aria,omitempty"` // a role's holder
+}
 
 // BandRef is a band-hub mirror's configuration.
 type BandRef struct {

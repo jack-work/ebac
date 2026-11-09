@@ -79,7 +79,18 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
-	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget())})
+	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget())}
+	if w.SourceName() == model.SourceRoster {
+		// The roster's whole input is the aria store, read here with the
+		// core's own grant: the plugin has none.
+		if req.Arias, err = p.Fig.ListArias(ctx); err != nil {
+			err = fmt.Errorf("list arias: %w", err)
+		}
+	}
+	var rep *plugin.Reply
+	if err == nil {
+		rep, err = p.call(ctx, w, req)
+	}
 	if err == nil {
 		err = SourceKeysOnly(w.SourceName(), rep)
 	}
@@ -105,6 +116,17 @@ var SourceKeys = map[string][]string{
 	"keel-threads":      {"threads", "blind"},
 	"teams-chat":        {"blind"},
 	model.SourceBandHub: {"queues", "nodes", "live", "dupes", "updated"},
+	// role:<name> is one key per role ("*" is a prefix pattern: one more
+	// segment, no dots, so it cannot reach a nested key).
+	model.SourceRoster: {"role:*", "forks", "updated"},
+}
+
+func keyAllowed(pattern, k string) bool {
+	if pre, ok := strings.CutSuffix(pattern, "*"); ok {
+		rest, ok := strings.CutPrefix(k, pre)
+		return ok && rest != "" && !strings.ContainsAny(rest, ".*")
+	}
+	return pattern == k
 }
 
 // SourceKeysOnly refuses a reply that writes outside its source's keys,
@@ -117,7 +139,7 @@ func SourceKeysOnly(source string, rep *plugin.Reply) error {
 	allowed := SourceKeys[source]
 	check := func(verb, k string) error {
 		for _, a := range allowed {
-			if a == k {
+			if keyAllowed(a, k) {
 				return nil
 			}
 		}

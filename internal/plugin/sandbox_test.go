@@ -181,7 +181,7 @@ func TestSandboxShowsEachPluginOnlyItsGrants(t *testing.T) {
 		}
 	}
 
-	for _, plug := range []string{"gh", "tomb", "keel", "bandhub"} {
+	for _, plug := range []string{"gh", "tomb", "keel", "bandhub", "roster"} {
 		t.Run(plug, func(t *testing.T) {
 			sb := &Sandbox{Bwrap: bw, Grants: b.grants}
 			rr := *r

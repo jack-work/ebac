@@ -11,6 +11,7 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/internal/rosterstate"
 )
 
 // One round through a fake plugin against a live form: the core applies the
@@ -154,7 +155,21 @@ func TestSourceKeysOnly(t *testing.T) {
 	if err := SourceKeysOnly(model.SourceBandHub, hub); err != nil {
 		t.Fatalf("band-hub's own keys refused: %v", err)
 	}
+	// The roster's role:<name> pattern: one more segment, no dots or stars.
+	ros := &plugin.Reply{}
+	for _, k := range []string{"role:cheroot-boss", "role:loner%2Ev2", "forks", "updated"} {
+		ros.SetKey(k, "x")
+	}
+	ros.Unset = []string{"role:gone"}
+	if err := SourceKeysOnly(model.SourceRoster, ros); err != nil {
+		t.Fatalf("the roster's own keys refused: %v", err)
+	}
 	for _, c := range []struct{ source, key, want string }{
+		{model.SourceRoster, "target-aria", `plugin roster may not set form key "target-aria"`},
+		{model.SourceRoster, "role:", `plugin roster may not set form key "role:"`},
+		{model.SourceRoster, "role:a.target-aria", `plugin roster may not set form key "role:a.target-aria"`},
+		{model.SourceRoster, "role:*", `plugin roster may not set form key "role:*"`},
+		{model.SourceRoster, "queues", `plugin roster may not set form key "queues"`},
 		{"teams-chat", "threads", `plugin tomb may not set form key "threads" (teams-chat keys: blind)`},
 		{"", "authored", `plugin gh may not set form key "authored" (github-pr keys: none)`},
 		{model.SourceBandHub, "blind", `plugin bandhub may not set form key "blind"`},
@@ -225,4 +240,71 @@ func TestLiveAPluginCannotWriteTheSeat(t *testing.T) {
 	if got.Runtime.ConsecutiveFailures != 1 || !strings.Contains(got.Runtime.LastError, "target-aria") {
 		t.Fatalf("refusal not counted as a failed round: %d %q", got.Runtime.ConsecutiveFailures, got.Runtime.LastError)
 	}
+}
+
+// The core hands the roster plugin the real aria store: a round writes a
+// role:<name> key for every role and the forks list; a second round on the
+// same store writes no roster key.
+func TestLiveRosterRoundReadsTheStore(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-roster")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &model.Critic{Name: "livetest-roster-" + strings.TrimPrefix(id, "@")[:8], Source: model.SourceRoster,
+		CreatedAt: time.Now().UTC(), FormID: id}
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	var seen int
+	var lastSet []string
+	fixed := time.Now()
+	h := rosterstate.Plugin{Now: func() time.Time { return fixed }}.Handle
+	spy := func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+		seen = len(req.Arias)
+		rep, err := h(ctx, req)
+		lastSet = nil
+		if rep != nil {
+			for k := range rep.Set {
+				lastSet = append(lastSet, k)
+			}
+		}
+		return rep, err
+	}
+	var out strings.Builder
+	p := &Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"roster": spy}}
+	if err := p.Poll(ctx, w.Name); err != nil {
+		t.Fatalf("round: %v\n%s", err, out.String())
+	}
+	if seen == 0 {
+		t.Fatal("the core passed the roster no arias")
+	}
+	fm, _ := f.Form(ctx, id)
+	roles := 0
+	for k := range fm {
+		if strings.HasPrefix(k, "role:") {
+			roles++
+		}
+	}
+	if roles == 0 || fm["forks"] == nil || fm["updated"] == nil {
+		t.Fatalf("roster keys missing: %d role keys, forks %v, updated %v", roles, fm["forks"] != nil, fm["updated"] != nil)
+	}
+	t.Logf("store: %d arias, %d roles on the form", seen, roles)
+
+	// A second round soon after: the store may move (other seats are live),
+	// so the control is that it writes only what changed, never all of it.
+	if err := p.Poll(ctx, w.Name); err != nil {
+		t.Fatalf("round 2: %v", err)
+	}
+	if len(lastSet) >= roles {
+		t.Fatalf("round 2 rewrote %d keys of %d: not change-only", len(lastSet), roles)
+	}
+	t.Logf("round 2 wrote %v", lastSet)
 }

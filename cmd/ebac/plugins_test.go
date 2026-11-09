@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -122,4 +123,41 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	if _, err := r.Call(context.Background(), name, plugin.Request{Op: plugin.OpBrief, Critic: c}); err == nil || !strings.Contains(stderr.String(), "not supported") {
 		t.Fatalf("brief: %v; stderr %q", err, stderr.String())
 	}
+}
+
+// ebac-roster through a real exec, inside its sandbox when bubblewrap is at
+// hand: its whole input arrives on stdin, so a round still derives the roster
+// (the positive control for a plugin that is shown no grant at all).
+func TestRosterPluginBinaryRound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain on PATH")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("go", "build", "-o", dir, "../ebac-roster").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	r := &plugin.Runner{Dir: dir, Timeout: plugin.DefaultTimeout, Stderr: os.Stderr}
+	if bw := os.Getenv("EBAC_TEST_BWRAP"); bw != "" {
+		fig := filepath.Join(t.TempDir(), "figaro")
+		if err := os.Mkdir(fig, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		r.Sandbox = &plugin.Sandbox{Bwrap: bw, Grants: plugin.Grants{plugin.GrantFigaro: {filepath.Join(fig, "angelus.sock")}}}
+	}
+	arias := []model.Aria{
+		{ID: "11111111aaaaaaaaaaaaaaaaaaaaaaaa", Handle: "lead-seat", Kind: "conversation", State: "idle"},
+		{ID: "@aaaa0001", Kind: "form", Name: "alpha-leader", TargetAria: "11111111"},
+	}
+	c := model.Critic{Name: "roles", FormID: "@r", Source: model.SourceRoster}
+	rep, err := r.Call(context.Background(), "roster", plugin.Request{Op: plugin.OpRound, Critic: c, Arias: arias})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Done || len(rep.Events) != 0 || !strings.Contains(string(rep.Set["role:alpha-leader"]), "11111111 lead-seat") {
+		t.Fatalf("sandboxed=%v reply: done %v events %d set %v", r.Sandbox != nil, rep.Done, len(rep.Events), rep.Set)
+	}
+	t.Logf("sandboxed=%v role:alpha-leader = %s", r.Sandbox != nil, rep.Set["role:alpha-leader"])
 }
