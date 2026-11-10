@@ -542,3 +542,25 @@ func (g *GH) BranchTip(ctx context.Context, repo, branch string) (string, error)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// GraphQL runs one GraphQL query and returns its data object. A response with
+// errors is an error naming the first one.
+func (g *GH) GraphQL(ctx context.Context, query string) (json.RawMessage, error) {
+	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + query}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return nil, fmt.Errorf("decode graphql: %w", err)
+	}
+	if len(r.Errors) > 0 {
+		return nil, fmt.Errorf("graphql: %s", r.Errors[0].Message)
+	}
+	return r.Data, nil
+}

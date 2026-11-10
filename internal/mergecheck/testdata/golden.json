@@ -1,0 +1,3046 @@
+{
+ "rule": "# Chiqun merge-ready criteria\n\nBoss rule 2026-11-10 ~20Z: CHIQUN MERGE-READY CRITERIA (when to DM Chiqun for an admin merge of one of our PRs)\n\nFormat (dashboard steward, 2026-11-10 ~23:45Z): one section per step, `## <step-id>: <label>`, in the order the steps are checked. The minister-control dashboard parses this file on every refresh: step order, labels and tooltip text come from here, and a PR's state is \"waiting: <label>\" of its first unmet step. Edit the prose freely; adding, removing or renaming a step id changes what the dashboard checks (a step with no automated check shows as \"not automated\"). Sections without a step id (WHEN, FOLLOW-UP) are policy only.\n\n## band-jobs: band jobs\n1. Do NOT wait on the Rust PR pipeline. Validate on band-work with the fast jobs that mirror it best: aether.check-ni (compile incl. tests), aether.gate-kit (actors crates), aether.gate-ext with tests=<the changed crate> (aether_grpc / aether_routing), aether.gate-services when storage/services change, aether.clippy-pr. Read the test count on every PASS (0 tests = no verdict).\n\n## runtime-ci: Runtime CI\n2. The fast GitHub pipeline (Aether Runtime PR Pipeline) is GREEN.\n\n## rust-triage: Rust triage\n3. If the Rust PR pipeline is RED: prove it is not ours: code read of the failing step against our diff, plus running the failing test ad hoc on band-work at our head (and at main to show it fails there too). If not ours: good to go; say so with evidence.\n\n## conflict: conflict\n4. No conflicts with main (mergeable CLEAN).\n\n## threads: threads\n(Added from the Minister's state list, Boss order 2026-11-10 ~23:15Z.) No unresolved review threads: every reviewer finding is fixed, or answered and resolved.\n\n## ilya: Ilya\n5. MOST IMPORTANT: at least ILYA's approval (Ilya-Grebnov). Get there by iterating with the bots on small PRs: go through a couple of rounds, close out scope creep (reject with one line + where it is filed), dismiss trivial objections, fix real ones. Lukas and the other reviewers are added confidence, not required.\n5a. (Minister 2026-11-10 ~23Z) The architect verdict is the architect-review[bot] issue comment; APPROVE counts, and so does APPROVE_WITH_NOTES (\"nothing blocks merge\"), labelled as such, provided each Major in its notes is fixed in the PR or filed as a follow-up issue named in the Chiqun notice. An Ilya-Grebnov auto-approve review is the usual receipt but is not required.\n\n## lukas-carryover: Lukas\n5b. (Boss 2026-11-10 ~22:15Z) Architect carry-over: if the architect-review bot APPROVED an EARLIER head, and the changes since are marginal (rebase, tests, docs/comments, or small fixes to review findings with no new behavior), and Lukas's bot (login lukas) APPROVES the CURRENT head, criterion 5 holds: DM Chiqun. A behavior change after the architect APPROVE still needs a fresh architect verdict. The notice names the architect head, the current head and one line on why the interdiff is marginal.\n\n## notified: notice to Chiqun\n(Added from the Minister's state list, Boss order 2026-11-10 ~23:15Z.) All steps above hold and the Secretary has sent Chiqun the merge-ready message (see WHEN): the PR is then \"ready\" and we wait for his admin merge. The Secretary writes chiqun_notified {at, chat, followups} on the PR's board entry when it sends.\n\n## WHEN\nWHEN 1-5 hold: the Knight tells the Secretary; the Secretary DMs Chiqun for the admin merge (small -> Chiqun DM; large/critical -> Akshay+Chiqun group).\n\n## FOLLOW-UP\nFOLLOW-UP (Boss 2026-11-10 ~23:35Z, replaces \"one follow-up per new approval\"): Chiqun is close; ping him freely. The moment a PR becomes ready, the Secretary DMs him at once (standing approval, no per-message Boss yes): \"New for your review: <PR link + title>. Still waiting on you: <every other ready, unmerged PR from the board, link + title>\". Every newly ready PR triggers one such DM (the delta plus the full outstanding list); a merge drops a PR from the list. No batching windows, no waiting.\n",
+ "self_check": {
+  "orphan_evaluators": [],
+  "not_automated": [],
+  "error": ""
+ },
+ "cases": [
+  {
+   "name": "ready",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": true,
+     "status": "yes",
+     "note": "sent 2026-11-10T21:00:00Z in Chiqun DM; follow-ups 1",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "not notified",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: notice to Chiqun"
+  },
+  {
+   "name": "draft",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": true,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "draft"
+  },
+  {
+   "name": "merged",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "MERGED",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": null,
+   "state": "merged"
+  },
+  {
+   "name": "band job failed",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 13,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "job 13 gate-kit: FAIL",
+     "ev": [
+      "job 13 gate-kit: FAIL"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "band job running",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 14,
+     "queue": "aether.gate-ext",
+     "state": "leased"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {},
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "pending",
+     "note": "job 14 gate-ext: leased",
+     "ev": [
+      "job 14 gate-ext: leased"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "zero tests",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 0
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "job 11 gate-kit: PASS, 0 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 0 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "no fast job",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "no fast job on this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "runtime pending",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "PENDING"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": false,
+     "status": "pending",
+     "note": "Aether Runtime PR Pipeline: pending",
+     "ev": [
+      "Aether Runtime PR Pipeline: pending"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "no Rust pipeline run at this head (not waited on)",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Runtime CI"
+  },
+  {
+   "name": "rust red unproven",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "FAILURE"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": false,
+     "status": "no",
+     "note": "Rust PR Pipeline red; not yet proven not ours",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): failure"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Rust triage"
+  },
+  {
+   "name": "rust red proven",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "FAILURE"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {
+    "rust_not_ours": "flake on main #1"
+   },
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline red; proven not ours: flake on main #1",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): failure"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: notice to Chiqun"
+  },
+  {
+   "name": "conflict dirty",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "CONFLICTING",
+    "merge_state": "DIRTY",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": false,
+     "status": "no",
+     "note": "mergeable conflicting, merge state dirty: rebase on main",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: conflict"
+  },
+  {
+   "name": "conflict unknown",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "UNKNOWN",
+    "merge_state": "UNKNOWN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": false,
+     "status": "pending",
+     "note": "mergeable unknown, merge state unknown",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: conflict"
+  },
+  {
+   "name": "threads",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 1,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": false,
+     "status": "no",
+     "note": "1 unresolved review thread",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: threads"
+  },
+  {
+   "name": "notes unhandled",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE_WITH_NOTES",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "t1"
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": false,
+     "status": "no",
+     "note": "architect approve with notes at abcdef12 (t1); Majors in the notes not yet marked handled (the Knight sets majors_handled + majors_note on the board); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Ilya"
+  },
+  {
+   "name": "notes handled",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {
+    "majors_handled": true,
+    "majors_note": "filed #9"
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE_WITH_NOTES",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "t1"
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve with notes at abcdef12 (t1); Majors handled (Knight): filed #9; Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: notice to Chiqun"
+  },
+  {
+   "name": "arch hold",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "REQUEST_CHANGES",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "at": "t0",
+    "hold": true,
+    "hold_at": "t2"
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": false,
+     "status": "pending",
+     "note": "architect pass in progress (hold posted t2); last architect request changes at 01234567 (t0); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "01234567",
+     "stale": true
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": false,
+     "status": "no",
+     "note": "needs an approving architect verdict first (on any head)",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Ilya"
+  },
+  {
+   "name": "no arch",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": null,
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": false,
+     "status": "no",
+     "note": "no architect verdict yet; Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": false,
+     "status": "no",
+     "note": "needs an approving architect verdict first (on any head)",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Ilya"
+  },
+  {
+   "name": "carry over",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "lukas",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {
+    "marginal": true,
+    "marginal_reason": "rebase only"
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "at": "t0"
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at 01234567 (t0); no Ilya-Grebnov review (not required); carried over (rule 5b, marginal interdiff)",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at 01234567 (t0) (an earlier head); interdiff marginal (board); Knight: rebase only; lukas approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: notice to Chiqun"
+  },
+  {
+   "name": "not marginal",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {
+    "marginal": false
+   },
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "at": "t0"
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": false,
+     "status": "no",
+     "note": "architect approve at 01234567 (t0); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "01234567",
+     "stale": true
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": false,
+     "status": "no",
+     "note": "architect approve at 01234567 (t0) (an earlier head); interdiff NOT marginal (board): fresh architect pass needed; no lukas review",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": false,
+     "status": "no",
+     "note": "not yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: Ilya"
+  },
+  {
+   "name": "notified string",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "BLOCKED",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ]
+   },
+   "jobs": [
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {},
+   "item": {
+    "chiqun_notified": "yes, 21:00Z"
+   },
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "ev": [
+      "job 11 gate-kit: PASS, 412 tests",
+      "job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state blocked",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "notice to Chiqun",
+     "ok": true,
+     "status": "yes",
+     "note": "sent: yes, 21:00Z",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  }
+ ]
+}

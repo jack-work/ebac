@@ -97,6 +97,9 @@ type Request struct {
 	// the core each round; Children its child forms, key -> @id.
 	Inputs   map[string]json.RawMessage `json:"inputs,omitempty"`
 	Children map[string]string          `json:"children,omitempty"`
+	// Board is the board form's keys the reconciliation reads (prs, stacks,
+	// items, board_sync), read by the core each round.
+	Board map[string]json.RawMessage `json:"board,omitempty"`
 
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
@@ -205,6 +208,7 @@ func Adopt(core, from *model.Critic) {
 	r.Author = f.Author
 	r.Keel = f.Keel
 	r.BandHub = f.BandHub
+	r.PRBoard = f.PRBoard
 	r.Roster = f.Roster
 	r.Releases = f.Releases
 	r.Stopped = f.Stopped

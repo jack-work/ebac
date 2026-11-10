@@ -47,6 +47,10 @@ func Needs(plugin string, c *model.Critic) []Grant {
 	if c != nil && c.SourceName() == model.SourceReleases {
 		return nil // public github.com releases, read without a credential
 	}
+	if c != nil && c.SourceName() == model.SourceBoard {
+		// GHE, and the hub's metadata for the band jobs on each PR head.
+		return []Grant{GrantBandCred, GrantCredCache, GrantBandHub}
+	}
 	switch plugin {
 	case "gh", "tomb":
 		return []Grant{GrantBandCred, GrantCredCache}

@@ -74,6 +74,11 @@ type Runtime struct {
 	// PR forms), by the plugin's stable key: key -> @id. Core-owned.
 	Children map[string]string `json:"children,omitempty"`
 
+	// PRBoard is a board-sync critic's state, opaque to the core (the
+	// plugin's prboard.State): the search cursor, each tracked PR's head and
+	// fact digest, test counts, ledger outbox times.
+	PRBoard json.RawMessage `json:"pr_board,omitempty"`
+
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
 	BandHub json.RawMessage `json:"band_hub,omitempty"`
@@ -173,6 +178,8 @@ type Critic struct {
 	// owners keep (rule text, needs files, ledger outbox and acks).
 	BoardForm  string `json:"board_form,omitempty"`
 	InputsForm string `json:"inputs_form,omitempty"`
+	// BoardWatch is whose PRs, in which repo, board sync follows.
+	BoardWatch *BoardWatch `json:"board_watch,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).
@@ -575,3 +582,9 @@ var (
 	BoardFormKeys    = map[string]bool{"prs": true, "stacks": true, "board_sync": true}
 	InputsFormKeys   = map[string]bool{"ledger_outbox": true}
 )
+
+// BoardWatch is a board-sync critic's upstream: one author's PRs in one repo.
+type BoardWatch struct {
+	Author string `json:"author"`
+	Repo   string `json:"repo"` // owner/name on the critic's host
+}

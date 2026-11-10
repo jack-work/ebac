@@ -31,6 +31,9 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
+  ebac add-board --author L --repo O/R --board @FORM --inputs @FORM [--name board-sync] [--every 2m]
+                                            board sync: one form per open PR of L (facts, merge checklist),
+                                            the board reconciled, a ledger record via the inputs form on merge
   ebac add-roster [--name roles] [--every 1m]
                                             the role roster: roles, holders, lieutenants, fork counts per role (10 min),
                                             derived from the aria store into a studied form (plugin ebac-roster);
@@ -106,6 +109,8 @@ func main() {
 		err = cmdAddKeel(ctx, g, args)
 	case "add-releases":
 		err = cmdAddReleases(ctx, g, args)
+	case "add-board":
+		err = cmdAddBoard(ctx, g, args)
 	case "add-band-hub":
 		err = cmdAddBandHub(ctx, g, args)
 	case "add-roster":

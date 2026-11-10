@@ -100,6 +100,9 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		// through the core, and cites its child forms by @id.
 		req.Inputs, err = p.readInputs(ctx, w)
 		req.Children = w.Runtime.Children
+		if err == nil {
+			req.Board, err = p.readBoard(ctx, w)
+		}
 	}
 	var rep *plugin.Reply
 	if err == nil {

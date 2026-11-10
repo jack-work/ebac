@@ -135,6 +135,12 @@ func (c *Client) get(ctx context.Context, cl *http.Client, path string, v any) e
 	return nil
 }
 
+// Get reads one metadata route into v (a metaReaders principal sees only what
+// the hub's meta view allows).
+func (c *Client) Get(ctx context.Context, path string, v any) error {
+	return c.get(ctx, c.http(), path, v)
+}
+
 // Fetch reads the hub's metadata: stats, nodes, ready and leased jobs.
 func (c *Client) Fetch(ctx context.Context) (*Hub, error) {
 	cl := c.http()

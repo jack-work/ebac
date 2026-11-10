@@ -246,6 +246,27 @@ func (p *Poller) renewChildren(ctx context.Context, w *model.Critic) {
 
 // readInputs is the critic's inputs form for the plugin: every top-level key
 // but system.
+// BoardReadKeys are the board form keys a board-sync plugin reads.
+var BoardReadKeys = []string{"prs", "stacks", "items", "board_sync"}
+
+// readBoard is the board form's BoardReadKeys, for the reconciliation.
+func (p *Poller) readBoard(ctx context.Context, w *model.Critic) (map[string]json.RawMessage, error) {
+	if w.BoardForm == "" {
+		return nil, nil
+	}
+	f, err := p.Store.ReadForm(ctx, w.BoardForm)
+	if err != nil {
+		return nil, fmt.Errorf("board form %s: %w", w.BoardForm, err)
+	}
+	out := map[string]json.RawMessage{}
+	for _, k := range BoardReadKeys {
+		if v, ok := f.Keys[k]; ok {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
 func (p *Poller) readInputs(ctx context.Context, w *model.Critic) (map[string]json.RawMessage, error) {
 	if w.InputsForm == "" {
 		return nil, nil
