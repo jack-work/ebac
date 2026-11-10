@@ -165,3 +165,50 @@ func TestLiveScoutFormsThroughTheCore(t *testing.T) {
 		t.Fatalf("the board moved: %v -> %v", board0, b1)
 	}
 }
+
+// Pings: only the scout pings, at most MaxPings a round, each one line of at most 400 bytes to a role @<hex>.
+func TestValidatePings(t *testing.T) {
+	scout := &model.Critic{Name: "s", Source: model.SourceScout}
+	ok := plugin.Ping{To: "@8d70861a", Text: "scout: issue #1 changed: body by alice; linked PR #2; https://x/1"}
+	if err := ValidatePings(scout, &plugin.Reply{Pings: []plugin.Ping{ok}}); err != nil {
+		t.Fatalf("valid ping refused: %v", err)
+	}
+	many := make([]plugin.Ping, MaxPings+1)
+	for i := range many {
+		many[i] = ok
+	}
+	for name, c := range map[string]struct {
+		w     *model.Critic
+		pings []plugin.Ping
+		in    string
+	}{
+		"another source": {&model.Critic{Name: "x", Source: "github-author"}, []plugin.Ping{ok}, "may not ping"},
+		"too many":       {scout, many, "pings in one round"},
+		"an aria id":     {scout, []plugin.Ping{{To: "8d70861a", Text: "x"}}, "not a role form"},
+		"two lines":      {scout, []plugin.Ping{{To: ok.To, Text: "a\nb"}}, "one line"},
+		"too long":       {scout, []plugin.Ping{{To: ok.To, Text: strings.Repeat("x", 401)}}, "one line"},
+		"empty":          {scout, []plugin.Ping{{To: ok.To}}, "one line"},
+	} {
+		if err := ValidatePings(c.w, &plugin.Reply{Pings: c.pings}); err == nil || !strings.Contains(err.Error(), c.in) {
+			t.Errorf("%s: %v (want %q)", name, err, c.in)
+		}
+	}
+}
+
+// A validated round's pings go to each role's holder; a role nobody holds is skipped and said.
+func TestLandFormsSendsPings(t *testing.T) {
+	var sent []string
+	var out strings.Builder
+	p := &Poller{Out: &out,
+		Send:   func(_ context.Context, to, msg string) error { sent = append(sent, to+" "+msg); return nil },
+		Holder: func(_ context.Context, to string) bool { return to != "@deadbeef" }}
+	w := &model.Critic{Name: "s", Source: model.SourceScout}
+	err := p.landForms(context.Background(), w, &plugin.Reply{Pings: []plugin.Ping{{To: "@8d70861a", Text: "one"}, {To: "@deadbeef", Text: "two"}}})
+	if err != nil || len(sent) != 1 || sent[0] != "@8d70861a one" || !strings.Contains(out.String(), "ping to @deadbeef skipped (no holder)") {
+		t.Fatalf("err %v sent %v out %q", err, sent, out.String())
+	}
+	sent = nil
+	if err := p.landForms(context.Background(), &model.Critic{Name: "a", Source: "github-author"}, &plugin.Reply{Pings: []plugin.Ping{{To: "@8d70861a", Text: "x"}}}); err != nil || len(sent) != 0 {
+		t.Fatalf("another source's pings were sent: %v", sent)
+	}
+}

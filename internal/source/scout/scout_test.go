@@ -37,6 +37,8 @@ type item struct {
 	mergedAt   string
 	closedAt   string
 	unresolved int
+	editor     map[string]any   // issue: the last body editor (author{__typename login})
+	events     []map[string]any // issue: label and state events, oldest first
 }
 
 func (p *item) gql() map[string]any {
@@ -49,6 +51,20 @@ func (p *item) gql() map[string]any {
 		"labels": map[string]any{"nodes": labels}}
 	if p.issue {
 		base["__typename"] = "Issue"
+		base["body"] = p.body
+		if p.editor != nil {
+			base["editor"], base["lastEditedAt"] = p.editor, p.updated.Format(time.RFC3339)
+		}
+		comments := []any{}
+		for _, c := range p.comments[max(0, len(p.comments)-50):] { // comments(last:50)
+			comments = append(comments, c)
+		}
+		events := []any{}
+		for _, e := range p.events {
+			events = append(events, e)
+		}
+		base["comments"] = map[string]any{"nodes": comments}
+		base["timelineItems"] = map[string]any{"nodes": events}
 		return base
 	}
 	ctxs := []any{}
@@ -380,7 +396,7 @@ func TestEntryFieldsExactlyTheList(t *testing.T) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	if strings.Join(got, " ") != "author kind labels n state title updated_at" || is["kind"] != "issue" {
+	if strings.Join(got, " ") != "author digests kind labels n state title updated_at" || is["kind"] != "issue" {
 		t.Fatalf("issue entry %v", is)
 	}
 	// merged_at appears once merged.

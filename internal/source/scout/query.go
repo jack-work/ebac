@@ -24,8 +24,15 @@ comments(last:30){nodes{author{login} createdAt body}}
 commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:60){nodes{
 ... on CheckRun{name conclusion status detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`
 
-// issueFields is everything a pass reads about one issue.
-const issueFields = `number title url state updatedAt closedAt author{login} labels(first:20){nodes{name}}`
+// issueFields is everything a pass reads about one issue, including who made
+// each kind of change (S5): the last body editor, the last label and state
+// events' actors, and the recent comments' authors.
+const issueFields = `number title url state updatedAt closedAt author{login} labels(first:20){nodes{name}}
+body lastEditedAt editor{__typename login}
+comments(last:50){nodes{author{__typename login} createdAt}}
+timelineItems(last:20, itemTypes:[LABELED_EVENT, UNLABELED_EVENT, CLOSED_EVENT, REOPENED_EVENT]){nodes{__typename
+... on LabeledEvent{createdAt actor{__typename login}} ... on UnlabeledEvent{createdAt actor{__typename login}}
+... on ClosedEvent{createdAt actor{__typename login}} ... on ReopenedEvent{createdAt actor{__typename login}}}}`
 
 // searchQuery is ONE GraphQL call: one aliased search per author (a<i>), each
 // for the author's PRs and issues in repo updated at or after the cursor
@@ -83,7 +90,13 @@ func filesQuery(repo string, n int, after string) string {
 }
 
 type login struct {
-	Login string `json:"login"`
+	Typename string `json:"__typename,omitempty"`
+	Login    string `json:"login"`
+}
+
+// bot says whether an actor is automation: a Bot, or a login ending [bot].
+func (l *login) bot() bool {
+	return l != nil && (l.Typename == "Bot" || strings.HasSuffix(l.Login, "[bot]"))
 }
 
 type labels struct {
@@ -157,6 +170,15 @@ type ghNode struct {
 			Body      string `json:"body"`
 		} `json:"nodes"`
 	} `json:"comments"`
+	LastEditedAt string `json:"lastEditedAt"`
+	Editor       *login `json:"editor"`
+	Timeline     struct {
+		Nodes []struct {
+			Typename  string `json:"__typename"`
+			CreatedAt string `json:"createdAt"`
+			Actor     *login `json:"actor"`
+		} `json:"nodes"`
+	} `json:"timelineItems"`
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
@@ -214,10 +236,22 @@ type Issue struct {
 	Number   int
 	Author   string
 	Title    string
+	URL      string
 	State    string // OPEN, CLOSED
 	Updated  string
 	ClosedAt string
 	Labels   []string
+	Body     string
+	// Who made each kind of change last (S5): the body's last editor (its
+	// author when never edited), the last label and state events' actors.
+	BodyBy, LabelsBy, StateBy *login
+	Comments                  []Comment // the recent comments, oldest first
+}
+
+// Comment is one issue comment's author and time.
+type Comment struct {
+	By *login
+	At string
 }
 
 var buildRE = regexp.MustCompile(`buildId=(\d+)`)
@@ -262,8 +296,23 @@ func links(n ghNode) []int {
 }
 
 func toIssue(g ghNode) Issue {
-	return Issue{Number: g.Number, Author: g.author(), Title: g.Title, State: g.State, Updated: g.UpdatedAt, ClosedAt: g.ClosedAt,
-		Labels: g.Labels.names()}
+	is := Issue{Number: g.Number, Author: g.author(), Title: g.Title, URL: g.URL, State: g.State, Updated: g.UpdatedAt,
+		ClosedAt: g.ClosedAt, Labels: g.Labels.names(), Body: g.Body, BodyBy: g.Author}
+	if g.LastEditedAt != "" && g.Editor != nil {
+		is.BodyBy = g.Editor
+	}
+	for _, e := range g.Timeline.Nodes { // oldest first: the last one wins
+		switch e.Typename {
+		case "LabeledEvent", "UnlabeledEvent":
+			is.LabelsBy = e.Actor
+		case "ClosedEvent", "ReopenedEvent":
+			is.StateBy = e.Actor
+		}
+	}
+	for _, c := range g.Comments.Nodes {
+		is.Comments = append(is.Comments, Comment{By: c.Author, At: c.CreatedAt})
+	}
+	return is
 }
 
 func toPR(g ghNode) PR {

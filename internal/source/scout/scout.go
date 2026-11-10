@@ -3,7 +3,10 @@
 // written as keys pr:<n> and issue:<n> on the scout's own role form, only
 // when the entry changes (board-sync v2, S1); and, on merge or close, the
 // PR's final entry as a record in the inputs form's ledger outbox, the entry
-// kept Keep after it closed and then removed (S2).
+// kept Keep after it closed and then removed (S2); a material change on an
+// issue (body, checklist, labels, state, a human comment; never by the sync
+// login or a bot) pings the owner role of each open PR whose body links it,
+// one line, at most MaxIssuePings a pass (S5).
 //
 // Every pass is a catch-up, never a full pull:
 //  1. ONE GraphQL call: one aliased search per author for PRs and issues
@@ -55,6 +58,13 @@ const MissingRetry = time.Hour
 
 // MaxFilePages bounds one PR's file listing (100 files a page).
 const MaxFilePages = 30
+
+// MaxIssuePings bounds one pass's issue pings; the rest wait in the state's
+// queue (at most MaxQueue) for the next passes.
+const (
+	MaxIssuePings = 6
+	MaxQueue      = 50
+)
 
 // GitHub is what a pass needs from the forge: one GraphQL query per call.
 type GitHub interface {
@@ -132,13 +142,24 @@ type PREntry struct {
 
 // IssueEntry is an issue's entry (key issue:<n>).
 type IssueEntry struct {
-	N         int      `json:"n"`
-	Kind      string   `json:"kind"` // issue
-	Author    string   `json:"author"`
-	Title     string   `json:"title"`
-	State     string   `json:"state"` // OPEN, CLOSED
-	Labels    []string `json:"labels"`
-	UpdatedAt string   `json:"updated_at"`
+	N         int          `json:"n"`
+	Kind      string       `json:"kind"` // issue
+	Author    string       `json:"author"`
+	Title     string       `json:"title"`
+	State     string       `json:"state"` // OPEN, CLOSED
+	Labels    []string     `json:"labels"`
+	UpdatedAt string       `json:"updated_at"`
+	Digests   IssueDigests `json:"digests"`
+}
+
+// IssueDigests are what a material change is measured on (S5): the body
+// without its checklist, the checklist, the labels (8-byte hex digests), and
+// the count of recent human comments (not a bot, not the sync login).
+type IssueDigests struct {
+	Body          string `json:"body"`
+	Checklist     string `json:"checklist"`
+	Labels        string `json:"labels"`
+	HumanComments int    `json:"human_comments"`
 }
 
 // PRKey and IssueKey are the role-form keys of an entry.
@@ -164,9 +185,11 @@ type TrackedPR struct {
 
 // TrackedIssue is what the state keeps per tracked issue.
 type TrackedIssue struct {
-	State string `json:"s"`
-	Entry string `json:"e"`
-	Done  string `json:"z,omitempty"` // closed_at
+	State     string       `json:"s"`
+	Entry     string       `json:"e"`
+	Done      string       `json:"z,omitempty"` // closed_at
+	D         IssueDigests `json:"d"`
+	LastHuman string       `json:"h,omitempty"` // the newest human comment's time
 }
 
 // State is the plugin's opaque state (critic runtime.scout).
@@ -177,6 +200,7 @@ type State struct {
 	Skip    map[int]string        `json:"skip,omitempty"`    // untracked PR -> the head whose files missed the filter
 	Missing map[int]string        `json:"missing,omitempty"` // linked number that is not a readable issue -> when tried
 	Tests   map[int64]int         `json:"tests,omitempty"`   // known test counts by job id (a done job's count never changes)
+	Queue   []plugin.Ping         `json:"queue,omitempty"`   // issue pings beyond MaxIssuePings, oldest first
 }
 
 // Pass is one round's inputs.
@@ -194,6 +218,7 @@ type Result struct {
 	Set     map[string]json.RawMessage
 	Unset   []string
 	Forms   []plugin.FormWrite
+	Pings   []plugin.Ping
 	GHCalls int
 	Log     []string
 }
@@ -250,6 +275,10 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	m := matcher{f: f, labels: map[string]bool{}}
 	for _, l := range in.Watch.Labels {
 		m.labels[strings.ToLower(l)] = true
+	}
+	owners, err := compileOwners(in.Watch.Owners)
+	if err != nil {
+		return res, err
 	}
 	pol := mergecheck.Parse(inputString(in.Inputs["rule"]))
 	if len(pol.Steps) == 0 {
@@ -464,6 +493,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			freshIssues[is.Number] = is
 		}
 	}
+	var pings []plugin.Ping
 	for _, n := range sortedKeys(freshIssues) {
 		is := freshIssues[n]
 		delete(st.Missing, n)
@@ -475,10 +505,18 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			t = &TrackedIssue{}
 			st.Issues[n] = t
 		}
-		e := IssueEntry{N: n, Kind: "issue", Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, UpdatedAt: is.Updated}
+		d, lastHuman := issueDigests(is, in.Watch.SyncLogin)
+		e := IssueEntry{N: n, Kind: "issue", Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, UpdatedAt: is.Updated,
+			Digests: d}
 		if e.Labels == nil {
 			e.Labels = []string{}
 		}
+		if t.Entry != "" { // a baseline is never news
+			if what, by := material(t, is, d, lastHuman, in.Watch.SyncLogin); len(what) > 0 {
+				pings = append(pings, issuePings(st.PRs, owners, is, what, by, logf)...)
+			}
+		}
+		t.D, t.LastHuman = d, lastHuman
 		t.State, t.Done = is.State, ""
 		if is.State != "OPEN" {
 			t.Done = is.ClosedAt
@@ -493,6 +531,8 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			delete(st.Missing, k)
 		}
 	}
+
+	res.Pings = queuePings(&st, pings, logf)
 
 	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member; the entry
 	// stays until Keep after the close.
@@ -774,4 +814,195 @@ func digest(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
+}
+
+// S5: issue changes to the owners of the PRs linking them.
+
+// owner is a compiled OwnerRule.
+type owner struct {
+	author string
+	title  *regexp.Regexp
+	role   string
+}
+
+var roleRE = regexp.MustCompile(`^@[0-9a-f]{8,32}$`)
+
+func compileOwners(rules []model.OwnerRule) ([]owner, error) {
+	var out []owner
+	for i, r := range rules {
+		o := owner{author: r.Author, role: r.Role}
+		if r.Author == "" || !roleRE.MatchString(r.Role) {
+			return nil, fmt.Errorf("owner rule %d: want an author and a role @<hex>, got %q -> %q", i, r.Author, r.Role)
+		}
+		if r.TitleMatch != "" {
+			re, err := regexp.Compile(r.TitleMatch)
+			if err != nil {
+				return nil, fmt.Errorf("owner rule %d: title_match: %w", i, err)
+			}
+			o.title = re
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// CheckOwners validates owner rules before they are stored (ebac add-scout).
+func CheckOwners(rules []model.OwnerRule) error {
+	_, err := compileOwners(rules)
+	return err
+}
+
+// roleOf is the owner role of a PR: the first rule matching its author (and title), or "".
+func roleOf(owners []owner, t *TrackedPR) string {
+	for _, o := range owners {
+		if strings.EqualFold(o.author, t.Author) && (o.title == nil || o.title.MatchString(t.Title)) {
+			return o.role
+		}
+	}
+	return ""
+}
+
+var checkRE = regexp.MustCompile(`(?m)^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]*(.*?)[ \t]*$`)
+
+// issueDigests are an issue's digests, and the time of its newest human comment.
+func issueDigests(is Issue, sync string) (IssueDigests, string) {
+	body := strings.ReplaceAll(is.Body, "\r\n", "\n")
+	var check []string
+	for _, m := range checkRE.FindAllStringSubmatch(body, -1) {
+		check = append(check, strings.ToLower(m[1])+"|"+m[2])
+	}
+	rest := strings.TrimSpace(checkRE.ReplaceAllString(body, ""))
+	labels := append([]string(nil), is.Labels...)
+	for i := range labels {
+		labels[i] = strings.ToLower(labels[i])
+	}
+	sort.Strings(labels)
+	d := IssueDigests{Body: digest(rest), Checklist: digest(check), Labels: digest(labels)}
+	last := ""
+	for _, c := range is.Comments {
+		if human(c.By, sync) {
+			d.HumanComments++
+			if c.At > last {
+				last = c.At
+			}
+		}
+	}
+	return d, last
+}
+
+// human says whether an actor's change is news: not a bot, not the sync login. An unknown actor (a deleted
+// account, an event beyond the timeline read) counts as human: a lost human change is worse than a stray ping.
+func human(l *login, sync string) bool {
+	if l == nil {
+		return true
+	}
+	return !l.bot() && !(sync != "" && strings.EqualFold(l.Login, sync))
+}
+
+// material is what changed on a tracked issue since the last pass, by whom, leaving out what the sync or a bot did.
+func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman, sync string) ([]string, []string) {
+	var what, by []string
+	add := func(part string, l *login) {
+		if !human(l, sync) {
+			return
+		}
+		what = append(what, part)
+		who := "?"
+		if l != nil {
+			who = l.Login
+		}
+		if !contains(by, who) {
+			by = append(by, who)
+		}
+	}
+	if d.Body != t.D.Body {
+		add("body", is.BodyBy)
+	}
+	if d.Checklist != t.D.Checklist {
+		add("checklist", is.BodyBy)
+	}
+	if d.Labels != t.D.Labels {
+		add("labels", is.LabelsBy)
+	}
+	if is.State != t.State {
+		add("state "+strings.ToLower(is.State), is.StateBy)
+	}
+	if lastHuman > t.LastHuman {
+		for i := len(is.Comments) - 1; i >= 0; i-- {
+			if c := is.Comments[i]; c.At == lastHuman {
+				add("comment", c.By)
+				break
+			}
+		}
+	}
+	return what, by
+}
+
+// issuePings are one line per owner role of the open tracked PRs linking the issue.
+func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []string, logf func(string, ...any)) []plugin.Ping {
+	byRole := map[string][]string{}
+	var roles []string
+	for _, n := range sortedKeys(prs) {
+		t := prs[n]
+		if t.State != "OPEN" || !containsInt(t.Links, is.Number) {
+			continue
+		}
+		role := roleOf(owners, t)
+		if role == "" {
+			logf("issue #%d changed: PR #%d (%s) has no owner rule", is.Number, n, t.Author)
+			continue
+		}
+		if _, ok := byRole[role]; !ok {
+			roles = append(roles, role)
+		}
+		byRole[role] = append(byRole[role], "#"+strconv.Itoa(n))
+	}
+	if len(roles) == 0 {
+		logf("issue #%d changed (%s by %s): no open tracked PR links it", is.Number, strings.Join(what, ", "), strings.Join(by, ", "))
+		return nil
+	}
+	title := is.Title
+	if len(title) > 60 {
+		title = title[:59] + "~"
+	}
+	var out []plugin.Ping
+	for _, role := range roles {
+		out = append(out, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf("scout: issue #%d %q changed: %s by %s; linked PR %s; %s",
+			is.Number, title, strings.Join(what, ", "), strings.Join(by, ", "), strings.Join(byRole[role], " "), is.URL))})
+	}
+	return out
+}
+
+// queuePings sends at most MaxIssuePings this pass, oldest first; the rest wait in the queue (bounded at MaxQueue,
+// the oldest dropped and said).
+func queuePings(st *State, fresh []plugin.Ping, logf func(string, ...any)) []plugin.Ping {
+	q := append(st.Queue, fresh...)
+	if over := len(q) - MaxQueue; over > 0 {
+		logf("issue ping queue full: %d oldest dropped", over)
+		q = q[over:]
+	}
+	n := min(len(q), MaxIssuePings)
+	send := append([]plugin.Ping(nil), q[:n]...)
+	st.Queue = append([]plugin.Ping(nil), q[n:]...)
+	if len(st.Queue) == 0 {
+		st.Queue = nil
+	}
+	return send
+}
+
+func containsInt(list []int, k int) bool {
+	for _, x := range list {
+		if x == k {
+			return true
+		}
+	}
+	return false
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 400 {
+		s = s[:399] + "~"
+	}
+	return s
 }

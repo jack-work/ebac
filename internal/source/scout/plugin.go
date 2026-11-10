@@ -69,9 +69,9 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = now().UTC()
 	w.Runtime.Scout = model.MustJSON(r.State)
-	rep.Set, rep.Unset, rep.Forms = r.Set, r.Unset, r.Forms
-	rep.Logf("%s: round %d: %d GitHub call(s), %d entr(y/ies) written, %d removed, %d PR(s) and %d issue(s) tracked",
-		w.Name, w.Runtime.Round, r.GHCalls, len(r.Set), len(r.Unset), len(r.State.PRs), len(r.State.Issues))
+	rep.Set, rep.Unset, rep.Forms, rep.Pings = r.Set, r.Unset, r.Forms, r.Pings
+	rep.Logf("%s: round %d: %d GitHub call(s), %d entr(y/ies) written, %d removed, %d PR(s) and %d issue(s) tracked, %d ping(s), %d queued",
+		w.Name, w.Runtime.Round, r.GHCalls, len(r.Set), len(r.Unset), len(r.State.PRs), len(r.State.Issues), len(r.Pings), len(r.State.Queue))
 	return rep, nil
 }
 

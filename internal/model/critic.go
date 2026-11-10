@@ -566,8 +566,9 @@ func CheckCriticKey(raw json.RawMessage) (*Critic, error) {
 
 // SourceScout is the GitHub scout (ebac-gh): one entry per relevant PR and
 // issue of a few authors in one repo, as keys pr:<n> / issue:<n> on its own
-// role form, the merge checklist's first unmet step, and ledger records
-// through the inputs form's outbox.
+// role form, the merge checklist's first unmet step, ledger records through
+// the inputs form's outbox, and material issue changes pinged to the owner
+// role of each PR linking the issue.
 const SourceScout = "github-scout"
 
 // ScoutWatch is a scout's configuration.
@@ -581,4 +582,18 @@ type ScoutWatch struct {
 	Labels     []string `json:"labels,omitempty"`
 	TitleMatch string   `json:"title_match,omitempty"`
 	Paths      []string `json:"paths,omitempty"`
+	// SyncLogin is the plan->issues sync's login: its edits and comments on
+	// an issue never ping anyone (nor do a bot's).
+	SyncLogin string `json:"sync_login,omitempty"`
+	// Owners route a material issue change to the owner role of each PR
+	// linking the issue: the first rule matching the PR's author (and title,
+	// when set) names the role.
+	Owners []OwnerRule `json:"owners,omitempty"`
+}
+
+// OwnerRule maps a PR to its owner role: author, optionally a title regex.
+type OwnerRule struct {
+	Author     string `json:"author"`
+	TitleMatch string `json:"title_match,omitempty"`
+	Role       string `json:"role"` // @<form id>
 }

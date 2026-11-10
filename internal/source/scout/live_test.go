@@ -122,3 +122,64 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 		t.Fatalf("recovered: %v %d", c.Runtime.LastSuccess, c.Runtime.ConsecutiveFailures)
 	}
 }
+
+// Live S5, through the core on scratch forms: a human's issue comment reaches the owner role of each open PR linking
+// it (through the core's send, faked here so no aria is woken); the sync login's body edit reaches nobody.
+func TestLiveIssueChangeReachesOwner(t *testing.T) {
+	if os.Getenv("EBAC_LIVE") != "1" {
+		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
+	}
+	ctx := context.Background()
+	f := figaro.NewFigaro("")
+	t.Cleanup(func() { _ = f.Close() })
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	mint := func(name string) string {
+		id, err := f.FormNew(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		return id
+	}
+	inputs, board, role := mint("livetest-scout-inputs"), mint("livetest-board"), mint("ebac-livetest-scout-s5")
+	wd := s5World(t)
+	name := "livetest-scout-s5-" + strings.TrimPrefix(role, "@")[:8]
+	w := &model.Critic{Name: name, Source: model.SourceScout, Host: "microsoft.ghe.com", FormID: role, CreatedAt: time.Now().UTC(),
+		EverySec: 120, BoardForm: board, InputsForm: inputs, Scout: &wd.watch}
+	w.Runtime.Scout = model.MustJSON(wd.st)
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	now := wd.now
+	var sent []string
+	var out strings.Builder
+	p := &poll.Poller{Store: st, Fig: f, Out: &out,
+		Plugins: plugin.InProc{"gh": Plugin{GH: wd.gh, Hub: wd.hub, Now: func() time.Time { return now }}.Handle},
+		Send:    func(_ context.Context, to, msg string) error { sent = append(sent, to+" "+msg); return nil },
+		Holder:  func(context.Context, string) bool { return true }}
+	is := wd.gh.items[301]
+
+	is.body, is.editor, is.updated = is.body+"\nsynced\n", who(syncLogin), now.Add(time.Minute)
+	now = now.Add(2 * time.Minute)
+	if err := p.Poll(ctx, name); err != nil {
+		t.Fatalf("sync pass: %v\n%s", err, out.String())
+	}
+	keys, _, _ := f.FormRaw(ctx, role)
+	if len(sent) != 0 || !strings.Contains(string(keys["issue:301"]), `"digests"`) {
+		t.Fatalf("sync edit: sent %v, entry %s", sent, keys["issue:301"])
+	}
+
+	is.comments, is.updated = []map[string]any{{"author": who("alice"), "createdAt": now.Format(time.RFC3339)}}, now.Add(time.Minute)
+	now = now.Add(2 * time.Minute)
+	if err := p.Poll(ctx, name); err != nil {
+		t.Fatalf("human pass: %v\n%s", err, out.String())
+	}
+	got := strings.Join(sent, "\n")
+	if len(sent) != 3 || !strings.Contains(got, knight+" scout: issue #301") || !strings.Contains(got, "comment by alice") {
+		t.Fatalf("human comment: sent %q\n%s", got, out.String())
+	}
+}
