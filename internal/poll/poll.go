@@ -95,16 +95,12 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			err = fmt.Errorf("list arias: %w", err)
 		}
 	}
-	if err == nil && w.SourceName() == model.SourceBoard {
-		// Board sync reads its owners' inputs form (rule, needs, ledger acks)
-		// through the core, and cites its child forms by @id.
+	if err == nil && w.SourceName() == model.SourceScout {
+		// The scout reads its owners' inputs form (merge rule, ledger acks)
+		// and the board's owner marks, read-only, through the core.
 		req.Inputs, err = p.readInputs(ctx, w)
-		req.Children = w.Runtime.Children
 		if err == nil {
 			req.Board, err = p.readBoard(ctx, w)
-		}
-		if err == nil {
-			req.Notes = p.readNotes(ctx, w)
 		}
 	}
 	var rep *plugin.Reply
@@ -146,6 +142,8 @@ var SourceKeys = map[string][]string{
 	// role:<name> is one key per role ("*" is a prefix pattern: one more
 	// segment, no dots, so it cannot reach a nested key).
 	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)
+	// One key per PR and per issue, on the scout's own role form.
+	model.SourceScout: {"pr:*", "issue:*"},
 }
 
 func keyAllowed(pattern, k string) bool {

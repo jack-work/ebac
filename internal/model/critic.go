@@ -70,14 +70,10 @@ type Runtime struct {
 	// LastPing is when a collect-mode critic last pinged its seat.
 	LastPing time.Time `json:"last_ping,omitempty"`
 
-	// Children are the child forms the core keeps for the critic (board-sync
-	// PR forms), by the plugin's stable key: key -> @id. Core-owned.
-	Children map[string]string `json:"children,omitempty"`
-
-	// PRBoard is a board-sync critic's state, opaque to the core (the
-	// plugin's prboard.State): the search cursor, each tracked PR's head and
-	// fact digest, test counts, ledger outbox times.
-	PRBoard json.RawMessage `json:"pr_board,omitempty"`
+	// Scout is a scout's state, opaque to the core (the plugin's
+	// scout.State): the search cursor, each tracked PR's and issue's head
+	// and entry digest, path verdicts, test counts, ledger outbox times.
+	Scout json.RawMessage `json:"scout,omitempty"`
 
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
@@ -173,13 +169,15 @@ type Critic struct {
 	Band *BandRef `json:"band_hub,omitempty"`
 	// Releases is a release watch's configuration (source github-releases).
 	Releases *ReleasesRef `json:"releases_watch,omitempty"`
-	// BoardForm and InputsForm are a board-sync critic's two outside forms
-	// (source github-prs): the board it reconciles and the inputs form its
-	// owners keep (rule text, needs files, ledger outbox and acks).
+	// BoardForm and InputsForm are a scout's two outside forms (source
+	// github-scout): the board, read-only for the owner marks the merge
+	// checklist reads, and the inputs form its owners keep (merge rule,
+	// ledger acks) and whose ledger outbox it writes.
 	BoardForm  string `json:"board_form,omitempty"`
 	InputsForm string `json:"inputs_form,omitempty"`
-	// BoardWatch is whose PRs, in which repo, board sync follows.
-	BoardWatch *BoardWatch `json:"board_watch,omitempty"`
+	// Scout is a scout's configuration: repo, authors, relevance filter,
+	// owner roles.
+	Scout *ScoutWatch `json:"scout_watch,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).
@@ -566,29 +564,21 @@ func CheckCriticKey(raw json.RawMessage) (*Critic, error) {
 	return &w, nil
 }
 
-// SourceBoard is board sync (ebac-gh): one child form per open PR, the board
-// form reconciled, ledger records through the inputs form's outbox.
-const SourceBoard = "github-prs"
+// SourceScout is the GitHub scout (ebac-gh): one entry per relevant PR and
+// issue of a few authors in one repo, as keys pr:<n> / issue:<n> on its own
+// role form, the merge checklist's first unmet step, and ledger records
+// through the inputs form's outbox.
+const SourceScout = "github-scout"
 
-// ChildLease is a child form's lifetime, renewed each pass: a stuck or
-// removed board-sync critic leaks no form for longer than this.
-const ChildLease = 2 * 24 * time.Hour
-
-// Child form, board and inputs keys a plugin may write (plugin.FormWrite).
-// Nobody but an owner role writes note (note.next, note.blocker, ...); the
-// core refuses it on every target.
-var (
-	FormWriteRefused = map[string]bool{"note": true, "system": true, "target-aria": true, "name": true, "kind": true, CriticKey: true}
-	BoardFormKeys    = map[string]bool{"prs": true, "stacks": true, "board_sync": true}
-	InputsFormKeys   = map[string]bool{"ledger_outbox": true}
-)
-
-// BoardWatch is a board-sync critic's upstream: one author's PRs in one repo.
-type BoardWatch struct {
-	Author string `json:"author"`
-	Repo   string `json:"repo"` // owner/name on the critic's host
-	// JudgeTo is the role (@form) that gets each new judgement line (a PR
-	// with no stack tag, no owner, an item whose PRs are all gone): the
-	// Decisions Minister.
-	JudgeTo string `json:"judge_to,omitempty"`
+// ScoutWatch is a scout's configuration.
+type ScoutWatch struct {
+	Repo    string   `json:"repo"`    // owner/name on the critic's host
+	Authors []string `json:"authors"` // logins whose PRs and issues are read
+	// The relevance filter: a PR is tracked when it carries one of Labels,
+	// its title matches TitleMatch, or a changed file matches one of Paths
+	// (relevance.Spec). An issue is tracked on a label or title hit, or when
+	// a tracked PR's body links it.
+	Labels     []string `json:"labels,omitempty"`
+	TitleMatch string   `json:"title_match,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
 }

@@ -31,9 +31,12 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
-  ebac add-board --author L --repo O/R --board @FORM --inputs @FORM [--name board-sync] [--every 2m]
-                                            board sync: one form per open PR of L (facts, merge checklist),
-                                            the board reconciled, a ledger record via the inputs form on merge
+  ebac add-scout --name effort-github --authors A[,B] --repo O/R --board @FORM --inputs @FORM [--every 2m]
+              [--labels L[,L]] [--title-match REGEX] [--paths GLOB[,GLOB]]
+                                            the GitHub scout: one entry pr:<n> / issue:<n> on its own role form per
+                                            relevant PR and issue of A, B (label OR title OR paths), merge_state from
+                                            the inputs form's rule and the board's marks (read-only); on merge or
+                                            close a ledger record to the inputs form's outbox, the entry kept 7 d
   ebac add-roster [--name roles] [--every 1m]
                                             the role roster: roles, holders, lieutenants, fork counts per role (10 min),
                                             derived from the aria store into a studied form (plugin ebac-roster);
@@ -109,8 +112,8 @@ func main() {
 		err = cmdAddKeel(ctx, g, args)
 	case "add-releases":
 		err = cmdAddReleases(ctx, g, args)
-	case "add-board":
-		err = cmdAddBoard(ctx, g, args)
+	case "add-scout":
+		err = cmdAddScout(ctx, g, args)
 	case "add-band-hub":
 		err = cmdAddBandHub(ctx, g, args)
 	case "add-roster":

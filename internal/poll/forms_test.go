@@ -16,49 +16,53 @@ import (
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
 
+// The scout may write one other form, its inputs form, and there only ledger_outbox; any other source may write none.
 func TestValidateForms(t *testing.T) {
-	board := &model.Critic{Name: "b", Source: model.SourceBoard, BoardForm: "@board", InputsForm: "@inputs"}
-	ok := []plugin.FormWrite{
-		{Key: "pr-108445", Set: map[string]json.RawMessage{"state": raw(`"OPEN"`), "checklist": raw(`[]`)}},
-		{Key: "pr-96046", Retire: true},
-		{Board: true, Set: map[string]json.RawMessage{"prs": raw(`{}`)}},
-		{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"108445":{}}`)}},
-	}
-	if err := ValidateForms(board, &plugin.Reply{Forms: ok}); err != nil {
-		t.Fatalf("valid writes refused: %v", err)
+	scout := &model.Critic{Name: "s", Source: model.SourceScout, InputsForm: "@inputs"}
+	ok := plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"108445":{}}`)}}
+	if err := ValidateForms(scout, &plugin.Reply{Forms: []plugin.FormWrite{ok}}); err != nil {
+		t.Fatalf("valid write refused: %v", err)
 	}
 	for name, c := range map[string]struct {
 		w  *model.Critic
 		fw plugin.FormWrite
 		in string
 	}{
-		"another source":      {&model.Critic{Name: "x", Source: "teams-chat"}, plugin.FormWrite{Key: "pr-1"}, "may not write other forms"},
-		"no target":           {board, plugin.FormWrite{Set: map[string]json.RawMessage{"a": raw(`1`)}}, "0 targets"},
-		"two targets":         {board, plugin.FormWrite{Key: "pr-1", Board: true}, "2 targets"},
-		"bad child key":       {board, plugin.FormWrite{Key: "PR 1"}, "is not [a-z0-9-]"},
-		"note on a child":     {board, plugin.FormWrite{Key: "pr-1", Set: map[string]json.RawMessage{"note": raw(`{}`)}}, `"note" (owner or core key)`},
-		"note unset":          {board, plugin.FormWrite{Key: "pr-1", Unset: []string{"note"}}, `unset "note"`},
-		"note on the board":   {board, plugin.FormWrite{Board: true, Set: map[string]json.RawMessage{"note": raw(`{}`)}}, `"note" (owner or core key)`},
-		"dotted note":         {board, plugin.FormWrite{Key: "pr-1", Set: map[string]json.RawMessage{"note.next": raw(`"x"`)}}, "top-level keys only"},
-		"system":              {board, plugin.FormWrite{Key: "pr-1", Set: map[string]json.RawMessage{"system": raw(`{}`)}}, "owner or core key"},
-		"target-aria":         {board, plugin.FormWrite{Board: true, Unset: []string{"target-aria"}}, "owner or core key"},
-		"board key not ours":  {board, plugin.FormWrite{Board: true, Set: map[string]json.RawMessage{"items": raw(`{}`)}}, `board key "items"`},
-		"inputs key not ours": {board, plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"ledger_ack": raw(`{}`)}}, `inputs key "ledger_ack"`},
-		"board retire":        {board, plugin.FormWrite{Board: true, Retire: true}, "only a child form retires"},
-		"no board form":       {&model.Critic{Name: "b", Source: model.SourceBoard}, plugin.FormWrite{Board: true}, "no board form"},
+		"another source":    {&model.Critic{Name: "x", Source: "teams-chat", InputsForm: "@inputs"}, ok, "may not write other forms"},
+		"no target":         {scout, plugin.FormWrite{Set: ok.Set}, "names no target"},
+		"no inputs form":    {&model.Critic{Name: "s", Source: model.SourceScout}, ok, "no inputs form"},
+		"ledger_ack":        {scout, plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"ledger_ack": raw(`{}`)}}, `inputs key "ledger_ack"`},
+		"rule":              {scout, plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"rule": raw(`""`)}}, `inputs key "rule"`},
+		"dotted outbox key": {scout, plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox.1": raw(`{}`)}}, `"ledger_outbox.1"`},
+		"target-aria":       {scout, plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"target-aria": raw(`"x"`)}}, `"target-aria"`},
 	} {
-		err := ValidateForms(c.w, &plugin.Reply{Forms: append(append([]plugin.FormWrite{}, ok[0]), c.fw)})
+		err := ValidateForms(c.w, &plugin.Reply{Forms: []plugin.FormWrite{ok, c.fw}})
 		if err == nil || !strings.Contains(err.Error(), c.in) || !strings.Contains(err.Error(), "reply refused") {
 			t.Errorf("%s: %v (want %q)", name, err, c.in)
 		}
 	}
 }
 
-// Live, through the core: a board-sync critic's plugin writes a child PR form (minted with a ChildLease lifetime and
-// recorded in runtime.children), the board's prs key and a ledger outbox member, and reads the inputs form; a reply
-// naming note is refused whole (nothing lands); a retire renames the child and drops it from runtime.children; the
-// outbox merges members and removes a null one.
-func TestLiveBoardFormsThroughTheCore(t *testing.T) {
+// The scout's own keys are pr:<n> and issue:<n>, one segment, nothing else.
+func TestScoutSourceKeys(t *testing.T) {
+	ok := &plugin.Reply{Set: map[string]json.RawMessage{"pr:108445": raw(`{}`), "issue:96000": raw(`{}`)}, Unset: []string{"pr:1"}}
+	if err := SourceKeysOnly(model.SourceScout, ok); err != nil {
+		t.Fatalf("scout keys refused: %v", err)
+	}
+	for _, k := range []string{"pr:", "pr:1.title", "prs", "authored", "critic", "issue:*", "target-aria"} {
+		if err := SourceKeysOnly(model.SourceScout, &plugin.Reply{Set: map[string]json.RawMessage{k: raw(`1`)}}); err == nil {
+			t.Errorf("scout may set %q", k)
+		}
+	}
+	if err := SourceKeysOnly("github-author", &plugin.Reply{Set: map[string]json.RawMessage{"pr:1": raw(`1`)}}); err == nil {
+		t.Error("another source may set pr:1")
+	}
+}
+
+// Live, through the core on scratch forms: the scout's entries land on its own role form, its outbox members merge
+// into the inputs form's ledger_outbox (a null removes one) without touching the steward's keys, the board is read
+// (prs, items) and never written, and a reply naming another inputs key is refused whole (nothing lands).
+func TestLiveScoutFormsThroughTheCore(t *testing.T) {
 	if os.Getenv("EBAC_LIVE") != "1" {
 		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
 	}
@@ -78,7 +82,7 @@ func TestLiveBoardFormsThroughTheCore(t *testing.T) {
 		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
 		return id
 	}
-	critForm, boardForm, inputsForm := mint("ebac-livetest-boardsync"), mint("livetest-board"), mint("livetest-inputs")
+	critForm, boardForm, inputsForm := mint("ebac-livetest-scout"), mint("livetest-board"), mint("livetest-inputs")
 	if err := f.SetJSON(ctx, boardForm, "items", map[string]string{"a": "hand-kept"}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,13 +92,15 @@ func TestLiveBoardFormsThroughTheCore(t *testing.T) {
 	if err := f.SetJSON(ctx, inputsForm, "ledger_outbox", map[string]any{"1": map[string]string{"pr": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	name := "livetest-boardsync-" + strings.TrimPrefix(critForm, "@")[:8]
-	w := &model.Critic{Name: name, Source: model.SourceBoard, FormID: critForm, BoardForm: boardForm, InputsForm: inputsForm,
-		EverySec: 120, CreatedAt: time.Now().UTC()}
+	if err := f.SetJSON(ctx, inputsForm, "ledger_ack", map[string]any{"1": map[string]string{"sha": "k"}}); err != nil {
+		t.Fatal(err)
+	}
+	name := "livetest-scout-" + strings.TrimPrefix(critForm, "@")[:8]
+	w := &model.Critic{Name: name, Source: model.SourceScout, FormID: critForm, BoardForm: boardForm, InputsForm: inputsForm,
+		Scout: &model.ScoutWatch{Repo: "bic/aether", Authors: []string{"x"}}, EverySec: 120, CreatedAt: time.Now().UTC()}
 	if err := st.SaveCritic(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-
 	var reply plugin.Reply
 	var seen plugin.Request
 	handle := func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
@@ -106,14 +112,6 @@ func TestLiveBoardFormsThroughTheCore(t *testing.T) {
 	}
 	var out strings.Builder
 	p := &Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"gh": handle}}
-	load := func() *model.Critic {
-		t.Helper()
-		c, err := st.LoadCritic(ctx, name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c
-	}
 	keys := func(id string) map[string]json.RawMessage {
 		t.Helper()
 		k, _, err := f.FormRaw(ctx, id)
@@ -122,82 +120,48 @@ func TestLiveBoardFormsThroughTheCore(t *testing.T) {
 		}
 		return k
 	}
+	board0 := keys(boardForm)
 
-	reply = plugin.Reply{Forms: []plugin.FormWrite{
-		{Key: "pr-108445", Set: map[string]json.RawMessage{"state": raw(`"OPEN"`), "head": raw(`"abc"`)}},
-		{Board: true, Set: map[string]json.RawMessage{"prs": raw(`{"ledger-1":{"pr":108445,"front":true}}`)}},
-		{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"2":{"pr":"2"}}`)}},
-	}}
+	reply = plugin.Reply{Set: map[string]json.RawMessage{"pr:108445": raw(`{"n":108445,"state":"MERGED"}`), "issue:96000": raw(`{"n":96000}`)},
+		Forms: []plugin.FormWrite{{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"2":{"pr":"2"}}`)}}}}
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("round 1: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(string(seen.Inputs["rule"]), "band-jobs") {
-		t.Fatalf("the plugin did not get the inputs form: %v", seen.Inputs)
+	if !strings.Contains(string(seen.Inputs["rule"]), "band-jobs") || !strings.Contains(string(seen.Board["items"]), "hand-kept") {
+		t.Fatalf("the plugin did not get the inputs and the board: %v %v", seen.Inputs, seen.Board)
 	}
-	child := load().Runtime.Children["pr-108445"]
-	if child == "" {
-		t.Fatalf("no child recorded: %+v", load().Runtime.Children)
+	ck := keys(critForm)
+	if !strings.Contains(string(ck["pr:108445"]), "MERGED") || string(ck["issue:96000"]) != `{"n":96000}` {
+		t.Fatalf("entries on the role form: %v", ck)
 	}
-	ck := keys(child)
-	if string(ck["state"]) != `"OPEN"` || string(ck["kind"]) != `"ebac.child"` || string(ck["name"]) != `"ebac-`+name+`-pr-108445"` || string(ck["parent_form"]) != `"`+critForm+`"` {
-		t.Fatalf("child keys: %v", ck)
-	}
-	arias, err := f.ListArias(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lease := time.Duration(-1)
-	for _, a := range arias {
-		if a.ID == child {
-			lease = time.Duration(a.TTLMS) * time.Millisecond
-		}
-	}
-	if lease != model.ChildLease {
-		t.Fatalf("child lease %s, want %s", lease, model.ChildLease)
-	}
-	bk := keys(boardForm)
-	if !strings.Contains(string(bk["prs"]), "108445") || !strings.Contains(string(bk["items"]), "hand-kept") {
-		t.Fatalf("board: %v", bk)
-	}
-	if ob := string(keys(inputsForm)["ledger_outbox"]); !strings.Contains(ob, `"1"`) || !strings.Contains(ob, `"2"`) {
-		t.Fatalf("outbox not merged: %s", ob)
-	}
-	if _, req := seen.Children["pr-108445"]; req {
-		t.Fatal("round 1 request already named a child it had not minted")
+	ik := keys(inputsForm)
+	if ob := string(ik["ledger_outbox"]); !strings.Contains(ob, `"1"`) || !strings.Contains(ob, `"2"`) || !strings.Contains(string(ik["ledger_ack"]), `"k"`) {
+		t.Fatalf("outbox not merged or ack touched: %v", ik)
 	}
 
-	// note is refused whole: neither the child's state nor the board moves.
-	reply = plugin.Reply{Forms: []plugin.FormWrite{
-		{Key: "pr-108445", Set: map[string]json.RawMessage{"state": raw(`"MERGED"`)}},
-		{Key: "pr-108445", Set: map[string]json.RawMessage{"note": raw(`{"next":"x"}`)}},
-	}}
+	// Another inputs key: refused whole, the entry write in the same reply does not land.
+	reply = plugin.Reply{Set: map[string]json.RawMessage{"pr:108445": raw(`{"n":108445,"state":"OPEN"}`)},
+		Forms: []plugin.FormWrite{{Inputs: true, Set: map[string]json.RawMessage{"ledger_ack": raw(`{}`)}}}}
 	if err := p.Poll(ctx, name); err == nil || !strings.Contains(err.Error(), "reply refused") {
-		t.Fatalf("a note write was not refused: %v", err)
+		t.Fatalf("a ledger_ack write was not refused: %v", err)
 	}
-	if string(keys(child)["state"]) != `"OPEN"` {
+	if !strings.Contains(string(keys(critForm)["pr:108445"]), "MERGED") {
 		t.Fatal("a refused reply partly landed")
 	}
 
-	// Retire after a final write; outbox member 1 removed by null.
-	reply = plugin.Reply{Forms: []plugin.FormWrite{
-		{Key: "pr-108445", Set: map[string]json.RawMessage{"state": raw(`"MERGED"`)}, Retire: true},
-		{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"1":null}`)}},
-	}}
+	// A null member removes it; an unset entry goes.
+	reply = plugin.Reply{Unset: []string{"issue:96000"}, Forms: []plugin.FormWrite{{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{"1":null}`)}}}}
 	if err := p.Poll(ctx, name); err != nil {
-		t.Fatalf("retire round: %v\n%s", err, out.String())
-	}
-	if seen.Children["pr-108445"] != child {
-		t.Fatalf("the request did not cite the child: %v", seen.Children)
-	}
-	ck = keys(child)
-	if string(ck["state"]) != `"MERGED"` || !strings.HasPrefix(string(ck["name"]), `"`+model.ArchivedFormPrefix) {
-		t.Fatalf("retired child: %v", ck)
-	}
-	if _, still := load().Runtime.Children["pr-108445"]; still {
-		t.Fatal("a retired child is still renewed")
+		t.Fatalf("round 3: %v\n%s", err, out.String())
 	}
 	if ob := string(keys(inputsForm)["ledger_outbox"]); strings.Contains(ob, `"1"`) || !strings.Contains(ob, `"2"`) {
 		t.Fatalf("outbox after null: %s", ob)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, child) })
+	if _, still := keys(critForm)["issue:96000"]; still {
+		t.Fatal("unset entry still on the form")
+	}
+	b1 := keys(boardForm)
+	if string(b1["items"]) != string(board0["items"]) || len(b1) != len(board0) {
+		t.Fatalf("the board moved: %v -> %v", board0, b1)
+	}
 }

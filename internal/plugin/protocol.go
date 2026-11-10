@@ -93,17 +93,12 @@ type Request struct {
 	// holder-edited configuration, read fresh every round.
 	Keys map[string]json.RawMessage `json:"keys,omitempty"`
 
-	// Inputs are the keys of the critic's inputs form (board sync), read by
-	// the core each round; Children its child forms, key -> @id.
-	Inputs   map[string]json.RawMessage `json:"inputs,omitempty"`
-	Children map[string]string          `json:"children,omitempty"`
-	// Board is the board form's keys the reconciliation reads (prs, stacks,
-	// items, board_sync), read by the core each round.
+	// Inputs are the keys of the critic's inputs form (the scout: merge rule,
+	// ledger acks), read by the core each round.
+	Inputs map[string]json.RawMessage `json:"inputs,omitempty"`
+	// Board is the board form's owner marks (keys prs, items), read-only,
+	// read by the core each round (the scout's merge checklist).
 	Board map[string]json.RawMessage `json:"board,omitempty"`
-	// Notes are the owner notes on each child form (key -> its note object:
-	// next, blocker, needs_boss, by, at), read by the core each round. The
-	// plugin reads them; it never writes note.*.
-	Notes map[string]json.RawMessage `json:"notes,omitempty"`
 
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
@@ -113,26 +108,19 @@ type Request struct {
 	Retry   int                    `json:"retry,omitempty"`   // OpBrief
 }
 
-// FormWrite is one write to a form the core keeps for the critic. Exactly one
-// target: Key (a child form, minted by the core on its first write and kept
-// in runtime.children), Board (the critic's board form), or Inputs (the
-// critic's inputs form). Set and Unset are top-level keys; Retire (child
-// only) renames the form ebac-archived-... and stops renewing it, after this
-// write's Set and Unset.
-// Ping is a one-line message the core sends to a role (board sync: a
-// judgement line to the Minister, a stale note on a lane front to its owner).
+// Ping is a one-line message the core sends to a role (the scout: a material
+// issue change to the owner role of each PR linking it).
 type Ping struct {
 	To   string `json:"to"` // a role form, @<id>
 	Text string `json:"text"`
 }
 
+// FormWrite is one write to the critic's inputs form (the scout's ledger
+// outbox): Set's ledger_outbox members are merged into the form's, and a null
+// member is removed. Inputs names the target and must be set.
 type FormWrite struct {
-	Key    string                     `json:"key,omitempty"`
-	Board  bool                       `json:"board,omitempty"`
 	Inputs bool                       `json:"inputs,omitempty"`
 	Set    map[string]json.RawMessage `json:"set,omitempty"`
-	Unset  []string                   `json:"unset,omitempty"`
-	Retire bool                       `json:"retire,omitempty"`
 }
 
 // Gone is one resource the plugin has given up on (form key gone.<Key>).
@@ -159,11 +147,11 @@ type Reply struct {
 	Set   map[string]json.RawMessage `json:"set,omitempty"`
 	Unset []string                   `json:"unset,omitempty"`
 	Gone  []Gone                     `json:"gone,omitempty"`
-	// Pings are one-line messages to roles (board sync only; ValidatePings).
+	// Pings are one-line messages to roles (the scout only; ValidatePings).
 	Pings []Ping `json:"pings,omitempty"`
-	// Forms are writes to forms the core keeps for the critic (board sync):
-	// child forms by stable key, the board form, the inputs form's outbox.
-	// Validated whole (ValidateForms) before any of the reply is applied.
+	// Forms are writes to the critic's inputs form (the scout's ledger
+	// outbox), validated whole (ValidateForms) before any of the reply is
+	// applied.
 	Forms []FormWrite `json:"forms,omitempty"`
 	// Wake are one-off messages for the alert target (blind, gone).
 	Wake []string `json:"wake,omitempty"`
@@ -221,7 +209,7 @@ func Adopt(core, from *model.Critic) {
 	r.Author = f.Author
 	r.Keel = f.Keel
 	r.BandHub = f.BandHub
-	r.PRBoard = f.PRBoard
+	r.Scout = f.Scout
 	r.Roster = f.Roster
 	r.Releases = f.Releases
 	r.Stopped = f.Stopped

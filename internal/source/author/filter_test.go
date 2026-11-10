@@ -15,6 +15,7 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/internal/relevance"
 )
 
 // The author-chiqun filter, as the leader's order encodes the Minister's rule.chiqun_relevance (2026-11-09).
@@ -30,7 +31,7 @@ func chiqunKeys() map[string]json.RawMessage {
 	return map[string]json.RawMessage{model.AuthorPathsKey: model.MustJSON(chiqunPaths), model.AuthorTitleKey: model.MustJSON(chiqunTitle)}
 }
 
-func mustFilter(t *testing.T, keys map[string]json.RawMessage) *filter {
+func mustFilter(t *testing.T, keys map[string]json.RawMessage) *relevance.Filter {
 	t.Helper()
 	spec, err := specFromKeys(keys)
 	if err != nil {
@@ -68,7 +69,7 @@ func TestChiqunTitles(t *testing.T) {
 		"chore: [Effort retire] not at the start":                                     false,
 		"feat(effort_x): another scope":                                               false,
 	} {
-		if got := f.titleHit(title); got != want {
+		if got := f.TitleHit(title); got != want {
 			t.Errorf("title %q: tracked %v, want %v", title, got, want)
 		}
 	}
@@ -97,7 +98,7 @@ func TestChiqunPaths(t *testing.T) {
 		"aether_rust/crates/quality_slices/src/floor.rs":                                false,
 		"aether_rust/crates/x/src/my_effort_y.rs":                                       false,
 	} {
-		if got := f.pathHit([]string{file}); got != want {
+		if got := f.PathHit([]string{file}); got != want {
 			t.Errorf("file %s: tracked %v, want %v", file, got, want)
 		}
 	}
@@ -106,10 +107,10 @@ func TestChiqunPaths(t *testing.T) {
 func TestFilterKeysAndGlobs(t *testing.T) {
 	// paths as one comma-separated string (what `figaro set ... paths a,b` may store).
 	f := mustFilter(t, map[string]json.RawMessage{model.AuthorPathsKey: model.MustJSON("**/a/**, b?.go")})
-	if !f.pathHit([]string{"x/a/y.go"}) || !f.pathHit([]string{"b1.go"}) || f.pathHit([]string{"b12.go"}) || f.pathHit([]string{"x/b1.go"}) {
+	if !f.PathHit([]string{"x/a/y.go"}) || !f.PathHit([]string{"b1.go"}) || f.PathHit([]string{"b12.go"}) || f.PathHit([]string{"x/b1.go"}) {
 		t.Fatal("comma-separated paths misread")
 	}
-	if g := mustFilter(t, nil); !g.all() {
+	if g := mustFilter(t, nil); !g.All() {
 		t.Fatal("no keys must track every PR")
 	}
 	for _, bad := range []map[string]json.RawMessage{
