@@ -52,7 +52,7 @@ func has(lines []string, sub string) bool {
 
 func TestRenderFixture(t *testing.T) {
 	h := fixture(t)
-	v := Render(h, []string{"leob", "ross"}, nil)
+	v := Render(h, []string{"leob", "ross"}, nil, nil)
 	nonEmpty := 0
 	for _, q := range h.Stats.Queues {
 		if q.Counts.Ready+q.Counts.Leased > 0 {
@@ -83,7 +83,7 @@ func TestRenderStableAcrossPolls(t *testing.T) {
 	if day.Hour() > 22 {
 		t.Fatalf("fixture hub now %s is too late in the day for a +1h same-day check", day)
 	}
-	js := func() string { b, _ := json.Marshal(Render(h, nil, nil)); return string(b) }
+	js := func() string { b, _ := json.Marshal(Render(h, nil, nil, nil)); return string(b) }
 	a := js()
 	h.Stats.Hub.Now += 60_000
 	if b := js(); b != a {
@@ -118,14 +118,14 @@ func TestNodeStaleOnlyPastThreshold(t *testing.T) {
 	h := fixture(t)
 	h.Stats.Hub.NodeStaleS = 30
 	h.Nodes[0].AgeS = 29
-	if has(Render(h, nil, nil).Nodes, "stale") {
+	if has(Render(h, nil, nil, nil).Nodes, "stale") {
 		t.Fatal("a fresh node shows stale")
 	}
 	h.Nodes[0].AgeS = 900
 	h.Nodes[0].Received = h.Stats.Hub.Now - 900_000
 	want := "stale_since=" + Since(h.Nodes[0].Received, h.Stats.Hub.Now)
-	if !has(Render(h, nil, nil).Nodes, want) {
-		t.Fatalf("a stale node does not say so: %v", Render(h, nil, nil).Nodes)
+	if !has(Render(h, nil, nil, nil).Nodes, want) {
+		t.Fatalf("a stale node does not say so: %v", Render(h, nil, nil, nil).Nodes)
 	}
 }
 
@@ -158,17 +158,17 @@ func TestDupes(t *testing.T) {
 	h := fixture(t)
 	g := find(t, h, 4269)
 	h.Live = append(h.Live, clone(g, 9001, map[string]string{"label": "resubmitted", "why": "again"}))
-	v := Render(h, nil, nil)
+	v := Render(h, nil, nil, nil)
 	if !has(v.Dupes, "dupe gate.change 5f4ddf1b: 4269,9001") {
 		t.Fatalf("label/why resubmit not a dupe: %v", v.Dupes)
 	}
 	h.Live[len(h.Live)-1] = clone(g, 9001, map[string]string{"sha": "0000000000000000000000000000000000000001"})
-	if v := Render(h, nil, nil); len(v.Dupes) != 0 {
+	if v := Render(h, nil, nil, nil); len(v.Dupes) != 0 {
 		t.Fatalf("control: a different sha is a dupe: %v", v.Dupes)
 	}
 	b := find(t, h, 4246)
 	h.Live[len(h.Live)-1] = clone(b, 9002, map[string]string{"branch": "other/branch"})
-	if v := Render(h, nil, nil); !has(v.Dupes, "dupe aether.clippy-pr 1c93d0cb: 4246,9002") {
+	if v := Render(h, nil, nil, nil); !has(v.Dupes, "dupe aether.clippy-pr 1c93d0cb: 4246,9002") {
 		t.Fatalf("branch must be ignored: %v", v.Dupes)
 	}
 }
@@ -184,18 +184,28 @@ func TestSuperseded(t *testing.T) {
 	if got := Branches(h.Live); len(got) != 1 || got[0] != br {
 		t.Fatalf("branches to check = %v; want only job 4246's (main is trunk, never checked)", got)
 	}
-	if v := Render(h, nil, map[string]string{br: "1c93d0cbdb78231be750c9e188777b9b47124a9d"}); len(v.Dupes) != 0 {
+	if v := Render(h, nil, map[string]string{br: "1c93d0cbdb78231be750c9e188777b9b47124a9d"}, nil); len(v.Dupes) != 0 {
 		t.Fatalf("tip == sha flagged: %v", v.Dupes)
 	}
-	if v := Render(h, nil, map[string]string{br: "ffffffffffffffffffffffffffffffffffffffff"}); !has(v.Dupes, "superseded 4246 aether.clippy-pr") || !has(v.Dupes, "tip=ffffffff") {
-		t.Fatalf("moved tip not flagged: %v", v.Dupes)
+	const sha, tip = "1c93d0cbdb78231be750c9e188777b9b47124a9d", "ffffffffffffffffffffffffffffffffffffffff"
+	moved := map[string]string{br: tip}
+	// A different tip is flagged only when it is a PROVEN descendant of the job's sha.
+	if v := Render(h, nil, moved, map[string]bool{Pair(sha, tip): true}); !has(v.Dupes, "superseded 4246 aether.clippy-pr") || !has(v.Dupes, "tip=ffffffff") {
+		t.Fatalf("descendant tip not flagged: %v", v.Dupes)
+	}
+	// An older (or diverged) tip: the forge lags the node mirrors (jobs 4664-4669). Never flagged; nor with no verdict.
+	if v := Render(h, nil, moved, map[string]bool{Pair(sha, tip): false}); len(v.Dupes) != 0 {
+		t.Fatalf("older tip flagged: %v", v.Dupes)
+	}
+	if v := Render(h, nil, moved, nil); len(v.Dupes) != 0 {
+		t.Fatalf("tip without a verdict flagged: %v", v.Dupes)
 	}
 	// absent upstream is unknown (mirror-only branches, e.g. jobs 4378-4401): never flagged.
-	if v := Render(h, nil, map[string]string{br: ""}); len(v.Dupes) != 0 {
+	if v := Render(h, nil, map[string]string{br: ""}, nil); len(v.Dupes) != 0 {
 		t.Fatalf("branch absent upstream flagged: %v", v.Dupes)
 	}
 	// main moving under a pinned eval is not supersession.
-	if v := Render(h, nil, map[string]string{"main": "ffffffffffffffffffffffffffffffffffffffff"}); has(v.Dupes, "superseded") {
+	if v := Render(h, nil, map[string]string{"main": "ffffffffffffffffffffffffffffffffffffffff"}, nil); has(v.Dupes, "superseded") {
 		t.Fatalf("trunk flagged: %v", v.Dupes)
 	}
 }
@@ -218,7 +228,7 @@ func TestNeverRendersLogFields(t *testing.T) {
 	q := QueueStats{Queue: "q"}
 	q.Counts.Ready = 1
 	h.Stats.Queues = append(h.Stats.Queues, q)
-	out, _ := json.Marshal(Render(h, nil, nil))
+	out, _ := json.Marshal(Render(h, nil, nil, nil))
 	if strings.Contains(string(out), "hunter2") {
 		t.Fatalf("a log field reached the view: %s", out)
 	}
@@ -287,13 +297,13 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	ctx := context.Background()
 	h := fixture(t)
 	now := time.UnixMilli(h.Stats.Hub.Now)
-	r := Step(ctx, State{}, h, Config{}, now, nil)
+	r := Step(ctx, State{}, h, Config{}, now, nil, nil)
 	if strings.Join(r.Changed, ",") != "queues,nodes,dupes" || len(r.Set) != 4 || r.Set["updated"] == nil || strings.Join(r.Unset, ",") != "live" {
 		t.Fatalf("first round: changed %v, %d keys, unset %v", r.Changed, len(r.Set), r.Unset)
 	}
 	t.Logf("first round: %d bytes", setBytes(r.Set))
 	h.Stats.Hub.Now += 60_000
-	r2 := Step(ctx, r.State, h, Config{}, now.Add(time.Minute), nil)
+	r2 := Step(ctx, r.State, h, Config{}, now.Add(time.Minute), nil, nil)
 	if len(r2.Set) != 0 || len(r2.Unset) != 0 {
 		t.Fatalf("a quiet re-poll wrote %v, unset %v", r2.Changed, r2.Unset)
 	}
@@ -302,7 +312,7 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	j.Created = h.Stats.Hub.Now
 	h.Live = append(h.Live, j)
 	bump(h, j.Queue)
-	r3 := Step(ctx, r2.State, h, Config{}, now.Add(2*time.Minute), nil)
+	r3 := Step(ctx, r2.State, h, Config{}, now.Add(2*time.Minute), nil, nil)
 	if strings.Join(r3.Changed, ",") != "queues" || r3.Set["updated"] == nil || len(r3.Set) != 2 {
 		t.Fatalf("a new job: changed %v (%d keys); want queues + updated", r3.Changed, len(r3.Set))
 	}
@@ -321,7 +331,7 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 			h.Stats.Queues[i].Counts.Leased++
 		}
 	}
-	r4 := Step(ctx, r3.State, h, Config{}, now.Add(3*time.Minute), nil)
+	r4 := Step(ctx, r3.State, h, Config{}, now.Add(3*time.Minute), nil, nil)
 	if strings.Join(r4.Changed, ",") != "queues,nodes" {
 		t.Fatalf("a claim: changed %v; want queues,nodes", r4.Changed)
 	}
@@ -348,16 +358,17 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 		}
 		return "ffffffffffffffffffffffffffffffffffffffff", nil
 	}
-	r := Step(ctx, State{}, h, Config{}, now, tip)
+	desc := func(context.Context, string, string, string) (bool, error) { return true, nil }
+	r := Step(ctx, State{}, h, Config{}, now, tip, desc)
 	if calls != 1 || !has(r.State.View.Dupes, "superseded 4246") {
 		t.Fatalf("first round: %d calls, dupes %v", calls, r.State.View.Dupes)
 	}
-	r = Step(ctx, r.State, h, Config{}, now.Add(4*time.Minute), tip)
+	r = Step(ctx, r.State, h, Config{}, now.Add(4*time.Minute), tip, desc)
 	if calls != 1 {
 		t.Fatalf("tips asked again within %s: %d calls", TipEvery, calls)
 	}
 	fail = true
-	r = Step(ctx, r.State, h, Config{}, now.Add(6*time.Minute), tip)
+	r = Step(ctx, r.State, h, Config{}, now.Add(6*time.Minute), tip, desc)
 	if calls != 2 || r.State.TipErr == "" || !has(r.State.View.Dupes, "superseded 4246") {
 		t.Fatalf("a failed refresh must keep the old tips and say so: calls %d err %q dupes %v", calls, r.State.TipErr, r.State.View.Dupes)
 	}
@@ -388,4 +399,54 @@ func setBytes(set map[string]json.RawMessage) int {
 		n += len(k) + len(v)
 	}
 	return n
+}
+
+// The descent check through Step: an OLDER tip (compare: behind) is never flagged, a true descendant is; each
+// (sha, tip) pair costs one call, cached across rounds; an error is unknown (nothing flagged), not cached, and
+// retried no sooner than TipEvery; a pair no live job needs leaves the cache.
+func TestStepDescent(t *testing.T) {
+	ctx := context.Background()
+	h := fixture(t)
+	now := time.UnixMilli(h.Stats.Hub.Now)
+	const older, newer = "0000000000000000000000000000000000000001", "0000000000000000000000000000000000000002"
+	cur := older
+	tip := func(context.Context, string, string) (string, error) { return cur, nil }
+	calls := map[string]int{}
+	fail := false
+	desc := func(_ context.Context, repo, base, head string) (bool, error) {
+		calls[base+"..."+head]++
+		if fail {
+			return false, fmt.Errorf("HTTP 502")
+		}
+		return head == newer, nil // the forge's compare: newer is ahead of the job's sha, older is behind it
+	}
+	r := Step(ctx, State{}, h, Config{}, now, tip, desc)
+	if has(r.State.View.Dupes, "superseded") || len(calls) != 1 {
+		t.Fatalf("older tip: dupes %v, calls %v", r.State.View.Dupes, calls)
+	}
+	r = Step(ctx, r.State, h, Config{}, now.Add(time.Minute), tip, desc)
+	for p, n := range calls {
+		if n != 1 {
+			t.Fatalf("pair %s asked %d times; cached verdicts cost one call", p, n)
+		}
+	}
+	// The forge catches up: the tip is now a descendant (asked at the next tip refresh).
+	cur, fail = newer, true
+	r = Step(ctx, r.State, h, Config{}, now.Add(6*time.Minute), tip, desc)
+	if has(r.State.View.Dupes, "superseded") || r.State.DescErr == "" {
+		t.Fatalf("a failed compare must be unknown and say so: dupes %v err %q", r.State.View.Dupes, r.State.DescErr)
+	}
+	before := len(calls)
+	fail = false
+	r = Step(ctx, r.State, h, Config{}, now.Add(7*time.Minute), tip, desc)
+	if len(calls) != before || calls[Pair("1c93d0cbdb78231be750c9e188777b9b47124a9d", newer)] != 1 {
+		t.Fatalf("retried inside the back-off: %v", calls)
+	}
+	r = Step(ctx, r.State, h, Config{}, now.Add(12*time.Minute), tip, desc)
+	if !has(r.State.View.Dupes, "superseded 4246") || r.State.DescErr != "" {
+		t.Fatalf("descendant tip not flagged after the back-off: dupes %v err %q", r.State.View.Dupes, r.State.DescErr)
+	}
+	if len(r.State.Desc) != 1 {
+		t.Fatalf("cache keeps only pairs live jobs need: %v", r.State.Desc)
+	}
 }

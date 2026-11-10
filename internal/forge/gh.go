@@ -514,6 +514,23 @@ func isBot(a gqlAuthor) bool {
 	return false
 }
 
+// Descends says whether head is a STRICT descendant of base in repo: the
+// compare API answers "ahead" with behind_by 0. Behind, diverged, identical,
+// and a compare the forge does not know (404, 422: an unknown sha, no merge
+// base, or no compare at all) are a definite false, never an error; only a
+// failed call is an error.
+func (g *GH) Descends(ctx context.Context, repo, base, head string) (bool, error) {
+	out, err := g.run(ctx, []string{"api", "repos/" + repo + "/compare/" + base + "..." + head,
+		"-q", `.status + " " + (.behind_by|tostring)`}, nil)
+	if err != nil {
+		if m := err.Error(); strings.Contains(m, "HTTP 404") || strings.Contains(m, "HTTP 422") || strings.Contains(m, "Not Found") {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "ahead 0", nil
+}
+
 // BranchTip is the sha a branch points at, or "" when the branch is gone.
 func (g *GH) BranchTip(ctx context.Context, repo, branch string) (string, error) {
 	out, err := g.run(ctx, []string{"api", "repos/" + repo + "/git/ref/heads/" + branch, "-q", ".object.sha"}, nil)

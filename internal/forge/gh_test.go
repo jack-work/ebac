@@ -74,6 +74,33 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	switch scenario {
+	case "compare":
+		// gh api repos/R/compare/BASE...HEAD -q '<jq>': HEAD names the answer; stdout is what the jq prints.
+		var head string
+		for _, a := range rest {
+			if _, after, ok := strings.Cut(a, "/compare/"); ok {
+				_, head, _ = strings.Cut(after, "...")
+			}
+		}
+		switch head {
+		case "ahead":
+			os.Stdout.WriteString("ahead 0\n")
+		case "behind":
+			os.Stdout.WriteString("behind 3\n")
+		case "diverged":
+			os.Stdout.WriteString("diverged 2\n")
+		case "identical":
+			os.Stdout.WriteString("identical 0\n")
+		case "gone":
+			os.Stderr.WriteString("gh: Not Found (HTTP 404)\n")
+			os.Exit(1)
+		case "nobase":
+			os.Stderr.WriteString("gh: No common ancestor between base and head. (HTTP 422)\n")
+			os.Exit(1)
+		default:
+			os.Stderr.WriteString("gh: Server Error (HTTP 502)\n")
+			os.Exit(1)
+		}
 	case "author":
 		if p := os.Getenv("EBAC_FAKE_LOG"); p != "" {
 			f, _ := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -277,5 +304,20 @@ func TestIsBot(t *testing.T) {
 		if got := isBot(tc.a); got != tc.want {
 			t.Errorf("isBot(%s) = %v, want %v", tc.a.Login, got, tc.want)
 		}
+	}
+}
+
+// Descends is true only for a strict descendant (ahead, behind by 0). Every
+// definite no is false with no error; only a failed call is an error.
+func TestDescends(t *testing.T) {
+	g := fakeGH(t, "compare")
+	for head, want := range map[string]bool{"ahead": true, "behind": false, "diverged": false, "identical": false, "gone": false, "nobase": false} {
+		got, err := g.Descends(context.Background(), "bic/aether", "jobsha", head)
+		if err != nil || got != want {
+			t.Errorf("%s: %v, %v; want %v, no error", head, got, err, want)
+		}
+	}
+	if got, err := g.Descends(context.Background(), "bic/aether", "jobsha", "boom"); err == nil || got || !strings.Contains(err.Error(), "502") {
+		t.Fatalf("a failed call: %v, %v; want an error naming it", got, err)
 	}
 }

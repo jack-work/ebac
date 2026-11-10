@@ -85,10 +85,12 @@ func (j Job) what() string {
 	return w
 }
 
-// Render builds the view. tips maps branch -> tip sha; "" (absent upstream) or
-// a branch missing from tips is UNKNOWN, never flagged: mirror-only branches
-// live on node mirrors, not the forge.
-func Render(h *Hub, utility []string, tips map[string]string) View {
+// Render builds the view. tips maps branch -> tip sha; desc maps Pair(job sha,
+// tip) -> whether the tip is a proven strict descendant of the job's sha. Only
+// a proven descendant is flagged; anything else (absent upstream, no verdict,
+// behind, diverged) is UNKNOWN: the forge lags the node mirrors, and
+// mirror-only branches never reach it.
+func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bool) View {
 	now := h.Stats.Hub.Now
 	v := View{Queues: []string{}, Nodes: []string{}, Dupes: []string{}}
 
@@ -159,7 +161,7 @@ func Render(h *Hub, utility []string, tips map[string]string) View {
 		}
 		return a.ID < b.ID
 	})
-	v.Dupes = append(append([]string{}, dupes(live)...), superseded(live, tips)...)
+	v.Dupes = append(append([]string{}, dupes(live)...), superseded(live, tips, desc)...)
 	return v
 }
 
@@ -217,10 +219,10 @@ func dupes(live []Job) []string {
 // (a nightly eval) is not superseded by the move: never flagged.
 var trunk = map[string]bool{"main": true, "master": true}
 
-// superseded names live jobs whose branch tip exists upstream and has moved
-// off their sha. A branch absent upstream is unknown (it may be mirror-only),
-// never superseded.
-func superseded(live []Job, tips map[string]string) []string {
+// superseded names live jobs whose branch tip upstream is a PROVEN strict
+// descendant of their sha (warden 2026-11-10: jobs 4664-4669 were flagged by
+// an older tip). No tip, no verdict, or a negative one is never flagged.
+func superseded(live []Job, tips map[string]string, desc map[string]bool) []string {
 	var out []string
 	for _, j := range live {
 		br, sha := j.param("branch"), j.param("sha")
@@ -228,10 +230,28 @@ func superseded(live []Job, tips map[string]string) []string {
 			continue
 		}
 		tip := tips[br]
-		if tip == "" || tip == sha {
+		if tip == "" || tip == sha || !desc[Pair(sha, tip)] {
 			continue
 		}
 		out = append(out, fmt.Sprintf("superseded %d %s %s %s tip=%s", j.ID, j.Queue, j.what(), short(sha), short(tip)))
+	}
+	return out
+}
+
+// Pair keys a descent verdict: the job's sha, then the tip.
+func Pair(sha, tip string) string { return sha + "..." + tip }
+
+// pairs are the (job sha, tip) pairs live jobs need a descent verdict for.
+func pairs(live []Job, tips map[string]string) map[string][2]string {
+	out := map[string][2]string{}
+	for _, j := range live {
+		br, sha := j.param("branch"), j.param("sha")
+		if br == "" || sha == "" || trunk[br] {
+			continue
+		}
+		if tip := tips[br]; tip != "" && tip != sha {
+			out[Pair(sha, tip)] = [2]string{sha, tip}
+		}
 	}
 	return out
 }

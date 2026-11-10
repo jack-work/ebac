@@ -17,9 +17,10 @@ import (
 type Plugin struct {
 	// Hub, Tip and Now replace the socket client, the forge and the clock in
 	// tests; nil means the real ones.
-	Hub *Hub
-	Tip TipFunc
-	Now func() time.Time
+	Hub  *Hub
+	Tip  TipFunc
+	Desc DescFunc
+	Now  func() time.Time
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
@@ -60,17 +61,25 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 			prev = State{}
 		}
 	}
-	tip := pl.Tip
-	if tip == nil {
+	tip, desc := pl.Tip, pl.Desc
+	if tip == nil || desc == nil {
 		gh := forge.NewGH(req.GH, req.Host)
 		if w.Host != "" {
 			gh.Host = w.Host // the token follows the host
 		}
-		tip = gh.BranchTip
+		if tip == nil {
+			tip = gh.BranchTip
+		}
+		if desc == nil {
+			desc = gh.Descends
+		}
 	}
-	r := Step(ctx, prev, h, cfg, now(), tip)
+	r := Step(ctx, prev, h, cfg, now(), tip, desc)
 	w.Runtime.BandHub = model.MustJSON(r.State)
 	rep.Set, rep.Unset = r.Set, r.Unset
+	if r.State.DescErr != "" {
+		rep.Logf("%s: descent check: %s (unknown: nothing flagged until it answers)", w.Name, r.State.DescErr)
+	}
 	if r.State.TipErr != "" {
 		rep.Logf("%s: branch tips: %s (keeping the last ones)", w.Name, r.State.TipErr)
 	}
