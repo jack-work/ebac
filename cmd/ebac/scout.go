@@ -28,7 +28,6 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	labels := fs.String("labels", "", "relevance: labels, comma-separated (e.g. effort-router)")
 	title := fs.String("title-match", "", "relevance: title regex")
 	paths := fs.String("paths", "", "relevance: changed-file globs, comma-separated (** spans directories)")
-	sync := fs.String("sync-login", "", "the plan->issues sync's login: its issue edits and comments ping nobody")
 	var owners ownerFlags
 	fs.Var(&owners, "owner", "AUTHOR[/TITLE_REGEX]=@ROLE, repeatable, first match wins: who gets a material change on an issue\n"+
 		"its PRs link (e.g. 'John-Kelliher/(?i)ledger=@<ledger lead>' before 'John-Kelliher=@<knight>')")
@@ -39,7 +38,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	sw := &model.ScoutWatch{Repo: *repo, Authors: splitList(*authors), Labels: splitList(*labels), TitleMatch: *title, Paths: splitList(*paths),
-		SyncLogin: *sync, Owners: owners}
+		Owners: owners}
 	if len(sw.Authors) == 0 || !strings.Contains(sw.Repo, "/") {
 		return fmt.Errorf("--authors and --repo owner/name are required")
 	}

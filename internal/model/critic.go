@@ -582,9 +582,6 @@ type ScoutWatch struct {
 	Labels     []string `json:"labels,omitempty"`
 	TitleMatch string   `json:"title_match,omitempty"`
 	Paths      []string `json:"paths,omitempty"`
-	// SyncLogin is the plan->issues sync's login: its edits and comments on
-	// an issue never ping anyone (nor do a bot's).
-	SyncLogin string `json:"sync_login,omitempty"`
 	// Owners route a material issue change to the owner role of each PR
 	// linking the issue: the first rule matching the PR's author (and title,
 	// when set) names the role.

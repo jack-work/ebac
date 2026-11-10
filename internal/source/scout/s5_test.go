@@ -16,7 +16,6 @@ const (
 	knight    = "@8d70861a00000000000000000000aaaa"
 	lead      = "@cc540006000000000000000000000bbb"
 	secretary = "@3dbeb326000000000000000000000ccc"
-	syncLogin = "plan-sync"
 )
 
 func who(l string) map[string]any { return map[string]any{"__typename": "User", "login": l} }
@@ -26,14 +25,13 @@ func bot(l string) map[string]any { return map[string]any{"__typename": "Bot", "
 // 201 (Chiqun's -> the Secretary) and 105 (ours, merged: never pinged).
 func s5World(t *testing.T) *world {
 	w := newWorld(t)
-	w.watch.SyncLogin = syncLogin
 	w.watch.Owners = []model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: knight}, {Author: his, Role: secretary}}
 	link := "Part of https://x/bic/aether/issues/301"
 	old := w.now.Add(-time.Hour)
 	w.gh.items[101].body, w.gh.items[201].body = link, link
 	w.gh.items[104] = &item{n: 104, author: ours, title: "[Effort][ledger-2] the ledger piece", state: "OPEN", head: headA, mergeable: "MERGEABLE", updated: old, body: link}
 	w.gh.items[105] = &item{n: 105, author: ours, title: "[Effort][1-1] merged", state: "OPEN", head: headA, mergeable: "MERGEABLE", updated: old, body: link}
-	w.gh.items[301].body = "The plan item.\n\n- [ ] one\n- [x] two\n"
+	w.gh.items[301].body = "The plan item.\n\n- [ ] one\n- [x] two\n\n<!-- plan-sync -->\nPlan: owner Knight.\n- [ ] synced step\n<!-- /plan-sync -->\nhuman tail\n"
 	w.pass(0)
 	m := w.gh.items[105]
 	m.state, m.mergedAt, m.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
@@ -58,7 +56,8 @@ func pingsTo(r Result) map[string]string {
 }
 
 // S5: a material change by a human reaches the owner role of each OPEN PR linking the issue, one line each, naming
-// what changed and who; the sync login's and a bot's changes reach nobody but still move the entry's digests.
+// what changed and who; an edit confined to a plan-sync block (the sync edits as John-Kelliher) and a bot's label
+// reach nobody.
 func TestIssueChangeReachesOwners(t *testing.T) {
 	w := s5World(t)
 
@@ -79,14 +78,20 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		t.Fatalf("digests %v", entry(t, r, "issue:301")["digests"])
 	}
 
-	// The sync edits the body and comments; a bot labels: digests move, nobody is pinged.
+	// The sync (as John-Kelliher) rewrites its block and ticks a checklist item inside it: nobody is pinged.
 	r = w.change(func(is *item) {
-		is.body += "\nsynced from the plan\n"
-		is.editor = who(syncLogin)
-		is.comments = append(is.comments, map[string]any{"author": who(syncLogin), "createdAt": w.now.Format(time.RFC3339)})
+		is.body = strings.Replace(is.body, "Plan: owner Knight.\n- [ ] synced step", "Plan: owner Knight, needs #4100.\n- [x] synced step", 1)
+		is.editor = who(ours)
 	})
-	if len(r.Pings) != 0 || r.Set["issue:301"] == nil {
-		t.Fatalf("sync edit: pings %v, entry written %v", r.Pings, r.Set["issue:301"] != nil)
+	if len(r.Pings) != 0 {
+		t.Fatalf("sync block edit: pings %v", r.Pings)
+	}
+	// The same login edits outside the block: news.
+	r = w.change(func(is *item) {
+		is.body = strings.Replace(is.body, "human tail", "human tail, amended", 1)
+	})
+	if text := pingsTo(r)[knight]; !strings.Contains(text, "changed: body by "+ours) {
+		t.Fatalf("edit outside the block: %v", r.Pings)
 	}
 	r = w.change(func(is *item) {
 		is.labels = append(is.labels, "triaged")
@@ -94,7 +99,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.comments = append(is.comments, map[string]any{"author": bot("ci"), "createdAt": w.now.Format(time.RFC3339)})
 	})
 	if len(r.Pings) != 0 || r.Set["issue:301"] == nil {
-		t.Fatalf("bot label: pings %v", r.Pings)
+		t.Fatalf("bot label: pings %v, entry written %v", r.Pings, r.Set["issue:301"] != nil)
 	}
 
 	// A human ticks the checklist: checklist, not body.
@@ -119,14 +124,6 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 	})
 	if text := pingsTo(r)[secretary]; !strings.Contains(text, "changed: state closed by carol") {
 		t.Fatalf("close: %v", r.Pings)
-	}
-	// The sync reopens it: nobody.
-	r = w.change(func(is *item) {
-		is.state, is.closedAt = "OPEN", ""
-		is.events = append(is.events, map[string]any{"__typename": "ReopenedEvent", "createdAt": w.now.Format(time.RFC3339), "actor": who(syncLogin)})
-	})
-	if len(r.Pings) != 0 {
-		t.Fatalf("sync reopen pinged: %v", r.Pings)
 	}
 }
 
@@ -192,25 +189,25 @@ func TestQueueBounded(t *testing.T) {
 }
 
 // Digests: the checklist is its own digest (a tick moves it, not body's); labels are case- and order-blind; human
-// comments leave out bots and the sync login.
+// comments leave out bots.
 func TestIssueDigests(t *testing.T) {
 	base := Issue{Body: "Text.\r\n\r\n- [ ] a\r\n* [X] b\r\n", Labels: []string{"B", "a"},
 		Comments: []Comment{{By: &login{Login: "alice"}, At: "1"}, {By: &login{Typename: "Bot", Login: "x"}, At: "3"},
-			{By: &login{Login: "sync"}, At: "4"}, {By: &login{Login: "y[bot]"}, At: "5"}, {By: &login{Login: "bob"}, At: "2"}}}
-	d, last := issueDigests(base, "SYNC")
+			{By: &login{Login: "y[bot]"}, At: "5"}, {By: &login{Login: "bob"}, At: "2"}}}
+	d, last := issueDigests(base)
 	if d.HumanComments != 2 || last != "2" {
 		t.Fatalf("humans %d last %q", d.HumanComments, last)
 	}
 	tick := base
 	tick.Body = strings.Replace(base.Body, "- [ ] a", "- [x] a", 1)
 	tick.Labels = []string{"A", "b"}
-	d2, _ := issueDigests(tick, "sync")
+	d2, _ := issueDigests(tick)
 	if d2.Body != d.Body || d2.Checklist == d.Checklist || d2.Labels != d.Labels {
 		t.Fatalf("tick: %+v vs %+v", d2, d)
 	}
 	text := base
 	text.Body = "Other text.\n\n- [ ] a\n* [X] b\n"
-	if d3, _ := issueDigests(text, "sync"); d3.Body == d.Body || d3.Checklist != d.Checklist {
+	if d3, _ := issueDigests(text); d3.Body == d.Body || d3.Checklist != d.Checklist {
 		t.Fatalf("text edit: %+v vs %+v", d3, d)
 	}
 	keys := []string{}
@@ -272,5 +269,54 @@ func TestHandleCarriesPings(t *testing.T) {
 	rep, err := pl.Handle(context.Background(), plugin.Request{Op: plugin.OpRound, Critic: c, Inputs: w.in})
 	if err != nil || len(rep.Pings) != 3 || !strings.Contains(strings.Join(rep.Log, " "), "3 ping(s), 0 queued") {
 		t.Fatalf("err %v pings %v log %v", err, rep.Pings, rep.Log)
+	}
+}
+
+// The plan-sync markers are whole lines (whitespace trimmed): what sits between them, the marker lines included, is
+// left out of the body and checklist digests; an unclosed block runs to the end; a marker inside other text is text.
+func TestPlanSyncBlocks(t *testing.T) {
+	dig := func(body string) IssueDigests {
+		d, _ := issueDigests(Issue{Body: body})
+		return d
+	}
+	const doc = "Human text.\n- [ ] human step\n  <!-- plan-sync -->  \nPlan text.\n- [ ] plan step\n<!-- /plan-sync -->\nMore human text.\n"
+	base := dig(doc)
+	same := func(name, body string) {
+		t.Helper()
+		if d := dig(body); d.Body != base.Body || d.Checklist != base.Checklist {
+			t.Errorf("%s moved the digests", name)
+		}
+	}
+	moved := func(name, body string, bodyMoves, checkMoves bool) {
+		t.Helper()
+		d := dig(body)
+		if (d.Body != base.Body) != bodyMoves || (d.Checklist != base.Checklist) != checkMoves {
+			t.Errorf("%s: body moved %v (want %v), checklist moved %v (want %v)", name, d.Body != base.Body, bodyMoves,
+				d.Checklist != base.Checklist, checkMoves)
+		}
+	}
+	same("an edit inside the block", strings.Replace(doc, "Plan text.", "Plan text, rewritten.", 1))
+	same("a checklist tick inside the block", strings.Replace(doc, "- [ ] plan step", "- [x] plan step", 1))
+	same("CRLF", strings.ReplaceAll(doc, "\n", "\r\n"))
+	moved("an edit outside", strings.Replace(doc, "More human text.", "More human text!", 1), true, false)
+	moved("a tick outside", strings.Replace(doc, "- [ ] human step", "- [x] human step", 1), false, true)
+
+	// Unclosed: everything after the opening line is the sync's.
+	open := "Human text.\n<!-- plan-sync -->\nPlan.\n- [ ] a\n"
+	d0 := dig(open)
+	if d := dig(open + "more plan\n- [x] b\n"); d != d0 {
+		t.Error("an edit after an unclosed marker moved the digests")
+	}
+	if d := dig(strings.Replace(open, "Human text.", "Human text!", 1)); d.Body == d0.Body {
+		t.Error("an edit before an unclosed marker did not move the body digest")
+	}
+
+	// A marker inside other text is not a marker: what follows it is human text.
+	inline := "Human text <!-- plan-sync --> still human.\nTail.\n<!-- /plan-sync -->\n"
+	if d := dig(strings.Replace(inline, "Tail.", "Tail!", 1)); d.Body == dig(inline).Body {
+		t.Error("an inline marker opened a block")
+	}
+	if got := stripSync("a\n <!-- plan-sync -->\t\nb\n<!-- /plan-sync -->\nc\nx <!-- /plan-sync -->"); got != "a\nc\nx <!-- /plan-sync -->" {
+		t.Errorf("stripSync: %q", got)
 	}
 }

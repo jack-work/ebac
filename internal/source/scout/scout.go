@@ -4,8 +4,8 @@
 // when the entry changes (board-sync v2, S1); and, on merge or close, the
 // PR's final entry as a record in the inputs form's ledger outbox, the entry
 // kept Keep after it closed and then removed (S2); a material change on an
-// issue (body, checklist, labels, state, a human comment; never by the sync
-// login or a bot) pings the owner role of each open PR whose body links it,
+// issue (body, checklist, labels, state, a human comment; never an edit
+// confined to the sync's <!-- plan-sync --> blocks, never a bot) pings the owner role of each open PR whose body links it,
 // one line, at most MaxIssuePings a pass (S5).
 //
 // Every pass is a catch-up, never a full pull:
@@ -153,8 +153,9 @@ type IssueEntry struct {
 }
 
 // IssueDigests are what a material change is measured on (S5): the body
-// without its checklist, the checklist, the labels (8-byte hex digests), and
-// the count of recent human comments (not a bot, not the sync login).
+// without its checklist, the checklist (both over the body with every
+// plan-sync block stripped), the labels (8-byte hex digests), and the count
+// of recent human comments (not a bot).
 type IssueDigests struct {
 	Body          string `json:"body"`
 	Checklist     string `json:"checklist"`
@@ -505,14 +506,14 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			t = &TrackedIssue{}
 			st.Issues[n] = t
 		}
-		d, lastHuman := issueDigests(is, in.Watch.SyncLogin)
+		d, lastHuman := issueDigests(is)
 		e := IssueEntry{N: n, Kind: "issue", Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, UpdatedAt: is.Updated,
 			Digests: d}
 		if e.Labels == nil {
 			e.Labels = []string{}
 		}
 		if t.Entry != "" { // a baseline is never news
-			if what, by := material(t, is, d, lastHuman, in.Watch.SyncLogin); len(what) > 0 {
+			if what, by := material(t, is, d, lastHuman); len(what) > 0 {
 				pings = append(pings, issuePings(st.PRs, owners, is, what, by, logf)...)
 			}
 		}
@@ -864,9 +865,35 @@ func roleOf(owners []owner, t *TrackedPR) string {
 
 var checkRE = regexp.MustCompile(`(?m)^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]*(.*?)[ \t]*$`)
 
+// The plan->issues sync edits as a seat's own login, so its edits are told apart by place, not by author: it
+// wraps its part of an issue body between two marker LINES, <!-- plan-sync --> and <!-- /plan-sync --> (the whole
+// line, surrounding whitespace trimmed; a marker inside other text is not a marker), and the digests are taken over
+// the body with every such block stripped, marker lines included (an unclosed block strips to the end).
+const (
+	syncOpen  = "<!-- plan-sync -->"
+	syncClose = "<!-- /plan-sync -->"
+)
+
+// stripSync is the body without its plan-sync blocks.
+func stripSync(body string) string {
+	var keep []string
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		switch t := strings.TrimSpace(line); {
+		case !in && t == syncOpen:
+			in = true
+		case in && t == syncClose:
+			in = false
+		case !in:
+			keep = append(keep, line)
+		}
+	}
+	return strings.Join(keep, "\n")
+}
+
 // issueDigests are an issue's digests, and the time of its newest human comment.
-func issueDigests(is Issue, sync string) (IssueDigests, string) {
-	body := strings.ReplaceAll(is.Body, "\r\n", "\n")
+func issueDigests(is Issue) (IssueDigests, string) {
+	body := stripSync(strings.ReplaceAll(is.Body, "\r\n", "\n"))
 	var check []string
 	for _, m := range checkRE.FindAllStringSubmatch(body, -1) {
 		check = append(check, strings.ToLower(m[1])+"|"+m[2])
@@ -880,7 +907,7 @@ func issueDigests(is Issue, sync string) (IssueDigests, string) {
 	d := IssueDigests{Body: digest(rest), Checklist: digest(check), Labels: digest(labels)}
 	last := ""
 	for _, c := range is.Comments {
-		if human(c.By, sync) {
+		if human(c.By) {
 			d.HumanComments++
 			if c.At > last {
 				last = c.At
@@ -890,20 +917,18 @@ func issueDigests(is Issue, sync string) (IssueDigests, string) {
 	return d, last
 }
 
-// human says whether an actor's change is news: not a bot, not the sync login. An unknown actor (a deleted
-// account, an event beyond the timeline read) counts as human: a lost human change is worse than a stray ping.
-func human(l *login, sync string) bool {
-	if l == nil {
-		return true
-	}
-	return !l.bot() && !(sync != "" && strings.EqualFold(l.Login, sync))
+// human says whether an actor's change is news: not a bot. An unknown actor (a deleted account, an event beyond
+// the timeline read) counts as human: a lost human change is worse than a stray ping.
+func human(l *login) bool {
+	return l == nil || !l.bot()
 }
 
-// material is what changed on a tracked issue since the last pass, by whom, leaving out what the sync or a bot did.
-func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman, sync string) ([]string, []string) {
+// material is what changed on a tracked issue since the last pass, by whom, leaving out what a bot did (the sync's
+// edits inside its blocks never move the digests).
+func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman string) ([]string, []string) {
 	var what, by []string
 	add := func(part string, l *login) {
-		if !human(l, sync) {
+		if !human(l) {
 			return
 		}
 		what = append(what, part)

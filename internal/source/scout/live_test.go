@@ -124,7 +124,7 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 }
 
 // Live S5, through the core on scratch forms: a human's issue comment reaches the owner role of each open PR linking
-// it (through the core's send, faked here so no aria is woken); the sync login's body edit reaches nobody.
+// it (through the core's send, faked here so no aria is woken); an edit inside the plan-sync block reaches nobody.
 func TestLiveIssueChangeReachesOwner(t *testing.T) {
 	if os.Getenv("EBAC_LIVE") != "1" {
 		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
@@ -163,7 +163,7 @@ func TestLiveIssueChangeReachesOwner(t *testing.T) {
 		Holder:  func(context.Context, string) bool { return true }}
 	is := wd.gh.items[301]
 
-	is.body, is.editor, is.updated = is.body+"\nsynced\n", who(syncLogin), now.Add(time.Minute)
+	is.body, is.editor, is.updated = strings.Replace(is.body, "Plan: owner Knight.", "Plan: owner Knight, re-synced.", 1), who(ours), now.Add(time.Minute)
 	now = now.Add(2 * time.Minute)
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("sync pass: %v\n%s", err, out.String())
