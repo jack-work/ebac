@@ -103,6 +103,9 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		if err == nil {
 			req.Board, err = p.readBoard(ctx, w)
 		}
+		if err == nil {
+			req.Notes = p.readNotes(ctx, w)
+		}
 	}
 	var rep *plugin.Reply
 	if err == nil {
@@ -113,6 +116,9 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 	}
 	if err == nil {
 		err = ValidateForms(w, rep)
+	}
+	if err == nil {
+		err = ValidatePings(w, rep)
 	}
 	if err != nil {
 		// The plugin itself failed (crash, timeout, bad reply): a failed

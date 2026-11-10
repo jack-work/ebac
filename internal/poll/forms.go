@@ -226,7 +226,76 @@ func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Rep
 	}
 	err := p.applyForms(ctx, w, rep.Forms)
 	p.renewChildren(ctx, w)
+	if err == nil {
+		p.sendPings(ctx, w, rep.Pings)
+	}
 	return err
+}
+
+// MaxPings bounds one round's pings: a reconciliation gone wrong must not
+// flood a role.
+const MaxPings = 10
+
+var pingTo = regexp.MustCompile(`^@[0-9a-f]{8,32}$`)
+
+// ValidatePings refuses a reply whose pings are not one short line to a role
+// form, or more than MaxPings, or from a source other than board sync.
+func ValidatePings(w *model.Critic, rep *plugin.Reply) error {
+	if len(rep.Pings) == 0 {
+		return nil
+	}
+	if w.SourceName() != model.SourceBoard {
+		return fmt.Errorf("source %s may not ping roles: reply refused", w.SourceName())
+	}
+	if len(rep.Pings) > MaxPings {
+		return fmt.Errorf("%d pings in one round (max %d): reply refused", len(rep.Pings), MaxPings)
+	}
+	for i, pg := range rep.Pings {
+		switch {
+		case !pingTo.MatchString(pg.To):
+			return fmt.Errorf("ping %d: to %q is not a role form @<hex>: reply refused", i, pg.To)
+		case pg.Text == "" || len(pg.Text) > 400 || strings.ContainsAny(pg.Text, "\n\r"):
+			return fmt.Errorf("ping %d: text must be one line of 1-400 bytes: reply refused", i)
+		}
+	}
+	return nil
+}
+
+// sendPings delivers the pings to the roles' holders; a role nobody holds is
+// skipped and said.
+func (p *Poller) sendPings(ctx context.Context, w *model.Critic, pings []plugin.Ping) {
+	for _, pg := range pings {
+		if !p.RoleHasHolder(ctx, pg.To) {
+			fmt.Fprintf(p.Out, "%s: ping to %s skipped (no holder): %s\n", w.Name, pg.To, pg.Text)
+			continue
+		}
+		if err := p.Fig.Send(ctx, pg.To, pg.Text); err != nil {
+			fmt.Fprintf(p.Out, "%s: ping to %s failed: %v\n", w.Name, pg.To, err)
+		}
+	}
+}
+
+// readNotes is each child form's owner notes, key -> the note object. A note
+// written as flat dotted keys (note.next, figaro#43) is folded into one
+// object. An unreadable child is skipped (its note is not news this round).
+func (p *Poller) readNotes(ctx context.Context, w *model.Critic) map[string]json.RawMessage {
+	out := map[string]json.RawMessage{}
+	for key, id := range w.Runtime.Children {
+		f, err := p.Store.ReadForm(ctx, id)
+		if err != nil {
+			continue
+		}
+		note := model.ObjectOf(f.Keys["note"])
+		for k, v := range f.Keys {
+			if sub, ok := strings.CutPrefix(k, "note."); ok && sub != "" {
+				note[sub] = v
+			}
+		}
+		if len(note) > 0 {
+			out[key] = model.MustJSON(note)
+		}
+	}
+	return out
 }
 
 // renewChildren keeps every live child's lease ChildLease long, with one list

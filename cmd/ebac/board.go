@@ -22,6 +22,7 @@ func cmdAddBoard(ctx context.Context, g globals, args []string) error {
 	repo := fs.String("repo", "", "owner/repo on the forge host (e.g. bic/aether)")
 	board := fs.String("board", "", "the board form it reconciles (@id)")
 	inputs := fs.String("inputs", "", "the inputs form (@id): rule, needs, ledger_outbox, ledger_ack")
+	judgeTo := fs.String("judge", "", "the role (@id) that gets each new judgement line (the Decisions Minister)")
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 2*time.Minute, "poll interval")
 	_ = fs.Parse(args)
@@ -48,7 +49,7 @@ func cmdAddBoard(ctx context.Context, g globals, args []string) error {
 	}
 	w := &model.Critic{Name: *name, Source: model.SourceBoard, Host: *host, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		EverySec: int(every.Seconds()), BoardForm: *board, InputsForm: *inputs,
-		BoardWatch: &model.BoardWatch{Author: *author, Repo: *repo}, Stop: model.StopConditions{}}
+		BoardWatch: &model.BoardWatch{Author: *author, Repo: *repo, JudgeTo: *judgeTo}, Stop: model.StopConditions{}}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
 		return fmt.Errorf("mint role form: %w", err)

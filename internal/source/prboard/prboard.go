@@ -97,6 +97,9 @@ type Tracked struct {
 	Marks     string `json:"m,omitempty"` // digest of the owner marks the checklist last saw
 	Settling  bool   `json:"r,omitempty"` // checks pending or mergeability unknown: re-read next pass
 	Outbox    string `json:"o,omitempty"` // when the ledger record went to the outbox (RFC 3339)
+	Updated   string `json:"u,omitempty"` // the PR's updatedAt (runtime only: it moves with every push)
+	Stale     string `json:"n,omitempty"` // note.at of the owner note last marked stale on the form
+	Pinged    string `json:"q,omitempty"` // note.at of the stale front note whose owner was pinged
 }
 
 // State is the plugin's opaque state (critic runtime.pr_board).
@@ -104,6 +107,8 @@ type State struct {
 	Cursor string           `json:"cursor,omitempty"`
 	PRs    map[int]*Tracked `json:"prs,omitempty"`
 	Tests  map[int64]int    `json:"tests,omitempty"` // known test counts by job id (a done job's count never changes)
+	Judged map[string]bool  `json:"judged,omitempty"` // judgement lines already sent
+	Judge  string           `json:"judge,omitempty"`  // digest of the judgement lines on the board
 }
 
 // Pass is one round's inputs.
@@ -112,6 +117,7 @@ type Pass struct {
 	Inputs   map[string]json.RawMessage
 	Board    map[string]json.RawMessage
 	Children map[string]string
+	Notes    map[string]json.RawMessage // child key -> owner note object (next, blocker, needs_boss, by, at)
 	Now      time.Time
 }
 
@@ -122,8 +128,13 @@ type Result struct {
 	GHCalls   int
 	Changed   []int    // PR forms written
 	Judgement []string // reconciliation lines for the Minister
+	Pings     []plugin.Ping
 	Log       []string
 }
+
+// NoteStale is the age past which an owner note on a PR that moved after it
+// is stale (board-sync plan, section A).
+const NoteStale = 2 * time.Hour
 
 // ChildKey is a PR's child form key.
 func ChildKey(n int) string { return fmt.Sprintf("pr-%d", n) }
@@ -266,7 +277,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		keys := factKeys(in.Watch.Repo, p, js, steps, pstate)
 		d := digest(keys)
 		t.Title, t.State, t.Draft, t.Additions, t.Deletions, t.PState = p.Title, p.Facts.State, p.Facts.Draft, p.Additions, p.Deletions, pstate
-		t.Head, t.Jobs, t.Marks = p.Facts.Oid, digest(js), digest(mk)
+		t.Head, t.Jobs, t.Marks, t.Updated = p.Facts.Oid, digest(js), digest(mk), p.Updated
 		t.Settling = settling(p)
 		if d != t.Facts {
 			set := map[string]json.RawMessage{}
@@ -320,6 +331,8 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			res.Forms = append(res.Forms, plugin.FormWrite{Board: true, Set: map[string]json.RawMessage{"prs": model.MustJSON(r.Prs)}})
 			logf("board: %d added, %d changed, %d removed", len(r.Added), len(r.Changed), len(r.Removed))
 		}
+		judge(&st, &res, in.Watch.JudgeTo)
+		staleNotes(&st, &res, in, frontPRs(r.Prs))
 	}
 
 	// Retire after the board no longer cites them (the reconciliation archived the refs this same pass).
@@ -533,4 +546,123 @@ func digest(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
+}
+
+// judge writes the judgement lines onto the board when they change (an empty
+// set clears them) and pings each NEW line to the Minister, one line each.
+func judge(st *State, res *Result, to string) {
+	lines := append([]string(nil), res.Judgement...)
+	sort.Strings(lines)
+	if d := digest(lines); d != st.Judge {
+		res.Forms = append(res.Forms, plugin.FormWrite{Board: true, Set: map[string]json.RawMessage{
+			"board_sync": model.MustJSON(map[string]any{"judgement": lines})}})
+		st.Judge = d
+	}
+	now := map[string]bool{}
+	var fresh []string
+	for _, l := range lines {
+		now[l] = true
+		if !st.Judged[l] {
+			fresh = append(fresh, l)
+		}
+	}
+	st.Judged = now
+	if to == "" || len(fresh) == 0 {
+		return
+	}
+	const most = 5 // pings per round for judgement; the rest are on the board
+	for i, l := range fresh {
+		if i == most {
+			res.Pings = append(res.Pings, plugin.Ping{To: to, Text: fmt.Sprintf("board-sync: +%d more judgement line(s) on the board, key board_sync.judgement", len(fresh)-most)})
+			break
+		}
+		res.Pings = append(res.Pings, plugin.Ping{To: to, Text: oneLine("board-sync judgement: " + l)})
+	}
+}
+
+// frontPRs are the PR numbers that front a lane on the reconciled board.
+func frontPRs(prs map[string]json.RawMessage) map[int]string {
+	out := map[int]string{}
+	for cw, raw := range prs {
+		var e struct {
+			PR    int    `json:"pr"`
+			Front bool   `json:"front"`
+			Stack string `json:"stack"`
+		}
+		if json.Unmarshal(raw, &e) == nil && e.Front && e.PR > 0 {
+			out[e.PR] = e.Stack + " (" + cw + ")"
+		}
+	}
+	return out
+}
+
+// staleNotes applies the stale rule: an owner note older than NoteStale on an
+// open PR that moved after note.at is stale. The PR form says so (fact key
+// note_stale, cleared when the note is refreshed or the rule no longer holds);
+// a stale note on a lane front pings its owner (note.by, a role @id) once per
+// note.
+func staleNotes(st *State, res *Result, in Pass, fronts map[int]string) {
+	nums := make([]int, 0, len(st.PRs))
+	for n := range st.PRs {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	pings := 0
+	for _, n := range nums {
+		t := st.PRs[n]
+		if t.State != "OPEN" {
+			continue
+		}
+		var note struct {
+			By string `json:"by"`
+			At string `json:"at"`
+		}
+		_ = json.Unmarshal(in.Notes[ChildKey(n)], &note)
+		stale := ""
+		if at, err := time.Parse(time.RFC3339, note.At); err == nil && in.Now.Sub(at) > NoteStale {
+			if up, err := time.Parse(time.RFC3339, t.Updated); err == nil && up.After(at) {
+				stale = note.At
+			}
+		}
+		if stale != t.Stale {
+			fw := plugin.FormWrite{Key: ChildKey(n)}
+			if stale == "" {
+				fw.Unset = []string{"note_stale"}
+			} else {
+				fw.Set = map[string]json.RawMessage{"note_stale": model.MustJSON(map[string]string{"note_at": note.At, "pr_moved": t.Updated,
+					"meaning": "the owner note predates the PR's last move by more than " + NoteStale.String() + ": refresh note.*"})}
+			}
+			res.Forms = append(res.Forms, fw)
+			t.Stale = stale
+		}
+		lane, front := fronts[n]
+		if stale == "" || !front || t.Pinged == stale || !pingable(note.By) || pings == 3 {
+			continue
+		}
+		res.Pings = append(res.Pings, plugin.Ping{To: note.By, Text: oneLine(fmt.Sprintf(
+			"board-sync: your note on #%d, the front of lane %s, is stale (written %s, PR moved %s); refresh note.next/note.blocker on form %s",
+			n, lane, note.At, t.Updated, in.Children[ChildKey(n)]))})
+		t.Pinged = stale
+		pings++
+	}
+}
+
+func pingable(to string) bool {
+	if len(to) < 9 || to[0] != '@' {
+		return false
+	}
+	for _, c := range to[1:] {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return len(to) <= 33
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 400 {
+		s = s[:399] + "~"
+	}
+	return s
 }

@@ -100,6 +100,10 @@ type Request struct {
 	// Board is the board form's keys the reconciliation reads (prs, stacks,
 	// items, board_sync), read by the core each round.
 	Board map[string]json.RawMessage `json:"board,omitempty"`
+	// Notes are the owner notes on each child form (key -> its note object:
+	// next, blocker, needs_boss, by, at), read by the core each round. The
+	// plugin reads them; it never writes note.*.
+	Notes map[string]json.RawMessage `json:"notes,omitempty"`
 
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
@@ -115,6 +119,13 @@ type Request struct {
 // critic's inputs form). Set and Unset are top-level keys; Retire (child
 // only) renames the form ebac-archived-... and stops renewing it, after this
 // write's Set and Unset.
+// Ping is a one-line message the core sends to a role (board sync: a
+// judgement line to the Minister, a stale note on a lane front to its owner).
+type Ping struct {
+	To   string `json:"to"` // a role form, @<id>
+	Text string `json:"text"`
+}
+
 type FormWrite struct {
 	Key    string                     `json:"key,omitempty"`
 	Board  bool                       `json:"board,omitempty"`
@@ -148,6 +159,8 @@ type Reply struct {
 	Set   map[string]json.RawMessage `json:"set,omitempty"`
 	Unset []string                   `json:"unset,omitempty"`
 	Gone  []Gone                     `json:"gone,omitempty"`
+	// Pings are one-line messages to roles (board sync only; ValidatePings).
+	Pings []Ping `json:"pings,omitempty"`
 	// Forms are writes to forms the core keeps for the critic (board sync):
 	// child forms by stable key, the board form, the inputs form's outbox.
 	// Validated whole (ValidateForms) before any of the reply is applied.

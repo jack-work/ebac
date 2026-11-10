@@ -53,7 +53,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		}
 	}
 	rep := &plugin.Reply{Critic: w, Done: true}
-	r, err := Run(ctx, gh, hub, prev, Pass{Watch: *w.BoardWatch, Inputs: req.Inputs, Board: req.Board, Children: req.Children, Now: now()})
+	r, err := Run(ctx, gh, hub, prev, Pass{Watch: *w.BoardWatch, Inputs: req.Inputs, Board: req.Board, Children: req.Children, Notes: req.Notes, Now: now()})
 	for _, l := range r.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}
@@ -66,11 +66,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = now().UTC()
 	w.Runtime.PRBoard = model.MustJSON(r.State)
-	rep.Forms = r.Forms
-	if len(r.Judgement) > 0 {
-		rep.Forms = append(rep.Forms, plugin.FormWrite{Board: true, Set: map[string]json.RawMessage{
-			"board_sync": model.MustJSON(map[string]any{"judgement": r.Judgement})}})
-	}
+	rep.Forms, rep.Pings = r.Forms, r.Pings
 	rep.Logf("%s: round %d: %d GitHub call(s), %d PR form(s) written, %d tracked", w.Name, w.Runtime.Round, r.GHCalls, len(r.Changed), len(r.State.PRs))
 	return rep, nil
 }
@@ -98,7 +94,7 @@ func (h hubClient) Tests(ctx context.Context, id int64) (int, bool, error) {
 	case float64:
 		return int(x), true, nil
 	case map[string]any:
-		for _, k := range []string{"tests", "run", "total"} {
+		for _, k := range []string{"tests_run", "tests", "run", "total"} {
 			if f, ok := x[k].(float64); ok {
 				return int(f), true, nil
 			}

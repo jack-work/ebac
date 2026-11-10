@@ -587,4 +587,8 @@ var (
 type BoardWatch struct {
 	Author string `json:"author"`
 	Repo   string `json:"repo"` // owner/name on the critic's host
+	// JudgeTo is the role (@form) that gets each new judgement line (a PR
+	// with no stack tag, no owner, an item whose PRs are all gone): the
+	// Decisions Minister.
+	JudgeTo string `json:"judge_to,omitempty"`
 }
