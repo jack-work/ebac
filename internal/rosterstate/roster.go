@@ -14,26 +14,28 @@ import (
 	"github.com/gluck/ebac/internal/model"
 )
 
-// ForksMax caps the forks key, newest first: past it the list ends in
-// "+N more (figaro ls)", so the value stays small and under figaro's
-// 2046-character cut.
-const ForksMax = 20
+// ForksEvery bounds how often the forks key is rewritten: fork births and
+// deaths are constant, and every write reaches every student (cheroot
+// 2026-11-10). The full list stays in figaro ls.
+const ForksEvery = 10 * time.Minute
 
 // Dropped are keys earlier versions wrote; the first round unsets them once.
 var Dropped = []string{"updated"}
 
 // View is the form the roster writes: one key per role (role:<name>) and
-// the forks list.
+// forks, one line of live transient fork COUNTS per parent role.
 type View struct {
 	Roles map[string]string // form key -> one line
-	Forks []string
+	Forks string
 }
 
 // State is what the plugin wrote last round, so a round writes only change.
-// Slim says the Dropped keys have been unset.
+// Slim says the Dropped keys have been unset; ForksAt is when forks was last
+// written.
 type State struct {
-	Keys map[string]json.RawMessage `json:"keys"`
-	Slim bool                       `json:"slim,omitempty"`
+	Keys    map[string]json.RawMessage `json:"keys"`
+	Slim    bool                       `json:"slim,omitempty"`
+	ForksAt time.Time                  `json:"forks_at,omitempty"`
 }
 
 // KeyFor is a role form's key. Dots and stars are escaped: a dot would nest
@@ -162,31 +164,33 @@ func Derive(arias []model.Aria, now time.Time) View {
 			forks = append(forks, a)
 		}
 	}
-	under := func(a *model.Aria) string {
+	// Counts per parent role (a parent holding several names them all, as
+	// one); a fork whose parent holds no role is "other".
+	counts := map[string]int{}
+	other := 0
+	for _, a := range forks {
 		p := ix.get(a.Parent)
-		if p == nil {
-			return short(a.Parent)
+		if p == nil || len(holds[p.ID]) == 0 {
+			other++
+			continue
 		}
-		if n := holds[p.ID]; len(n) > 0 {
-			return strings.Join(n, "/")
-		}
-		return short(p.ID) + " " + p.Handle
+		counts[strings.Join(holds[p.ID], "/")]++
 	}
-	// Newest first: a fork's ttl runs from its creation, so expiry - ttl is
-	// when it was minted, fixed for its life.
-	sort.Slice(forks, func(i, j int) bool {
-		ci, cj := forks[i].ExpiresAt-forks[i].TTLMS, forks[j].ExpiresAt-forks[j].TTLMS
-		if ci != cj {
-			return ci > cj
-		}
-		return forks[i].ID < forks[j].ID
-	})
-	for i, a := range forks {
-		if i == ForksMax {
-			v.Forks = append(v.Forks, fmt.Sprintf("+%d more (figaro ls)", len(forks)-ForksMax))
-			break
-		}
-		v.Forks = append(v.Forks, fmt.Sprintf("%s %s under %s", short(a.ID), a.Handle, under(a)))
+	names := make([]string, 0, len(counts))
+	for n := range counts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names)+1)
+	for _, n := range names {
+		parts = append(parts, fmt.Sprintf("%s %d", n, counts[n]))
+	}
+	if other > 0 {
+		parts = append(parts, fmt.Sprintf("other %d", other))
+	}
+	v.Forks = strings.Join(parts, ", ")
+	if v.Forks == "" {
+		v.Forks = "none"
 	}
 	return v
 }
@@ -194,9 +198,6 @@ func Derive(arias []model.Aria, now time.Time) View {
 // Keys is the view as form keys.
 func (v View) Keys() map[string]json.RawMessage {
 	out := map[string]json.RawMessage{"forks": model.MustJSON(v.Forks)}
-	if v.Forks == nil {
-		out["forks"] = model.MustJSON([]string{})
-	}
 	for k, line := range v.Roles {
 		out[k] = model.MustJSON(line)
 	}
@@ -204,9 +205,20 @@ func (v View) Keys() map[string]json.RawMessage {
 }
 
 // Step compares a view with what was written: set holds only changed keys,
-// unset the keys whose role is gone (and, once, the Dropped keys).
-func Step(prev State, v View) (set map[string]json.RawMessage, unset []string, next State) {
+// unset the keys whose role is gone (and, once, the Dropped keys). forks is
+// rewritten at most every ForksEvery (at once over a pre-count list).
+func Step(prev State, v View, now time.Time) (set map[string]json.RawMessage, unset []string, next State) {
 	keys := v.Keys()
+	forksAt := prev.ForksAt
+	if old, ok := prev.Keys["forks"]; ok && string(old) != string(keys["forks"]) {
+		if !strings.HasPrefix(string(old), "[") && now.Sub(prev.ForksAt) < ForksEvery {
+			keys["forks"] = old // hold: what the form shows until the window passes
+		} else {
+			forksAt = now.UTC()
+		}
+	} else if !ok {
+		forksAt = now.UTC()
+	}
 	set = map[string]json.RawMessage{}
 	for k, val := range keys {
 		if string(prev.Keys[k]) != string(val) {
@@ -222,5 +234,5 @@ func Step(prev State, v View) (set map[string]json.RawMessage, unset []string, n
 		unset = append(unset, Dropped...)
 	}
 	sort.Strings(unset)
-	return set, unset, State{Keys: keys, Slim: true}
+	return set, unset, State{Keys: keys, Slim: true, ForksAt: forksAt}
 }

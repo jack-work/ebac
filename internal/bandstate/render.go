@@ -165,29 +165,20 @@ func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bo
 	return v
 }
 
-// ignoredParams never distinguish two jobs: branch (the order), and the
-// cosmetic label and why a resubmit may change (ebac Maintainer 2026-11-09).
-var ignoredParams = map[string]bool{"branch": true, "label": true, "why": true}
-
-// dupes groups live jobs that do the same work: same queue, sha and params
-// with branch, label and why ignored.
+// dupes groups live jobs that do the same work: same queue, template and the
+// FULL canonical params (sorted JSON of payload.params, attrs and tests
+// included), as warden-submit dedupes. The metadata view ebac reads shows only
+// branch, sha, label and node, so the full params arrive as the hub's digest
+// params_sum; a job without one is never grouped (flake.check 4709/4710: same
+// sha, attrs ci vs keel-web-*, were flagged and a real job was cancelled).
 func dupes(live []Job) []string {
 	groups := map[string][]int64{}
 	var order []string
 	for _, j := range live {
-		ks := make([]string, 0, len(j.Payload.Params))
-		for k := range j.Payload.Params {
-			if !ignoredParams[k] {
-				ks = append(ks, k)
-			}
+		if j.Payload.ParamsSum == "" {
+			continue
 		}
-		sort.Strings(ks)
-		var b strings.Builder
-		fmt.Fprintf(&b, "%s|%s", j.Queue, j.Payload.Template)
-		for _, k := range ks {
-			fmt.Fprintf(&b, "|%s=%s", k, j.Payload.Params[k])
-		}
-		key := b.String()
+		key := j.Queue + "|" + j.Payload.Template + "|" + j.Payload.ParamsSum
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}

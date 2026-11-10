@@ -80,6 +80,9 @@ type Job struct {
 	Payload struct {
 		Template string                     `json:"template"`
 		Params   map[string]json.RawMessage `json:"params"`
+		// ParamsSum is the hub's digest of the FULL params (the metadata
+		// view hides most of them): what dupes key on.
+		ParamsSum string `json:"params_sum"`
 	} `json:"payload"`
 }
 

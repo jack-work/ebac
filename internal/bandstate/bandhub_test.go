@@ -2,6 +2,8 @@ package bandstate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -153,23 +155,49 @@ func find(t *testing.T, h *Hub, id int64) Job {
 	return Job{}
 }
 
-// Same queue + sha + params with branch, label and why ignored is a dupe; any other param differing is not.
+// hubSum is what the hub sends as params_sum: a digest of the FULL params, canonical (sorted keys).
+func hubSum(full map[string]string) string {
+	b, _ := json.Marshal(full) // Go marshals map keys sorted
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:8])
+}
+
+// flakeCheck is a flake.check job as ebac's metadata view sees it: attrs hidden, only the hub's digest carries them.
+func flakeCheck(id int64, full map[string]string) Job {
+	var j Job
+	j.ID, j.Queue, j.State, j.Created = id, "flake.check", "leased", 1
+	j.Payload.Template = "flake.check"
+	j.Payload.Params = map[string]json.RawMessage{}
+	for _, k := range []string{"branch", "sha", "label", "node"} {
+		if v, ok := full[k]; ok {
+			j.Payload.Params[k], _ = json.Marshal(v)
+		}
+	}
+	j.Payload.ParamsSum = hubSum(full)
+	return j
+}
+
+// Dupes key on queue + template + the FULL params (the hub's params_sum). flake.check 4709/4710 (same sha, attrs ci
+// vs keel-web-*) are NOT dupes; identical params are; a row without params_sum is never grouped.
 func TestDupes(t *testing.T) {
 	h := fixture(t)
-	g := find(t, h, 4269)
-	h.Live = append(h.Live, clone(g, 9001, map[string]string{"label": "resubmitted", "why": "again"}))
-	v := Render(h, nil, nil, nil)
-	if !has(v.Dupes, "dupe gate.change 5f4ddf1b: 4269,9001") {
-		t.Fatalf("label/why resubmit not a dupe: %v", v.Dupes)
-	}
-	h.Live[len(h.Live)-1] = clone(g, 9001, map[string]string{"sha": "0000000000000000000000000000000000000001"})
+	sha := "0d1247125ae6c7564fcf7bac6ff5e5abdc3b525a"
+	ci := map[string]string{"attrs": "ci", "bundle": "/nix/store/x-flake.bundle", "node": "leob", "sha": sha}
+	web := map[string]string{"attrs": "keel-web-check keel-web-vm", "bundle": "/nix/store/x-flake.bundle", "node": "leob", "sha": sha}
+	h.Live = append(h.Live, flakeCheck(4709, ci), flakeCheck(4710, web))
 	if v := Render(h, nil, nil, nil); len(v.Dupes) != 0 {
-		t.Fatalf("control: a different sha is a dupe: %v", v.Dupes)
+		t.Fatalf("same sha, different attrs flagged: %v", v.Dupes)
 	}
-	b := find(t, h, 4246)
-	h.Live[len(h.Live)-1] = clone(b, 9002, map[string]string{"branch": "other/branch"})
-	if v := Render(h, nil, nil, nil); !has(v.Dupes, "dupe aether.clippy-pr 1c93d0cb: 4246,9002") {
-		t.Fatalf("branch must be ignored: %v", v.Dupes)
+	h.Live = append(h.Live, flakeCheck(4711, ci))
+	if v := Render(h, nil, nil, nil); !has(v.Dupes, "dupe flake.check 0d124712: 4709,4711") || len(v.Dupes) != 1 {
+		t.Fatalf("identical params not a dupe: %v", v.Dupes)
+	}
+	// An older hub (no params_sum): the visible params are identical, the hidden ones unknown: never a dupe.
+	for i := range h.Live {
+		h.Live[i].Payload.ParamsSum = ""
+	}
+	if v := Render(h, nil, nil, nil); len(v.Dupes) != 0 {
+		t.Fatalf("a row without the full params was grouped: %v", v.Dupes)
 	}
 }
 

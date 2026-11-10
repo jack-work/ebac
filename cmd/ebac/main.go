@@ -31,7 +31,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
   ebac add-roster [--name roles] [--every 1m]
-                                            the role roster: roles, holders, lieutenants and live transient forks,
+                                            the role roster: roles, holders, lieutenants, fork counts per role (10 min),
                                             derived from the aria store into a studied form (plugin ebac-roster);
                                             no seat, never a wake, writes only on change
   ebac add-releases --name N --repo O/R [--alert @ROLE | --aria SEAT] [--every 15m]

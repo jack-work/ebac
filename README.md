@@ -227,7 +227,7 @@ Each upstream is a separate executable next to `ebac` (one Nix output; never fou
 | `ebac-keel` | `keel-threads` |
 | `ebac-tomb` | `teams-chat` |
 | `ebac-bandhub` | `band-hub` (the hub mirror, no seat) |
-| `ebac-roster` | `aria-roster` (roles, holders, lieutenants, live forks from the aria store; no seat) |
+| `ebac-roster` | `aria-roster` (roles, holders, lieutenants, live fork counts per role from the aria store; no seat) |
 
 Protocol (`internal/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
 stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout or bad reply is a
