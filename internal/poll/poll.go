@@ -64,6 +64,9 @@ func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) 
 func (p *Poller) Poll(ctx context.Context, name string) error {
 	w, err := p.Store.LoadCritic(ctx, name)
 	if err != nil {
+		if berr := p.surfaceBroken(ctx, name); berr != nil {
+			return berr
+		}
 		return err
 	}
 	if w.Runtime.Archived {

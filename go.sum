@@ -2,8 +2,8 @@ github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/jack-work/figaro v0.48.0 h1:nc25FG2vGdeYw4Lc/igU6P6mrhVu3DoPiJX1lwzLfI8=
-github.com/jack-work/figaro v0.48.0/go.mod h1:et2D8qvv3ECXUzZd+oqPpVrWAlMQiGSIoblYG5nrQGU=
+github.com/jack-work/figaro v0.59.0 h1:lc8onkhHoTp97bSMuIm5+k0DMUx11BF44tWs7VceSfg=
+github.com/jack-work/figaro v0.59.0/go.mod h1:ocD2L7quwHtGAB8gitoZktfX4fTtzR+3zI+O7bMsOy8=
 github.com/jack-work/jkrpc v0.1.0 h1:qx03oLiVLuCL/2j3MDy0KLPvGs0Soja/oaQ4YlM9cVg=
 github.com/jack-work/jkrpc v0.1.0/go.mod h1:eY1OORs32+NWXRfbMPaX2q7jg58/7kDPB/PyoKJXZcY=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

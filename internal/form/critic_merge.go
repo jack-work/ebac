@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"sort"
+
+	"github.com/gluck/ebac/internal/model"
 )
 
 // mergeCritic is SaveRound's three-way merge of the critic key, field by
@@ -25,10 +27,15 @@ import (
 //     lost for good.
 //
 // With no base (a critic this process created) or nothing on the form, mine
-// is written whole, as before.
+// is written whole, as before. A form value that is not a usable critic
+// ({}, null, nameless) is an error, never a set of deletions: merged as one,
+// an empty critic on the form "removed" every field and wrote critic: {}.
 func mergeCritic(base, mine, theirs json.RawMessage) (json.RawMessage, []string, error) {
 	if len(base) == 0 || len(theirs) == 0 {
 		return mine, nil, nil
+	}
+	if _, err := model.CheckCriticKey(theirs); err != nil {
+		return nil, nil, err
 	}
 	var b, m, t map[string]json.RawMessage
 	for _, x := range []struct {

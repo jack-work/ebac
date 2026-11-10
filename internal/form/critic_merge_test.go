@@ -12,18 +12,18 @@ import (
 )
 
 func TestMergeCritic(t *testing.T) {
-	base := `{"name":"c","write":false,"every_sec":60,"prs":["a"]}`
+	base := `{"name":"c","write":false,"every_sec":60,"prs":[{"number":1}]}`
 	for _, c := range []struct {
 		name, mine, theirs, want, conflicts string
 	}{
-		{"no race: the round's change lands", `{"name":"c","write":false,"every_sec":30,"prs":["a"]}`, base, `{"every_sec":30,"name":"c","prs":["a"],"write":false}`, ""},
-		{"a live set survives an untouched field", base, `{"name":"c","write":true,"every_sec":60,"prs":["a"]}`, `{"every_sec":60,"name":"c","prs":["a"],"write":true}`, ""},
-		{"both sides, different fields", `{"name":"c","write":false,"every_sec":30,"prs":["a"]}`, `{"name":"c","write":true,"every_sec":60,"prs":["a"]}`, `{"every_sec":30,"name":"c","prs":["a"],"write":true}`, ""},
-		{"same field, different values: the form wins, reported", `{"name":"c","write":false,"every_sec":30,"prs":["a"]}`, `{"name":"c","write":false,"every_sec":99,"prs":["a"]}`, `{"every_sec":99,"name":"c","prs":["a"],"write":false}`, "every_sec"},
-		{"same field, same value: no conflict", `{"name":"c","write":true,"every_sec":60,"prs":["a"]}`, `{"name":"c","write":true,"every_sec":60,"prs":["a"]}`, `{"every_sec":60,"name":"c","prs":["a"],"write":true}`, ""},
-		{"a field the round dropped (omitempty) goes", `{"name":"c","every_sec":60,"prs":["a"]}`, base, `{"every_sec":60,"name":"c","prs":["a"]}`, ""},
-		{"a field the form added stays", base, `{"name":"c","write":false,"every_sec":60,"prs":["a"],"approve":true}`, `{"approve":true,"every_sec":60,"name":"c","prs":["a"],"write":false}`, ""},
-		{"another layout of the same value is no change", base, `{ "prs": [ "a" ], "every_sec": 60, "write": false, "name": "c" }`, `{"every_sec":60,"name":"c","prs":["a"],"write":false}`, ""},
+		{"no race: the round's change lands", `{"name":"c","write":false,"every_sec":30,"prs":[{"number":1}]}`, base, `{"every_sec":30,"name":"c","prs":[{"number":1}],"write":false}`, ""},
+		{"a live set survives an untouched field", base, `{"name":"c","write":true,"every_sec":60,"prs":[{"number":1}]}`, `{"every_sec":60,"name":"c","prs":[{"number":1}],"write":true}`, ""},
+		{"both sides, different fields", `{"name":"c","write":false,"every_sec":30,"prs":[{"number":1}]}`, `{"name":"c","write":true,"every_sec":60,"prs":[{"number":1}]}`, `{"every_sec":30,"name":"c","prs":[{"number":1}],"write":true}`, ""},
+		{"same field, different values: the form wins, reported", `{"name":"c","write":false,"every_sec":30,"prs":[{"number":1}]}`, `{"name":"c","write":false,"every_sec":99,"prs":[{"number":1}]}`, `{"every_sec":99,"name":"c","prs":[{"number":1}],"write":false}`, "every_sec"},
+		{"same field, same value: no conflict", `{"name":"c","write":true,"every_sec":60,"prs":[{"number":1}]}`, `{"name":"c","write":true,"every_sec":60,"prs":[{"number":1}]}`, `{"every_sec":60,"name":"c","prs":[{"number":1}],"write":true}`, ""},
+		{"a field the round dropped (omitempty) goes", `{"name":"c","every_sec":60,"prs":[{"number":1}]}`, base, `{"every_sec":60,"name":"c","prs":[{"number":1}]}`, ""},
+		{"a field the form added stays", base, `{"name":"c","write":false,"every_sec":60,"prs":[{"number":1}],"approve":true}`, `{"approve":true,"every_sec":60,"name":"c","prs":[{"number":1}],"write":false}`, ""},
+		{"another layout of the same value is no change", base, `{ "prs": [ {"number": 1} ], "every_sec": 60, "write": false, "name": "c" }`, `{"every_sec":60,"name":"c","prs":[{"number":1}],"write":false}`, ""},
 	} {
 		got, conf, err := mergeCritic(json.RawMessage(base), json.RawMessage(c.mine), json.RawMessage(c.theirs))
 		if err != nil {

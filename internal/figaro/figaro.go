@@ -224,6 +224,11 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
+	if key == model.CriticKey {
+		if _, err := model.CheckCriticKey(b); err != nil {
+			return fmt.Errorf("set %s.%s refused: %w", id, key, err)
+		}
+	}
 	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
@@ -270,6 +275,9 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 }
 
 func (f *Figaro) Unset(ctx context.Context, id, key string) error {
+	if key == model.CriticKey {
+		return fmt.Errorf("unset %s.%s refused: a critic form keeps its critic key (remove the critic with ebac rm)", id, key)
+	}
 	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
@@ -325,7 +333,8 @@ func (f *Figaro) FormRemove(ctx context.Context, id string) error {
 		delete(f.nodes, id)
 	}
 	f.mu.Unlock()
-	return AuditAng(rpc.MethodKill, id, ang).Kill(ctx, id, false)
+	_, err = AuditAng(rpc.MethodKill, id, ang).Kill(ctx, rpc.KillRequest{FigaroID: id})
+	return err
 }
 
 // ---------- arias ----------
@@ -534,6 +543,11 @@ func (f *Figaro) SetJSONIfVersion(ctx context.Context, id, key string, v any, ve
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
+	}
+	if key == model.CriticKey {
+		if _, err := model.CheckCriticKey(b); err != nil {
+			return fmt.Errorf("set %s.%s refused: %w", id, key, err)
+		}
 	}
 	c, err := f.Node(ctx, id)
 	if err != nil {

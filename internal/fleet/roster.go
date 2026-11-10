@@ -128,10 +128,25 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 		sum.Awaiting += row.Awaiting
 		rows = append(rows, row)
 	}
+	// A form whose critic key is unusable cannot be listed by name: it is an
+	// ERROR row, never a silent drop (2026-11-10: four wiped critics vanished).
+	broken, err := st.BrokenCritics(ctx)
+	if err != nil {
+		return nil, RosterSummary{}, err
+	}
+	for _, b := range broken {
+		rows = append(rows, RosterRow{Critic: b.Critic(), Form: b.FormID, Mode: "?", Seat: b.Holder, Health: BrokenHealth(b)})
+		sum.Unhealthy++
+	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Critic < rows[j].Critic })
 	sum.Critics = len(rows)
 	sum.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	return rows, sum, nil
+}
+
+// BrokenHealth is a broken critic form's health column.
+func BrokenHealth(b form.Broken) string {
+	return "ERROR critic key unusable (" + b.Err + "); see the form's " + model.CriticErrorKey
 }
 
 // seatReader is what SeatOf needs from figaro (a fake in tests).

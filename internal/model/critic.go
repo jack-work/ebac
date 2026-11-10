@@ -525,3 +525,27 @@ type ReleasesState struct {
 
 // PingEvery is the collect-mode ping cadence; 0 is ordinary delivery.
 func (w *Critic) PingEvery() time.Duration { return time.Duration(w.PingEverySec) * time.Second }
+
+// CriticKey is the role-form key a critic's configuration lives in, and
+// CriticErrorKey the key that says why a form's critic key is unusable.
+const (
+	CriticKey      = "critic"
+	CriticErrorKey = "critic_error"
+)
+
+// CheckCriticKey says whether raw is a usable critic key: a JSON object that
+// names its critic. Every write of the key passes through it (the 2026-11-10
+// wipe left critic: {} on four forms and they vanished from ebac ls).
+func CheckCriticKey(raw json.RawMessage) (*Critic, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("critic key absent")
+	}
+	var w Critic
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil, fmt.Errorf("critic key unreadable: %w", err)
+	}
+	if w.Name == "" {
+		return nil, fmt.Errorf("critic key names no critic: %.80s", raw)
+	}
+	return &w, nil
+}

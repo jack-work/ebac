@@ -293,17 +293,15 @@ func (f *CriticForm) ebac() EbacState {
 }
 
 func (f *CriticForm) Critic() (*model.Critic, error) {
-	raw, ok := f.Keys["critic"]
+	raw, ok := f.Keys[model.CriticKey]
 	if !ok {
 		return nil, fmt.Errorf("form %s has no critic", f.ID)
 	}
-	var w model.Critic
-	if err := json.Unmarshal(raw, &w); err != nil {
-		return nil, fmt.Errorf("form %s critic: %w", f.ID, err)
+	c, err := model.CheckCriticKey(raw)
+	if err != nil {
+		return nil, fmt.Errorf("form %s: %w", f.ID, err)
 	}
-	if w.Name == "" {
-		return nil, fmt.Errorf("form %s critic has no name", f.ID)
-	}
+	w := *c
 	w.FormID = f.ID
 	w.Runtime = f.ebac().Runtime
 	w.Trigger = f.Keys[trigger.FormKey]
@@ -438,6 +436,42 @@ func (s *Store) LoadSnapshot(ctx context.Context, name string) (*model.Snapshot,
 		return nil, err
 	}
 	return f.Snapshot()
+}
+
+// Broken is an ebac critic form whose critic key is unusable: it cannot be
+// listed or polled by name, so it is reported instead of dropped.
+type Broken struct {
+	FormID   string `json:"form"`
+	FormName string `json:"name"`   // the form's name key, ebac-<critic>
+	Holder   string `json:"holder"` // target-aria
+	Err      string `json:"error"`
+	Noted    string `json:"noted"` // the form's critic_error as it stands
+}
+
+// Critic is the critic name the form was minted for (its name key without
+// the ebac- prefix), the only name a broken critic still carries.
+func (b Broken) Critic() string { return strings.TrimPrefix(b.FormName, "ebac-") }
+
+// BrokenCritics lists the ebac critic forms whose critic key is unusable.
+func (s *Store) BrokenCritics(ctx context.Context) ([]Broken, error) {
+	forms, err := s.criticForms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []Broken
+	for _, f := range forms {
+		if _, err := f.Critic(); err == nil {
+			continue
+		} else {
+			b := Broken{FormID: f.ID, Err: err.Error()}
+			_ = json.Unmarshal(f.Keys["name"], &b.FormName)
+			_ = json.Unmarshal(f.Keys["target-aria"], &b.Holder)
+			_ = json.Unmarshal(f.Keys[model.CriticErrorKey], &b.Noted)
+			out = append(out, b)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].FormName < out[j].FormName })
+	return out, nil
 }
 
 func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
@@ -680,6 +714,35 @@ func checkBudget(id string, curBytes, nextBytes int) error {
 	return nil
 }
 
+// ErrCriticGuard marks a write refused because it would leave a usable critic
+// key unusable (empty, unreadable, nameless, absent, or another critic's).
+var ErrCriticGuard = errors.New("critic key guard")
+
+// guardCritic is the last check before any ebac write lands: when the form
+// holds a usable critic key, the board after the write must hold one naming
+// the same critic. It looks at the board the write would PRODUCE, not at what
+// the caller meant to set, so a corruption below the caller (figaro's form
+// library before v0.51.8 nulled a deleted key's in-order successor: removing
+// blind nulled critic, 2026-11-10) is refused too.
+func guardCritic(cur json.RawMessage, nextBoard []byte) error {
+	was, err := model.CheckCriticKey(cur)
+	if err != nil {
+		return nil // nothing usable to protect (a new form, or one already broken: a repair may land)
+	}
+	var next map[string]json.RawMessage
+	if err := json.Unmarshal(nextBoard, &next); err != nil {
+		return fmt.Errorf("%w: the next board is unreadable: %v", ErrCriticGuard, err)
+	}
+	now, err := model.CheckCriticKey(next[model.CriticKey])
+	if err != nil {
+		return fmt.Errorf("%w: it would leave %s's %v", ErrCriticGuard, was.Name, err)
+	}
+	if now.Name != was.Name {
+		return fmt.Errorf("%w: it would rename critic %s to %q", ErrCriticGuard, was.Name, now.Name)
+	}
+	return nil
+}
+
 // commit diffs the top-level keys build returns against the live form and
 // writes the difference as one versioned patch, re-reading on a lost race.
 // Keys build does not name are left as the seat or another writer left them.
@@ -714,6 +777,9 @@ func (s *Store) Commit(ctx context.Context, id string, build func(cur map[string
 		}
 		if err := checkBudget(id, len(curRaw), len(nextRaw)); err != nil {
 			return err
+		}
+		if err := guardCritic(f.Keys[model.CriticKey], nextRaw); err != nil {
+			return fmt.Errorf("write %s refused: %w", id, err)
 		}
 		patch := next.Diff(f.Snap)
 		if patch.IsIdentity() {
