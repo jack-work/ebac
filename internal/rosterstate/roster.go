@@ -14,9 +14,13 @@ import (
 	"github.com/gluck/ebac/internal/model"
 )
 
-// ForksMax caps the forks key: past it the list ends in "+N more", so the
-// value stays under figaro's 2046-character cut.
-const ForksMax = 25
+// ForksMax caps the forks key, newest first: past it the list ends in
+// "+N more (figaro ls)", so the value stays small and under figaro's
+// 2046-character cut.
+const ForksMax = 20
+
+// Dropped are keys earlier versions wrote; the first round unsets them once.
+var Dropped = []string{"updated"}
 
 // View is the form the roster writes: one key per role (role:<name>) and
 // the forks list.
@@ -26,8 +30,10 @@ type View struct {
 }
 
 // State is what the plugin wrote last round, so a round writes only change.
+// Slim says the Dropped keys have been unset.
 type State struct {
 	Keys map[string]json.RawMessage `json:"keys"`
+	Slim bool                       `json:"slim,omitempty"`
 }
 
 // KeyFor is a role form's key. Dots and stars are escaped: a dot would nest
@@ -83,7 +89,11 @@ func (ix *index) get(id string) *model.Aria {
 	return hit
 }
 
-// Derive is the roster for one listing of the store at now.
+// Derive is the roster for one listing of the store at now. Every line names
+// only WHO (roles, holders, forks and what they hang under), never how a seat
+// is doing (model, context fill, asleep, expiry): a studied form is mirrored
+// whole on every write, so a line that moves with the seat's work rewrites
+// every student's copy (ebac-leader 2026-11-10).
 func Derive(arias []model.Aria, now time.Time) View {
 	ix := newIndex(arias)
 	type role struct {
@@ -138,16 +148,6 @@ func Derive(arias []model.Aria, now time.Time) View {
 		} else {
 			h := r.holder
 			fmt.Fprintf(&b, "%s %s", short(h.ID), h.Handle)
-			if h.Model != "" {
-				fmt.Fprintf(&b, " %s", h.Model)
-			}
-			if h.ContextLimit > 0 {
-				// Tens of percent: finer would rewrite the key every turn.
-				fmt.Fprintf(&b, " fill %d%%", h.ContextTokens*10/h.ContextLimit*10)
-			}
-			if h.State == "dormant" {
-				b.WriteString(" asleep")
-			}
 			if l := leaderOf(h, r.name); l != "" {
 				fmt.Fprintf(&b, " under %s", l)
 			}
@@ -172,22 +172,21 @@ func Derive(arias []model.Aria, now time.Time) View {
 		}
 		return short(p.ID) + " " + p.Handle
 	}
+	// Newest first: a fork's ttl runs from its creation, so expiry - ttl is
+	// when it was minted, fixed for its life.
 	sort.Slice(forks, func(i, j int) bool {
-		ui, uj := under(forks[i]), under(forks[j])
-		if ui != uj {
-			return ui < uj
+		ci, cj := forks[i].ExpiresAt-forks[i].TTLMS, forks[j].ExpiresAt-forks[j].TTLMS
+		if ci != cj {
+			return ci > cj
 		}
 		return forks[i].ID < forks[j].ID
 	})
 	for i, a := range forks {
 		if i == ForksMax {
-			v.Forks = append(v.Forks, fmt.Sprintf("+%d more", len(forks)-ForksMax))
+			v.Forks = append(v.Forks, fmt.Sprintf("+%d more (figaro ls)", len(forks)-ForksMax))
 			break
 		}
-		// The expiry is fixed for a fork's life; a countdown would rewrite
-		// the key every round.
-		until := time.UnixMilli(a.ExpiresAt).UTC().Format("01-02 15:04Z")
-		v.Forks = append(v.Forks, fmt.Sprintf("%s %s under %s until %s", short(a.ID), a.Handle, under(a), until))
+		v.Forks = append(v.Forks, fmt.Sprintf("%s %s under %s", short(a.ID), a.Handle, under(a)))
 	}
 	return v
 }
@@ -204,9 +203,9 @@ func (v View) Keys() map[string]json.RawMessage {
 	return out
 }
 
-// Step compares a view with what was written: set holds only changed keys
-// (plus updated, when anything changed), unset the keys whose role is gone.
-func Step(prev State, v View, now time.Time) (set map[string]json.RawMessage, unset []string, next State) {
+// Step compares a view with what was written: set holds only changed keys,
+// unset the keys whose role is gone (and, once, the Dropped keys).
+func Step(prev State, v View) (set map[string]json.RawMessage, unset []string, next State) {
 	keys := v.Keys()
 	set = map[string]json.RawMessage{}
 	for k, val := range keys {
@@ -219,9 +218,9 @@ func Step(prev State, v View, now time.Time) (set map[string]json.RawMessage, un
 			unset = append(unset, k)
 		}
 	}
-	sort.Strings(unset)
-	if len(set) > 0 || len(unset) > 0 {
-		set["updated"] = model.MustJSON(now.UTC().Format(time.RFC3339))
+	if !prev.Slim {
+		unset = append(unset, Dropped...)
 	}
-	return set, unset, State{Keys: keys}
+	sort.Strings(unset)
+	return set, unset, State{Keys: keys, Slim: true}
 }

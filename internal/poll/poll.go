@@ -124,7 +124,7 @@ var SourceKeys = map[string][]string{
 	"github-releases":   {"releases"},
 	// role:<name> is one key per role ("*" is a prefix pattern: one more
 	// segment, no dots, so it cannot reach a nested key).
-	model.SourceRoster: {"role:*", "forks", "updated"},
+	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)
 }
 
 func keyAllowed(pattern, k string) bool {

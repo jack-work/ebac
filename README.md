@@ -252,7 +252,7 @@ A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=o
 
 **Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
 `authored`, `filter_error`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
-`updated` (and unset of the dropped `live`); roster `role:<name>`, `forks`, `updated`; PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
+`updated` (and unset of the dropped `live`); roster `role:<name>`, `forks` (and unset of the dropped `updated`); PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
 refused whole and the round fails with the key and plugin named. A source may also READ holder-edited
 keys, handed to it as `Request.Keys` (`model.SourceReads`): the author watch's relevance filter `paths`
 (globs; `**` spans directories, a glob also matches any directory above a file) and `title_match` (Go

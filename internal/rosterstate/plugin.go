@@ -37,7 +37,7 @@ func (pl Plugin) Handle(_ context.Context, req plugin.Request) (*plugin.Reply, e
 			prev = State{}
 		}
 	}
-	set, unset, next := Step(prev, Derive(req.Arias, now()), now())
+	set, unset, next := Step(prev, Derive(req.Arias, now()))
 	w.Runtime.Roster = mustJSON(next)
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = now().UTC()
