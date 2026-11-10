@@ -84,7 +84,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
-	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget())}
+	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: w.Reads}
 	if w.SourceName() == model.SourceRoster {
 		// The roster's whole input is the aria store, read here with the
 		// core's own grant: the plugin has none.
@@ -117,7 +117,7 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 // its reply is applied.
 var SourceKeys = map[string][]string{
 	"github-pr":         nil,
-	"github-author":     {"authored"},
+	"github-author":     {"authored", model.AuthorFilterErr},
 	"keel-threads":      {"threads", "blind"},
 	"teams-chat":        {"blind"},
 	model.SourceBandHub: {"queues", "nodes", "dupes", "updated", "live"}, // live: unset only (dropped key)

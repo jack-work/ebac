@@ -20,7 +20,10 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--recent 50] [--every 5m]
-                                            watch one author's N most recent PRs: wake on a new PR or a merge
+              [--paths GLOB[,GLOB]] [--title-match REGEX]
+                                            watch one author's N most recent PRs: wake on a new PR or a merge;
+                                            with a filter, only PRs whose title matches OR whose files match
+                                            (form keys paths, title_match; bad value -> last good + filter_error)
   ebac add-keel --name N --repo O/R [--paths GLOB[,GLOB]] [--aria SEAT | --alert @ROLE] --waiting-on "A[,B]"
               [--self "A,B"] [--every 45s]  watch one keel repo's comment threads: wake when A answers (5m with --feed=false)
               [--feed=false] [--keel-url https://H --token-cmd "hush oauth get ebac"]
@@ -43,7 +46,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac ack    --critic N --round R           the seat says it has acted on a delta
   ebac post   --critic N --pr P [--reply-to T [--react +1] [--resolve] | --path F --line L] [--event E] --body-file F
                                             queue a comment or review on the form; the next round sends it
-  ebac compact --critic N [--dry-run]        rewrite the form without comment bodies
+  ebac compact --critic N [--dry-run]        rewrite the form without comment bodies (author watch: run one
+                                            round now, keeping only tracked PRs; sizes before and after)
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
   ebac selfcheck [--critic N]                harness invariants, for develop mode

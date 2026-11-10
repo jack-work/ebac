@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
@@ -34,11 +35,14 @@ type GH struct {
 	// (the poller retargets Host per critic, so the credential is chosen per
 	// call, not at construction). NoCred is the test seam for a fake gh.
 	NoCred bool
+	credMu sync.Mutex // concurrent reads (author PRFiles) share creds
 	creds  map[string]*Cred
 }
 
 // cred is the band-cred credential for g.Host, one per host per process.
 func (g *GH) cred() *Cred {
+	g.credMu.Lock()
+	defer g.credMu.Unlock()
 	if g.creds == nil {
 		g.creds = map[string]*Cred{}
 	}

@@ -175,6 +175,9 @@ type Critic struct {
 	// Trigger is the role form's key trigger as read with the critic: the
 	// rules, owned by whoever holds the role, never part of the config.
 	Trigger json.RawMessage `json:"-"`
+	// Reads are the role-form keys in SourceReads[source], as read with the
+	// critic: the plugin's holder-edited configuration (Request.Keys).
+	Reads map[string]json.RawMessage `json:"-"`
 	// LegacyQuiet is a pre-trigger chat.quiet list, read only so the first
 	// round of a trigger-aware binary can turn it into rules.
 	LegacyQuiet []string `json:"-"`
@@ -334,9 +337,43 @@ func (a *AuthorRef) Window() int {
 // AuthorState lives under system.ebac.runtime: what each PR in the recent
 // window looked like last round, and a digest of the authored key as last
 // set, so an unchanged window is not written again.
+//
+// The relevance filter (role-form keys paths, title_match) adds: the last
+// good filter, the error last written to the form's filter_error key, a
+// digest of the filter the verdicts were made under, and the path verdicts
+// per PR at a head: Hit (its files matched) and Skip (untracked; the only
+// trace an untracked PR leaves).
 type AuthorState struct {
 	Seen   map[string]AuthorSeen `json:"seen,omitempty"`
 	Window string                `json:"window,omitempty"`
+
+	Filter    *AuthorFilter     `json:"filter,omitempty"`
+	FilterErr string            `json:"filter_err,omitempty"`
+	FilterSum string            `json:"filter_sum,omitempty"`
+	Hit       map[string]string `json:"hit,omitempty"`  // PR key -> head (12 hex)
+	Skip      map[string]string `json:"skip,omitempty"` // PR key -> head (12 hex)
+}
+
+// AuthorFilter is an author watch's relevance filter: a PR is tracked when
+// its title matches TitleMatch or any changed file matches one of Paths.
+// Neither set tracks every PR.
+type AuthorFilter struct {
+	Paths      []string `json:"paths,omitempty"`
+	TitleMatch string   `json:"title_match,omitempty"`
+}
+
+// Author filter form keys, owned by the role holder (figaro set), read by the
+// plugin every round.
+const (
+	AuthorPathsKey  = "paths"
+	AuthorTitleKey  = "title_match"
+	AuthorFilterErr = "filter_error"
+)
+
+// SourceReads are, per source, the role-form keys the core hands its plugin
+// on every round (Request.Keys): configuration the role holder edits.
+var SourceReads = map[string][]string{
+	"github-author": {AuthorPathsKey, AuthorTitleKey},
 }
 
 type AuthorSeen struct {

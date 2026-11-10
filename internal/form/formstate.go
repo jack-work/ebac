@@ -307,6 +307,14 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 	w.FormID = f.ID
 	w.Runtime = f.ebac().Runtime
 	w.Trigger = f.Keys[trigger.FormKey]
+	for _, k := range model.SourceReads[w.SourceName()] {
+		if v, ok := f.Keys[k]; ok {
+			if w.Reads == nil {
+				w.Reads = map[string]json.RawMessage{}
+			}
+			w.Reads[k] = v
+		}
+	}
 	var legacy struct {
 		Chat *struct {
 			Quiet []string `json:"quiet"`
@@ -751,6 +759,6 @@ func adoptWritten(w *model.Critic, written json.RawMessage) {
 	if len(written) == 0 || json.Unmarshal(written, &fresh) != nil {
 		return
 	}
-	fresh.FormID, fresh.Runtime, fresh.Trigger, fresh.LegacyQuiet = w.FormID, w.Runtime, w.Trigger, w.LegacyQuiet
+	fresh.FormID, fresh.Runtime, fresh.Trigger, fresh.LegacyQuiet, fresh.Reads = w.FormID, w.Runtime, w.Trigger, w.LegacyQuiet, w.Reads
 	*w = fresh
 }

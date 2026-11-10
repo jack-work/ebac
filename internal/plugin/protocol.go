@@ -89,6 +89,10 @@ type Request struct {
 	GH   string `json:"gh,omitempty"`
 	Host string `json:"host,omitempty"`
 
+	// Keys are the role-form keys the source reads (model.SourceReads): its
+	// holder-edited configuration, read fresh every round.
+	Keys map[string]json.RawMessage `json:"keys,omitempty"`
+
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
 

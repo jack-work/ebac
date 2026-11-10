@@ -70,3 +70,20 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 	}
 	return prs, nil
 }
+
+// PRFiles lists every file a pull request changes (paginated, so a PR of any
+// size is complete).
+func (g *GH) PRFiles(ctx context.Context, repo string, number int) ([]string, error) {
+	out, err := g.run(ctx, []string{"api", "--paginate", fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", repo, number),
+		"--jq", ".[].filename"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			files = append(files, l)
+		}
+	}
+	return files, nil
+}

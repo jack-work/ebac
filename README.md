@@ -251,9 +251,14 @@ sees only what it needs; the others are empty tmpfs dirs. The figaro socket is h
 A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=off`.
 
 **Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
-`authored`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
+`authored`, `filter_error`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
 `updated` (and unset of the dropped `live`); roster `role:<name>`, `forks`, `updated`; PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
-refused whole and the round fails with the key and plugin named.
+refused whole and the round fails with the key and plugin named. A source may also READ holder-edited
+keys, handed to it as `Request.Keys` (`model.SourceReads`): the author watch's relevance filter `paths`
+(globs; `**` spans directories, a glob also matches any directory above a file) and `title_match` (Go
+regexp). A PR is tracked when its title matches OR a changed file does (files listed once per head);
+neither key tracks all. An untracked PR never wakes and leaves only its number and head in the skip
+list; a bad value keeps the last good filter and says why in `filter_error`.
 
 ## Layout
 

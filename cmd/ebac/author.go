@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/source/author"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -26,6 +28,8 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 5*time.Minute, "poll interval")
 	recent := fs.Int("recent", model.DefaultAuthorRecent, "follow only the author's N most recently updated PRs (all repos together)")
+	paths := fs.String("paths", "", "track only PRs changing a file matching one of these globs (GLOB[,GLOB]; ** spans directories)")
+	titleMatch := fs.String("title-match", "", "track only PRs whose title matches this Go regexp (with --paths: either suffices)")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {
 		return err
@@ -56,6 +60,16 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 			ref.Repos = append(ref.Repos, r)
 		}
 	}
+	var filter model.AuthorFilter
+	for _, p := range strings.Split(*paths, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			filter.Paths = append(filter.Paths, p)
+		}
+	}
+	filter.TitleMatch = strings.TrimSpace(*titleMatch)
+	if err := author.CheckFilter(filter); err != nil {
+		return err
+	}
 	if err := forge.CheckForgeHost(*host); err != nil {
 		return err
 	}
@@ -82,6 +96,13 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	if err := st.SeedTrigger(ctx, w); err != nil {
 		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
 	}
+	if keys := filterKeys(filter); len(keys) > 0 {
+		if err := st.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
+			return keys, nil
+		}); err != nil {
+			return fmt.Errorf("critic created (role %s), but its filter: %w", w.FormID, err)
+		}
+	}
 	if *aria != "" {
 		if err := model.ValidAriaID(*aria); err != nil {
 			return fmt.Errorf("critic created (role %s), but --aria is bad: %w", formID, err)
@@ -95,5 +116,21 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 	}
 	fmt.Printf("author watch %q: role %s, %s in %s since %s, alert %s, every %s\n", *name, formID, ref.Login,
 		strings.Join(ref.Repos, ","), ref.Since.UTC().Format(time.RFC3339), w.AlertTarget(), *every)
+	if len(filter.Paths) > 0 || filter.TitleMatch != "" {
+		fmt.Printf("  filter: form keys %s, %s (edit with figaro set; a bad value keeps the last good one, see %s)\n",
+			model.AuthorPathsKey, model.AuthorTitleKey, model.AuthorFilterErr)
+	}
 	return nil
+}
+
+// filterKeys are the role-form keys an author filter is stored in.
+func filterKeys(f model.AuthorFilter) map[string]json.RawMessage {
+	keys := map[string]json.RawMessage{}
+	if len(f.Paths) > 0 {
+		keys[model.AuthorPathsKey] = model.MustJSON(f.Paths)
+	}
+	if f.TitleMatch != "" {
+		keys[model.AuthorTitleKey] = model.MustJSON(f.TitleMatch)
+	}
+	return keys
 }

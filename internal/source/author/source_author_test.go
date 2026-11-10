@@ -31,7 +31,7 @@ func authorKinds(ev []model.Event) map[string]model.Tier {
 
 func TestAuthorDiff(t *testing.T) {
 	st := &model.AuthorState{}
-	if ev := authorDiff(st, []forge.AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}, time.Time{}); len(ev) != 0 {
+	if ev := authorDiff(st, []forge.AuthoredPR{apr(1, "OPEN", false, "a"), apr(2, "OPEN", true, "b"), apr(3, "MERGED", false, "c")}, time.Time{}, nil); len(ev) != 0 {
 		t.Fatalf("first round must only record: %+v", ev)
 	}
 	ev := authorDiff(st, []forge.AuthoredPR{
@@ -41,7 +41,7 @@ func TestAuthorDiff(t *testing.T) {
 		apr(4, "OPEN", false, "d"),   // new -> wake
 		apr(5, "OPEN", true, "e"),    // new draft -> record
 		apr(6, "MERGED", false, "f"), // opened and merged between rounds -> wake merged
-	}, time.Time{})
+	}, time.Time{}, nil)
 	got := authorKinds(ev)
 	want := map[string]model.Tier{
 		"bic/aether#1 author_pr_merged": model.TierWake,
@@ -61,7 +61,7 @@ func TestAuthorDiff(t *testing.T) {
 	ev = authorDiff(st, []forge.AuthoredPR{
 		apr(1, "MERGED", false, "a"), apr(2, "OPEN", false, "b2"), apr(3, "MERGED", false, "c"),
 		apr(4, "CLOSED", false, "d"), apr(5, "OPEN", true, "e"), apr(6, "MERGED", false, "f"),
-	}, time.Time{})
+	}, time.Time{}, nil)
 	got = authorKinds(ev)
 	if got["bic/aether#2 author_pr_head_moved"] != model.TierRecord || got["bic/aether#4 author_pr_closed"] != model.TierRecord || len(got) != 2 {
 		t.Fatalf("head move + close must be recorded only: %v", got)
@@ -69,7 +69,7 @@ func TestAuthorDiff(t *testing.T) {
 	if (&model.Delta{Events: ev}).WakeWorthy() {
 		t.Fatal("a round of closes and head moves woke the seat")
 	}
-	ev = authorDiff(st, []forge.AuthoredPR{apr(4, "OPEN", false, "d")}, time.Time{})
+	ev = authorDiff(st, []forge.AuthoredPR{apr(4, "OPEN", false, "d")}, time.Time{}, nil)
 	if authorKinds(ev)["bic/aether#4 author_pr_reopened"] != model.TierRecord {
 		t.Fatalf("reopen: %v", authorKinds(ev))
 	}
@@ -175,7 +175,7 @@ func TestAuthorDiffReentryIsNotNews(t *testing.T) {
 	oldMerge := apr(12, "MERGED", false, "z")
 	oldMerge.Created, oldMerge.Merged = "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z"
 	st := &model.AuthorState{Seen: map[string]model.AuthorSeen{"bic/aether#1": {State: "OPEN"}}}
-	got := authorKinds(authorDiff(st, []forge.AuthoredPR{old, fresh, oldMerge}, prev))
+	got := authorKinds(authorDiff(st, []forge.AuthoredPR{old, fresh, oldMerge}, prev, nil))
 	if len(got) != 1 || got["bic/aether#11 author_pr_new"] != model.TierWake {
 		t.Fatalf("re-entry: %v; want only #11 new", got)
 	}
@@ -183,7 +183,7 @@ func TestAuthorDiffReentryIsNotNews(t *testing.T) {
 		t.Fatal("a re-entered PR must still be adopted into seen")
 	}
 	st = &model.AuthorState{Seen: map[string]model.AuthorSeen{"bic/aether#1": {State: "OPEN"}}}
-	if got := authorKinds(authorDiff(st, []forge.AuthoredPR{old}, time.Time{})); got["bic/aether#10 author_pr_new"] != model.TierWake {
+	if got := authorKinds(authorDiff(st, []forge.AuthoredPR{old}, time.Time{}, nil)); got["bic/aether#10 author_pr_new"] != model.TierWake {
 		t.Fatalf("control: with no cutoff an unseen PR is news: %v", got)
 	}
 }

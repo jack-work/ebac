@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	ebacform "github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/poll"
 )
 
 // cmdMigrate moves critics from the pre-form layout (critics/<name>.json and
@@ -115,10 +117,47 @@ func cmdCompact(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
+	if w, err := f.Critic(); err == nil && w.SourceName() == "github-author" {
+		return compactAuthor(ctx, g, st, f, *dry)
+	}
 	if w, err := f.Critic(); err == nil {
 		if me, err := forge.NewGH(g.gh, w.Host).Whoami(ctx); err == nil {
 			st.Me = me
 		}
 	}
 	return fleet.CompactForm(ctx, st, f, *dry)
+}
+
+// compactAuthor compacts an author watch: its round already keeps only the
+// tracked recent window (authored, seen) and a number+head per untracked PR,
+// so compacting is one round now, measured before and after.
+func compactAuthor(ctx context.Context, g globals, st *ebacform.Store, f *ebacform.CriticForm, dry bool) error {
+	w, _ := f.Critic()
+	size := func(f *ebacform.CriticForm) (int, int) {
+		all, _ := json.Marshal(f.Keys)
+		var authored map[string]json.RawMessage
+		_ = json.Unmarshal(f.Keys["authored"], &authored)
+		return len(all), len(authored)
+	}
+	b, n := size(f)
+	fmt.Printf("%s: form %s v%d is %d B, %d PRs in authored\n", w.Name, f.ID, f.Version, b, n)
+	if dry {
+		fmt.Println("dry run: the next round (or this command without --dry-run) keeps only tracked PRs")
+		return nil
+	}
+	pl, err := newRunner(g)
+	if err != nil {
+		return err
+	}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, GH: g.gh, Host: g.host}
+	if err := p.Poll(ctx, w.Name); err != nil {
+		return err
+	}
+	f2, err := st.ReadForm(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	b, n = size(f2)
+	fmt.Printf("%s: form %s v%d is %d B, %d tracked PRs in authored\n", w.Name, f2.ID, f2.Version, b, n)
+	return nil
 }

@@ -28,6 +28,8 @@ type Plugin struct {
 	// GH, when set, is used as is (tests); otherwise each request builds a
 	// client from the core's --gh/--host, retargeted to the critic's host.
 	GH *forge.GH
+	// Files, when set, replaces gh.PRFiles (tests).
+	Files FilesFunc
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
@@ -40,7 +42,11 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	switch req.Op {
 	case plugin.OpRound:
-		return round(ctx, gh, &req.Critic)
+		files := pl.Files
+		if files == nil {
+			files = gh.PRFiles
+		}
+		return round(ctx, gh, files, &req.Critic, req.Keys)
 	case plugin.OpBrief:
 		return &plugin.Reply{Brief: authorBrief(&req.Critic, plugin.Unwire(req.Pending))}, nil
 	}
@@ -63,7 +69,10 @@ const (
 // re-entered the window (updated again) rather than because it is new: an
 // unseen PR is NEW, or a fresh MERGE, only if it happened after the previous
 // good round (prevGood); otherwise it is adopted silently.
-func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR, prevGood time.Time) []model.Event {
+//
+// promoted are PRs the relevance filter skipped before and tracks now: news
+// whenever they were created, because they were never shown.
+func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR, prevGood time.Time, promoted map[string]bool) []model.Event {
 	first := st.Seen == nil
 	if first {
 		st.Seen = map[string]model.AuthorSeen{}
@@ -80,7 +89,7 @@ func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR, prevGood time.Tim
 			continue
 		}
 		if !seen {
-			if !after(pr.Created, prevGood) && !(pr.State == "MERGED" && after(pr.Merged, prevGood)) {
+			if !promoted[k] && !after(pr.Created, prevGood) && !(pr.State == "MERGED" && after(pr.Merged, prevGood)) {
 				continue // re-entered the recent window: not news
 			}
 			switch {
@@ -113,7 +122,7 @@ func authorDiff(st *model.AuthorState, prs []forge.AuthoredPR, prevGood time.Tim
 	return events
 }
 
-func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, error) {
+func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, keys map[string]json.RawMessage) (*plugin.Reply, error) {
 	rep := &plugin.Reply{Critic: w}
 	a := w.Author
 	if a == nil || a.Login == "" || len(a.Repos) == 0 {
@@ -143,14 +152,33 @@ func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, e
 		prs = append(prs, got...)
 	}
 	prs = recentWindow(prs, n)
+
+	st := w.Runtime.Author
+	f, spec, ferr := resolveFilter(st, keys)
+	if ferr != st.FilterErr {
+		if ferr == "" {
+			rep.Unset = []string{model.AuthorFilterErr}
+		} else {
+			rep.Set = map[string]json.RawMessage{model.AuthorFilterErr: model.MustJSON(ferr)}
+			rep.Logf("%s: %s", w.Name, ferr)
+		}
+		st.FilterErr = ferr
+	}
+	prs, promoted, err := relevant(ctx, st, f, spec, prs, files)
+	if err != nil {
+		w.Runtime.ConsecutiveFailures++
+		w.Runtime.LastError = err.Error()
+		rep.Error = err.Error()
+		return rep, nil
+	}
 	prevGood := w.Runtime.LastSuccess
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
-	st := w.Runtime.Author
-	rep.Events = plugin.Wire(authorDiff(st, prs, prevGood))
-	// Seen and the authored key hold the window and nothing else: what left it (older, or merged/closed long ago)
-	// is dropped, which also prunes a form written before the window existed on its first round.
+	rep.Events = plugin.Wire(authorDiff(st, prs, prevGood, promoted))
+	// Seen and the authored key hold the tracked window and nothing else: what left it (older, merged/closed long
+	// ago, or untracked by the filter) is dropped, which also prunes a form written before the window or the
+	// filter existed on its first round.
 	keep := map[string]bool{}
 	for _, pr := range prs {
 		keep[pr.Key()] = true
@@ -163,7 +191,10 @@ func round(ctx context.Context, gh *forge.GH, w *model.Critic) (*plugin.Reply, e
 	view := authoredView(prs)
 	raw := model.MustJSON(view)
 	if d := digest(raw); d != st.Window {
-		rep.Set = map[string]json.RawMessage{"authored": raw}
+		if rep.Set == nil {
+			rep.Set = map[string]json.RawMessage{}
+		}
+		rep.Set["authored"] = raw
 		st.Window = d
 	}
 	return rep, nil
@@ -215,7 +246,7 @@ func authorBrief(w *model.Critic, events []model.Event) string {
 	if n := len(events) - countWake(events); n > 0 {
 		fmt.Fprintf(&b, "(%d background change(s): closed, reopened, head moved or new draft.)\n", n)
 	}
-	fmt.Fprintf(&b, "Every PR is in form %s, key authored. When finished: ebac ack --critic %s --round %d\n",
+	fmt.Fprintf(&b, "Every tracked PR is in form %s, key authored. When finished: ebac ack --critic %s --round %d\n",
 		w.FormID, w.Name, w.Runtime.Round)
 	return b.String()
 }
