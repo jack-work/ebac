@@ -70,6 +70,10 @@ type Runtime struct {
 	// LastPing is when a collect-mode critic last pinged its seat.
 	LastPing time.Time `json:"last_ping,omitempty"`
 
+	// Children are the child forms the core keeps for the critic (board-sync
+	// PR forms), by the plugin's stable key: key -> @id. Core-owned.
+	Children map[string]string `json:"children,omitempty"`
+
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
 	BandHub json.RawMessage `json:"band_hub,omitempty"`
@@ -164,6 +168,11 @@ type Critic struct {
 	Band *BandRef `json:"band_hub,omitempty"`
 	// Releases is a release watch's configuration (source github-releases).
 	Releases *ReleasesRef `json:"releases_watch,omitempty"`
+	// BoardForm and InputsForm are a board-sync critic's two outside forms
+	// (source github-prs): the board it reconciles and the inputs form its
+	// owners keep (rule text, needs files, ledger outbox and acks).
+	BoardForm  string `json:"board_form,omitempty"`
+	InputsForm string `json:"inputs_form,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).
@@ -549,3 +558,20 @@ func CheckCriticKey(raw json.RawMessage) (*Critic, error) {
 	}
 	return &w, nil
 }
+
+// SourceBoard is board sync (ebac-gh): one child form per open PR, the board
+// form reconciled, ledger records through the inputs form's outbox.
+const SourceBoard = "github-prs"
+
+// ChildLease is a child form's lifetime, renewed each pass: a stuck or
+// removed board-sync critic leaks no form for longer than this.
+const ChildLease = 2 * 24 * time.Hour
+
+// Child form, board and inputs keys a plugin may write (plugin.FormWrite).
+// Nobody but an owner role writes note (note.next, note.blocker, ...); the
+// core refuses it on every target.
+var (
+	FormWriteRefused = map[string]bool{"note": true, "system": true, "target-aria": true, "name": true, "kind": true, CriticKey: true}
+	BoardFormKeys    = map[string]bool{"prs": true, "stacks": true, "board_sync": true}
+	InputsFormKeys   = map[string]bool{"ledger_outbox": true}
+)

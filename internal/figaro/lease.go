@@ -65,14 +65,19 @@ func mintPatch(name string) message.Patch {
 // daemon measures ttl from a stamp it took at the first ttl write, which it
 // reports only as expiresAt-ttl.
 func leaseTTL(now time.Time, ttlMS, expiresAtMS int64) (time.Duration, bool) {
+	return leaseTTLFor(now, ttlMS, expiresAtMS, FormLease)
+}
+
+// leaseTTLFor is leaseTTL for any lease length.
+func leaseTTLFor(now time.Time, ttlMS, expiresAtMS int64, lease time.Duration) (time.Duration, bool) {
 	if ttlMS <= 0 {
-		return FormLease, true
+		return lease, true
 	}
-	if time.UnixMilli(expiresAtMS).Sub(now) > FormLease-leaseRenewSlack {
+	if time.UnixMilli(expiresAtMS).Sub(now) > lease-leaseRenewSlack {
 		return 0, false
 	}
 	stamp := time.UnixMilli(expiresAtMS - ttlMS)
-	return (now.Sub(stamp) + FormLease).Truncate(time.Second) + time.Second, true
+	return (now.Sub(stamp) + lease).Truncate(time.Second) + time.Second, true
 }
 
 // RenewLease moves a form's deadline to FormLease from now when it has come
@@ -130,4 +135,52 @@ func Renew(ctx context.Context, fig *Figaro, id string) {
 	if _, err := fig.RenewLease(ctx, id); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: lease %s: %v\n", id, err)
 	}
+}
+
+// FormNewLease mints a form whose lifetime is lease (FormNew uses FormLease).
+func (f *Figaro) FormNewLease(ctx context.Context, name string, lease time.Duration) (string, error) {
+	id, err := f.FormNew(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if lease != FormLease {
+		if err := f.setLease(ctx, id, lease); err != nil {
+			return id, fmt.Errorf("lease %s: %w", id, err)
+		}
+	}
+	return id, nil
+}
+
+// RenewLeases keeps each form's deadline lease from now, writing only the
+// ones within leaseRenewSlack of needing it, with ONE list of the store for
+// all of them (RenewLease lists per form). Forms the store no longer has are
+// skipped; the first write error is returned after trying the rest.
+func (f *Figaro) RenewLeases(ctx context.Context, ids []string, lease time.Duration) error {
+	ang, err := f.Angelus()
+	if err != nil {
+		return err
+	}
+	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	if err != nil {
+		return fmt.Errorf("list for leases: %w", err)
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var first error
+	now := time.Now()
+	for _, r := range resp.Figaros {
+		if !want[r.ID] {
+			continue
+		}
+		ttl, due := leaseTTLFor(now, r.TTLMS, r.ExpiresAt, lease)
+		if !due {
+			continue
+		}
+		if err := f.setLease(ctx, r.ID, ttl); err != nil && first == nil {
+			first = fmt.Errorf("renew %s: %w", r.ID, err)
+		}
+	}
+	return first
 }

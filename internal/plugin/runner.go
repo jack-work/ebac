@@ -43,7 +43,7 @@ func For(source string) (string, error) {
 		return "bandhub", nil
 	case model.SourceRoster:
 		return "roster", nil
-	case model.SourceReleases:
+	case model.SourceReleases, model.SourceBoard:
 		return "gh", nil
 	}
 	return "", fmt.Errorf("no plugin serves source %q", source)

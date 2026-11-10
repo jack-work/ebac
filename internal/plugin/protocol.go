@@ -93,12 +93,32 @@ type Request struct {
 	// holder-edited configuration, read fresh every round.
 	Keys map[string]json.RawMessage `json:"keys,omitempty"`
 
+	// Inputs are the keys of the critic's inputs form (board sync), read by
+	// the core each round; Children its child forms, key -> @id.
+	Inputs   map[string]json.RawMessage `json:"inputs,omitempty"`
+	Children map[string]string          `json:"children,omitempty"`
+
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
 
 	Posts   map[string]*model.Post `json:"posts,omitempty"`   // OpPost
 	Pending []Event                `json:"pending,omitempty"` // OpBrief
 	Retry   int                    `json:"retry,omitempty"`   // OpBrief
+}
+
+// FormWrite is one write to a form the core keeps for the critic. Exactly one
+// target: Key (a child form, minted by the core on its first write and kept
+// in runtime.children), Board (the critic's board form), or Inputs (the
+// critic's inputs form). Set and Unset are top-level keys; Retire (child
+// only) renames the form ebac-archived-... and stops renewing it, after this
+// write's Set and Unset.
+type FormWrite struct {
+	Key    string                     `json:"key,omitempty"`
+	Board  bool                       `json:"board,omitempty"`
+	Inputs bool                       `json:"inputs,omitempty"`
+	Set    map[string]json.RawMessage `json:"set,omitempty"`
+	Unset  []string                   `json:"unset,omitempty"`
+	Retire bool                       `json:"retire,omitempty"`
 }
 
 // Gone is one resource the plugin has given up on (form key gone.<Key>).
@@ -125,6 +145,10 @@ type Reply struct {
 	Set   map[string]json.RawMessage `json:"set,omitempty"`
 	Unset []string                   `json:"unset,omitempty"`
 	Gone  []Gone                     `json:"gone,omitempty"`
+	// Forms are writes to forms the core keeps for the critic (board sync):
+	// child forms by stable key, the board form, the inputs form's outbox.
+	// Validated whole (ValidateForms) before any of the reply is applied.
+	Forms []FormWrite `json:"forms,omitempty"`
 	// Wake are one-off messages for the alert target (blind, gone).
 	Wake []string `json:"wake,omitempty"`
 	// DisableTimer stops the critic's timer (the source stopped it for good).

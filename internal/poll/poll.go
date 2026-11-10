@@ -95,12 +95,21 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			err = fmt.Errorf("list arias: %w", err)
 		}
 	}
+	if err == nil && w.SourceName() == model.SourceBoard {
+		// Board sync reads its owners' inputs form (rule, needs, ledger acks)
+		// through the core, and cites its child forms by @id.
+		req.Inputs, err = p.readInputs(ctx, w)
+		req.Children = w.Runtime.Children
+	}
 	var rep *plugin.Reply
 	if err == nil {
 		rep, err = p.call(ctx, w, req)
 	}
 	if err == nil {
 		err = SourceKeysOnly(w.SourceName(), rep)
+	}
+	if err == nil {
+		err = ValidateForms(w, rep)
 	}
 	if err != nil {
 		// The plugin itself failed (crash, timeout, bad reply): a failed
@@ -201,9 +210,13 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
 			return fmt.Errorf("%s: %w", w.Name, err)
 		}
+		ferr := p.landForms(ctx, w, rep)
 		wake()
 		if err := p.Store.SaveCritic(ctx, w); err != nil {
 			return err
+		}
+		if ferr != nil {
+			return ferr
 		}
 		if rep.Error != "" {
 			return fmt.Errorf("%s: %s", w.Name, rep.Error)
@@ -226,7 +239,11 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
 			return fmt.Errorf("%s: %w", w.Name, err)
 		}
-		return p.Store.Save(ctx, w, rep.Snapshot, nil)
+		ferr := p.landForms(ctx, w, rep)
+		if err := p.Store.Save(ctx, w, rep.Snapshot, nil); err != nil {
+			return err
+		}
+		return ferr
 	}
 
 	// --- outbox: what the seat wrote onto the form goes upstream ---
@@ -252,6 +269,7 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 	if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
 		return fmt.Errorf("%s: %w", w.Name, err)
 	}
+	ferr := p.landForms(ctx, w, rep)
 	wake()
 	figaro.Renew(ctx, p.Fig, w.FormID)
 
@@ -263,6 +281,9 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 	}
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
+	}
+	if ferr != nil {
+		return ferr
 	}
 	if derr != nil {
 		return derr
