@@ -24,6 +24,7 @@ type AuthoredPR struct {
 	Created string `json:"created"`
 	Updated string `json:"updated"`
 	Merged  string `json:"merged,omitempty"`
+	Closed  string `json:"closed,omitempty"` // closedAt of a CLOSED (not merged) PR
 }
 
 func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number) }
@@ -35,7 +36,7 @@ func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number)
 func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time.Time, limit int) ([]AuthoredPR, error) {
 	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", "all",
 		"--search", "updated:>=" + since.UTC().Format(time.RFC3339) + " sort:updated-desc", "--limit", fmt.Sprint(limit),
-		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt"}
+		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt,closedAt"}
 	out, err := g.run(ctx, args, nil)
 	if err != nil {
 		return nil, err
@@ -50,6 +51,7 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 		CreatedAt string `json:"createdAt"`
 		UpdatedAt string `json:"updatedAt"`
 		MergedAt  string `json:"mergedAt"`
+		ClosedAt  string `json:"closedAt"`
 	}
 	if err := json.Unmarshal(out, &rows); err != nil {
 		return nil, fmt.Errorf("decode pr list: %w", err)
@@ -65,8 +67,12 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time
 		if strings.HasPrefix(merged, "0001-") {
 			merged = ""
 		}
+		closed := ""
+		if r.State == "CLOSED" && !strings.HasPrefix(r.ClosedAt, "0001-") {
+			closed = r.ClosedAt
+		}
 		prs = append(prs, AuthoredPR{Repo: repo, Number: r.Number, URL: r.URL, Title: title, State: r.State,
-			Draft: r.IsDraft, Head: head, Created: r.CreatedAt, Updated: r.UpdatedAt, Merged: merged})
+			Draft: r.IsDraft, Head: head, Created: r.CreatedAt, Updated: r.UpdatedAt, Merged: merged, Closed: closed})
 	}
 	return prs, nil
 }

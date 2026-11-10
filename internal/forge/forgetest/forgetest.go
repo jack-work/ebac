@@ -93,6 +93,14 @@ func HelperProcess(t *testing.T) {
 			// The merge is stamped relative to now: the form's authored key keeps a closed PR only while it was
 			// updated in the last week, so a fixed date aged this fixture out of the view (2026-11-09).
 			`"headRefOid":"ce1bd297dddd","createdAt":"2026-10-22T19:29:02Z","updatedAt":"` + recent + `","mergedAt":"` + recent + `"}]`)
+	case "author-file":
+		// The PR list is whatever the test last wrote to $EBAC_FAKE_PRS (gh pr list --json rows).
+		b, err := os.ReadFile(os.Getenv("EBAC_FAKE_PRS"))
+		if err != nil {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		os.Stdout.Write(b)
 	case "author200":
 		// 200 PRs, newest update first as `sort:updated-desc` returns them; it ignores --limit, so the caller's own
 		// cap is what is tested. Every one was created and merged long ago: none is news after the baseline.

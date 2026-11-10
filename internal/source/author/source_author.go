@@ -261,11 +261,30 @@ func countWake(events []model.Event) int {
 	return n
 }
 
-// authoredView is the authored key: the recent window, by PR key.
-func authoredView(prs []forge.AuthoredPR) map[string]forge.AuthoredPR {
-	out := map[string]forge.AuthoredPR{}
+// AuthoredLine is one PR on the studied authored key: only what changes on a
+// STATE TRANSITION (title, open/draft/merged/closed and when). The head sha,
+// created and updated move with every push; they stay in the critic's runtime
+// (Seen, system.* : never studied), so a push to an open PR writes nothing
+// (author-jack flooded the Minister with ~6 deltas a minute, 2026-11-10). The
+// field names are the ones the key always had: the merge path (state MERGED,
+// merged) reads as before.
+type AuthoredLine struct {
+	Repo   string `json:"repo"`
+	Number int    `json:"n"`
+	URL    string `json:"url"`
+	Title  string `json:"title"`
+	State  string `json:"state"` // OPEN, CLOSED, MERGED
+	Draft  bool   `json:"draft,omitempty"`
+	Merged string `json:"merged,omitempty"`
+	Closed string `json:"closed,omitempty"`
+}
+
+// authoredView is the authored key: the tracked recent window, by PR key.
+func authoredView(prs []forge.AuthoredPR) map[string]AuthoredLine {
+	out := map[string]AuthoredLine{}
 	for _, pr := range prs {
-		out[pr.Key()] = pr
+		out[pr.Key()] = AuthoredLine{Repo: pr.Repo, Number: pr.Number, URL: pr.URL, Title: pr.Title, State: pr.State,
+			Draft: pr.Draft, Merged: pr.Merged, Closed: pr.Closed}
 	}
 	return out
 }
