@@ -512,6 +512,15 @@ type ReleasesState struct {
 	// Armed is set by the first round, which only records: a repo with no
 	// release yet must still announce its first one.
 	Armed bool `json:"armed,omitempty"`
+	// ETag is the list's last validator: the next request is conditional,
+	// and a 304 does not count against GitHub's unauthenticated limit
+	// (60/h per IP; gluk's egress IP is shared).
+	ETag string `json:"etag,omitempty"`
+	// LimitedUntil is GitHub's x-ratelimit-reset after a rate-limit refusal:
+	// no request before it. A back-off, not a failure.
+	LimitedUntil time.Time `json:"limited_until,omitempty"`
+	// Remaining is x-ratelimit-remaining as last answered (nil: not sent).
+	Remaining *int `json:"remaining,omitempty"`
 }
 
 // PingEvery is the collect-mode ping cadence; 0 is ordinary delivery.

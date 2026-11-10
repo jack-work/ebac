@@ -160,6 +160,14 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		}
 		return nil
 	}
+	if r := w.Releases; r != nil {
+		fmt.Printf("releases  %s, alert %s\n", r.Repo, w.AlertTarget())
+		if s := w.Runtime.Releases; s != nil {
+			fmt.Printf("seen      %d tag(s)%s\n", len(s.Seen), map[bool]string{true: ", conditional (ETag cached: a 304 costs no quota)", false: ""}[s.ETag != ""])
+			fmt.Printf("limit     %s\n", describeLimit(s, time.Now()))
+		}
+		return nil
+	}
 	if b := w.Band; b != nil {
 		fmt.Printf("band-hub  socket %s, utility %s, repo %s\n", b.Socket, strings.Join(b.Utility, ","), b.Repo)
 		return nil
@@ -227,4 +235,16 @@ func describeTrigger(w *model.Critic) string {
 		out += "\n          ERROR " + errText
 	}
 	return out
+}
+
+// describeLimit is a release watch's GitHub rate-limit state: unauthenticated
+// api.github.com allows 60 requests an hour per IP, and gluk's IP is shared.
+func describeLimit(s *model.ReleasesState, now time.Time) string {
+	if now.Before(s.LimitedUntil) {
+		return fmt.Sprintf("RATE LIMITED by GitHub until %s (back-off, not a failure; no request before it)", s.LimitedUntil.UTC().Format(time.RFC3339))
+	}
+	if s.Remaining != nil {
+		return fmt.Sprintf("%d request(s) left this hour (unauthenticated, shared egress IP)", *s.Remaining)
+	}
+	return "not limited"
 }

@@ -3,10 +3,12 @@ package releases
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
@@ -121,5 +123,87 @@ func TestPluginRound(t *testing.T) {
 	b, err := plugin.InProc{"gh": Plugin{}.Handle}.Call(context.Background(), "gh", plugin.Request{Op: plugin.OpBrief, Critic: w, Pending: rep.Events})
 	if err != nil || !strings.Contains(b.Brief, "v0.58.4 patch (from v0.58.3)") {
 		t.Fatalf("brief %+v %v", b, err)
+	}
+}
+
+// GitHub's unauthenticated limit (60/h per IP, shared on gluk): the list is fetched with If-None-Match and a 304
+// changes nothing (no events, no key, not a failure); a rate-limit refusal (403 + remaining 0, or 403 + Retry-After,
+// or 429) is a back-off until x-ratelimit-reset, never a failure, and no request is made before it. Control: a 403
+// that is not a rate limit still fails the round.
+func TestConditionalAndRateLimit(t *testing.T) {
+	var (
+		calls     int
+		ifNone    string
+		mode      = "ok"
+		resetUnix int64
+	)
+	list := rels(figaroTags[:4]...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		ifNone = r.Header.Get("If-None-Match")
+		switch mode {
+		case "limited":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", fmt.Sprint(resetUnix))
+			http.Error(w, `{"message":"API rate limit exceeded for 70.37.26.68"}`, http.StatusForbidden)
+			return
+		case "secondary":
+			w.Header().Set("Retry-After", "120")
+			http.Error(w, `{"message":"You have exceeded a secondary rate limit"}`, http.StatusForbidden)
+			return
+		case "forbidden":
+			http.Error(w, `{"message":"Repository access blocked"}`, http.StatusForbidden)
+			return
+		}
+		if ifNone == `W/"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `W/"v1"`)
+		w.Header().Set("X-RateLimit-Remaining", "41")
+		json.NewEncoder(w).Encode(list)
+	}))
+	t.Cleanup(srv.Close)
+	now := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+	c := model.Critic{Name: "releases-figaro", FormID: "@r", Source: model.SourceReleases,
+		Releases: &model.ReleasesRef{Repo: "jack-work/figaro", API: srv.URL}}
+	call := func(at time.Time) *plugin.Reply {
+		t.Helper()
+		rep, err := plugin.InProc{"gh": Plugin{HTTP: srv.Client(), Now: func() time.Time { return at }}.Handle}.Call(context.Background(), "gh",
+			plugin.Request{Op: plugin.OpRound, Critic: c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Runtime = rep.Critic.Runtime
+		return rep
+	}
+	if rep := call(now); rep.Error != "" || c.Runtime.Releases.ETag != `W/"v1"` || ifNone != "" || *c.Runtime.Releases.Remaining != 41 {
+		t.Fatalf("round 1: err %q etag %q sent %q", rep.Error, c.Runtime.Releases.ETag, ifNone)
+	}
+	if rep := call(now.Add(time.Minute)); rep.Error != "" || ifNone != `W/"v1"` || len(rep.Events) != 0 || len(rep.Set) != 0 || c.Runtime.ConsecutiveFailures != 0 {
+		t.Fatalf("304 round: err %q sent %q events %d set %v", rep.Error, ifNone, len(rep.Events), rep.Set)
+	}
+
+	mode, resetUnix = "limited", now.Add(30*time.Minute).Unix()
+	rep := call(now.Add(2 * time.Minute))
+	if rep.Error != "" || c.Runtime.ConsecutiveFailures != 0 || c.Runtime.LastError != "" || !c.Runtime.Releases.LimitedUntil.Equal(now.Add(30*time.Minute)) {
+		t.Fatalf("rate limit: err %q failures %d last %q until %s", rep.Error, c.Runtime.ConsecutiveFailures, c.Runtime.LastError, c.Runtime.Releases.LimitedUntil)
+	}
+	before := calls
+	if rep := call(now.Add(10 * time.Minute)); rep.Error != "" || calls != before || !strings.Contains(strings.Join(rep.Log, " "), "rate limited") {
+		t.Fatalf("inside the back-off: a request was made (%d -> %d) or it failed %q", before, calls, rep.Error)
+	}
+	mode = "ok"
+	if rep := call(now.Add(31 * time.Minute)); rep.Error != "" || calls != before+1 || !c.Runtime.Releases.LimitedUntil.IsZero() {
+		t.Fatalf("after the reset: calls %d err %q until %s", calls, rep.Error, c.Runtime.Releases.LimitedUntil)
+	}
+
+	mode = "secondary"
+	if rep := call(now.Add(40 * time.Minute)); rep.Error != "" || !c.Runtime.Releases.LimitedUntil.Equal(now.Add(42*time.Minute)) {
+		t.Fatalf("secondary limit: err %q until %s", rep.Error, c.Runtime.Releases.LimitedUntil)
+	}
+	mode = "forbidden"
+	if rep := call(now.Add(50 * time.Minute)); !strings.Contains(rep.Error, "HTTP 403") || c.Runtime.ConsecutiveFailures != 1 {
+		t.Fatalf("control: a plain 403 is a failure: err %q failures %d", rep.Error, c.Runtime.ConsecutiveFailures)
 	}
 }

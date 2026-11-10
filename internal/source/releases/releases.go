@@ -46,9 +46,11 @@ type Release struct {
 	} `json:"author"`
 }
 
-// Plugin serves github-releases. HTTP, when set, replaces the client (tests).
+// Plugin serves github-releases. HTTP and Now, when set, replace the client
+// and the clock (tests).
 type Plugin struct {
 	HTTP *http.Client
+	Now  func() time.Time
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
@@ -65,7 +67,33 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	return nil, fmt.Errorf("op %q not supported", req.Op)
 }
 
-func (pl Plugin) fetch(ctx context.Context, ref *model.ReleasesRef) ([]Release, error) {
+// answer is one list request's outcome besides the releases themselves.
+type answer struct {
+	notModified bool      // 304: the cached list stands (does not count against the limit)
+	etag        string    // the validator to send next time
+	limited     time.Time // a rate-limit refusal: no request before this
+	remaining   int       // x-ratelimit-remaining, -1 when absent
+}
+
+// rateLimit reads a refusal as GitHub's rate limit: 429, or 403 with
+// x-ratelimit-remaining 0 (primary) or Retry-After (secondary). The back-off is x-ratelimit-reset (unix seconds),
+// else Retry-After, else an hour.
+func rateLimit(resp *http.Response, now time.Time) (time.Time, bool) {
+	if resp.StatusCode != http.StatusTooManyRequests && !(resp.StatusCode == http.StatusForbidden &&
+		(resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")) {
+		return time.Time{}, false
+	}
+	if s, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil && s > 0 {
+		return time.Unix(s, 0).UTC(), true
+	}
+	if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
+		return now.Add(time.Duration(s) * time.Second).UTC(), true
+	}
+	return now.Add(time.Hour).UTC(), true
+}
+
+func (pl Plugin) fetch(ctx context.Context, ref *model.ReleasesRef, etag string, now time.Time) ([]Release, answer, error) {
+	a := answer{remaining: -1}
 	api := ref.API
 	if api == "" {
 		api = DefaultAPI
@@ -76,50 +104,90 @@ func (pl Plugin) fetch(ctx context.Context, ref *model.ReleasesRef) ([]Release, 
 	}
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/releases?per_page=%d", strings.TrimRight(api, "/"), ref.Repo, perPage), nil)
 	if err != nil {
-		return nil, err
+		return nil, a, err
 	}
 	r.Header.Set("Accept", "application/vnd.github+json")
 	r.Header.Set("User-Agent", "ebac")
+	if etag != "" {
+		r.Header.Set("If-None-Match", etag)
+	}
 	resp, err := cl.Do(r)
 	if err != nil {
-		return nil, fmt.Errorf("releases %s: %w", ref.Repo, err)
+		return nil, a, fmt.Errorf("releases %s: %w", ref.Repo, err)
 	}
 	defer resp.Body.Close()
+	if n, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil {
+		a.remaining = n
+	}
+	if resp.StatusCode == http.StatusNotModified {
+		a.notModified, a.etag = true, etag
+		return nil, a, nil
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, fmt.Errorf("releases %s: %w", ref.Repo, err)
+		return nil, a, fmt.Errorf("releases %s: %w", ref.Repo, err)
+	}
+	if until, ok := rateLimit(resp, now); ok {
+		a.limited = until
+		return nil, a, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("releases %s: HTTP %d: %.200s", ref.Repo, resp.StatusCode, body)
+		return nil, a, fmt.Errorf("releases %s: HTTP %d: %.200s", ref.Repo, resp.StatusCode, body)
 	}
 	var rels []Release
 	if err := json.Unmarshal(body, &rels); err != nil {
-		return nil, fmt.Errorf("releases %s: %w", ref.Repo, err)
+		return nil, a, fmt.Errorf("releases %s: %w", ref.Repo, err)
 	}
+	a.etag = resp.Header.Get("ETag")
 	out := rels[:0]
 	for _, x := range rels {
 		if !x.Draft && x.Tag != "" {
 			out = append(out, x)
 		}
 	}
-	return out, nil
+	return out, a, nil
 }
 
 func (pl Plugin) round(ctx context.Context, w *model.Critic) *plugin.Reply {
 	rep := &plugin.Reply{Critic: w}
-	rels, err := pl.fetch(ctx, w.Releases)
+	now := time.Now().UTC()
+	if pl.Now != nil {
+		now = pl.Now().UTC()
+	}
+	if w.Runtime.Releases == nil {
+		w.Runtime.Releases = &model.ReleasesState{}
+	}
+	st := w.Runtime.Releases
+	// A rate-limit back-off is not a failure: no request, no failure count,
+	// no error; ebac show says until when.
+	if now.Before(st.LimitedUntil) {
+		rep.Logf("%s: rate limited by GitHub until %s; no request", w.Name, st.LimitedUntil.Format(time.RFC3339))
+		return rep
+	}
+	rels, a, err := pl.fetch(ctx, w.Releases, st.ETag, now)
 	if err != nil {
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = err.Error()
 		rep.Error = err.Error()
 		return rep
 	}
-	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
-	w.Runtime.LastSuccess = time.Now().UTC()
-	if w.Runtime.Releases == nil {
-		w.Runtime.Releases = &model.ReleasesState{}
+	st.Remaining = nil
+	if a.remaining >= 0 {
+		st.Remaining = &a.remaining
 	}
-	news := Diff(w.Runtime.Releases, rels)
+	if !a.limited.IsZero() {
+		st.LimitedUntil = a.limited
+		rep.Logf("%s: rate limited by GitHub (unauthenticated 60/h, shared egress IP) until %s", w.Name, a.limited.Format(time.RFC3339))
+		return rep
+	}
+	st.LimitedUntil = time.Time{}
+	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
+	w.Runtime.LastSuccess = now
+	if a.notModified {
+		return rep // the list is unchanged: nothing new, the releases key stands
+	}
+	st.ETag = a.etag
+	news := Diff(st, rels)
 	rep.Inbox = map[string]form.InboxItem{}
 	for _, n := range news {
 		notes, cut := model.CutBody(strings.TrimSpace(n.Release.Body), notesBytes)

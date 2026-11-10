@@ -77,3 +77,16 @@ func TestLiveSetPingEvery(t *testing.T) {
 		t.Fatalf("0 did not turn collect mode off: %d", got.PingEverySec)
 	}
 }
+
+func TestDescribeLimit(t *testing.T) {
+	now := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+	s := &model.ReleasesState{LimitedUntil: now.Add(30 * time.Minute)}
+	if got := describeLimit(s, now); !strings.Contains(got, "RATE LIMITED by GitHub until 2026-11-10T20:30:00Z") || !strings.Contains(got, "not a failure") {
+		t.Fatalf("limited: %q", got)
+	}
+	n := 41
+	s = &model.ReleasesState{LimitedUntil: now.Add(-time.Minute), Remaining: &n}
+	if got := describeLimit(s, now); got != "41 request(s) left this hour (unauthenticated, shared egress IP)" {
+		t.Fatalf("after the reset: %q", got)
+	}
+}
