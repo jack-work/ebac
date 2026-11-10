@@ -110,9 +110,10 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	}
 	fig := st.Fig
 	seat := "(empty)"
-	if form, err := fig.Form(ctx, w.FormID); err == nil {
-		if t, ok := form["target-aria"].(string); ok && t != "" {
-			seat = t
+	if t, ok, err := fleet.SeatOf(ctx, fig, w); err == nil && t != "" {
+		seat = t
+		if !ok {
+			seat += " (unreachable)"
 		}
 	}
 	// AwaitingUs("") is not "unknown me", it is "every non-empty author
@@ -125,7 +126,11 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	// the old (wrong-but-not-crashing) behavior rather than erroring the
 	// whole command.
 	fmt.Printf("critic     %s (%s)\n", w.Name, w.Mode)
-	fmt.Printf("role      %s -> %s\n", w.FormID, seat)
+	if a := w.AlertTarget(); a != w.FormID {
+		fmt.Printf("role      %s, alert %s -> %s\n", w.FormID, a, seat)
+	} else {
+		fmt.Printf("role      %s -> %s\n", w.FormID, seat)
+	}
 	fmt.Printf("timer     %s, next %s\n", systemd.TimerState(w.Name).Display, systemd.NextElapse(w.Name))
 	fmt.Printf("round     %d, last success %s\n", w.Runtime.Round, stamp(w.Runtime.LastSuccess))
 	fmt.Printf("stop when %s\n", brief.DescribeStop(w.Stop))
@@ -133,6 +138,9 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("error     %s\n", w.Runtime.LastError)
 	}
 	fmt.Printf("trigger   %s\n", describeTrigger(w))
+	if w.PingEverySec > 0 {
+		fmt.Printf("collect   %s\n", describeCollect(w))
+	}
 	if n := len(w.Runtime.PendingEvents); n > 0 {
 		fmt.Printf("pending   %d undelivered event(s), retry %d, next %s\n",
 			n, w.Runtime.RetryCount, stamp(w.Runtime.NextRetryAt))

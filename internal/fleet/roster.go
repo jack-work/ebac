@@ -99,13 +99,8 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 		// same way. Two instruments that disagree about one fact are worse
 		// than one instrument: the roster used to score an unreachable seat
 		// as "ok" because it only tested for emptiness.
-		seatOK := false
-		if form, err := fig.Form(ctx, w.FormID); err == nil {
-			if t, ok := form["target-aria"].(string); ok && t != "" {
-				row.Seat = t
-				seatOK = fig.AriaExists(ctx, t)
-			}
-		}
+		seat, seatOK, _ := SeatOf(ctx, fig, w)
+		row.Seat = seat
 		if row.Seat == "" {
 			row.Seat = "(empty)"
 			sum.SeatsEmpty++
@@ -137,6 +132,28 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 	sum.Critics = len(rows)
 	sum.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	return rows, sum, nil
+}
+
+// seatReader is what SeatOf needs from figaro (a fake in tests).
+type seatReader interface {
+	Form(ctx context.Context, id string) (map[string]any, error)
+	AriaExists(ctx context.Context, id string) bool
+}
+
+// SeatOf is the aria a critic's deliveries reach: the holder (target-aria) of
+// its ALERT target, which is its own role form unless it was added with
+// --alert @ROLE. An --alert critic has no seat of its own by design; it is
+// seated when the alert role resolves to a live aria. ok says that aria
+// exists; err is a form that could not be read.
+func SeatOf(ctx context.Context, fig seatReader, w *model.Critic) (seat string, ok bool, err error) {
+	form, err := fig.Form(ctx, w.AlertTarget())
+	if err != nil {
+		return "", false, err
+	}
+	if t, _ := form["target-aria"].(string); t != "" {
+		return t, fig.AriaExists(ctx, t), nil
+	}
+	return "", false, nil
 }
 
 func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {

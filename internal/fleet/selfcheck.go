@@ -80,7 +80,8 @@ func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 	}
 
 	// 2. Seat occupancy. A role with no target-aria collects deltas nobody
-	//    will ever read.
+	//    will ever read. The role is the critic's ALERT target (SeatOf): an
+	//    --alert critic's own form has no seat by design.
 	empty := []string{}
 	dead := []string{}
 	checked := 0
@@ -88,15 +89,14 @@ func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 		if w.Runtime.Archived || !w.NeedsSeat() {
 			continue
 		}
-		form, e := fig.Form(ctx, w.FormID)
+		t, alive, e := SeatOf(ctx, fig, w)
 		if e != nil {
 			continue
 		}
 		checked++
-		t, _ := form["target-aria"].(string)
 		if t == "" {
 			empty = append(empty, w.Name)
-		} else if !fig.AriaExists(ctx, t) {
+		} else if !alive {
 			dead = append(dead, w.Name+"->"+t)
 		}
 	}

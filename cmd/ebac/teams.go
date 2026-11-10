@@ -34,8 +34,8 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	if *pingEvery < 0 || (*pingEvery > 0 && *pingEvery < *every) {
-		return fmt.Errorf("--ping-every %s: want 0 or at least --every (%s)", *pingEvery, *every)
+	if err := checkPingEvery(*pingEvery, *every); err != nil {
+		return err
 	}
 	w := &model.Critic{Name: *name, Mode: model.ModeTeams, Source: "teams-chat", CreatedAt: time.Now().UTC(), FigaroSock: g.figaro, EverySec: int(every.Seconds()),
 		Chat: &model.ChatRef{ID: *chat, Topic: *topic}, Stop: model.StopConditions{}, PingEverySec: int(pingEvery.Seconds())}

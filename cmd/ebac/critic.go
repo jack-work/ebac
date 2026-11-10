@@ -217,6 +217,57 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 	return nil
 }
 
+// cmdSet edits a live critic's configuration. --ping-every D turns COLLECT
+// mode on (gather every round, ping the seat at most every D, only when
+// something woke) or off (0). It must be 0 or at least the poll interval.
+func cmdSet(ctx context.Context, g globals, args []string) error {
+	fs := flag.NewFlagSet("set", flag.ExitOnError)
+	name := fs.String("critic", "", "critic name")
+	pingEvery := fs.Duration("ping-every", -1, "COLLECT mode ping interval, e.g. 30m; 0 turns collect mode off")
+	_ = fs.Parse(args)
+	if *pingEvery < 0 {
+		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off)")
+	}
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
+	if err != nil {
+		return err
+	}
+	w, err := st.LoadCritic(ctx, *name)
+	if err != nil {
+		return err
+	}
+	if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {
+		return err
+	}
+	w.PingEverySec = int(pingEvery.Seconds())
+	if err := st.SaveCritic(ctx, w); err != nil {
+		return err
+	}
+	fmt.Printf("%s: %s; takes effect on the next round\n", w.Name, describeCollect(w))
+	return nil
+}
+
+// checkPingEvery: a ping interval shorter than the poll interval would never
+// hold anything back.
+func checkPingEvery(ping, every time.Duration) error {
+	if ping < 0 || (ping != 0 && ping < every) {
+		return fmt.Errorf("--ping-every %s: want 0 or at least the poll interval (%s)", ping, every)
+	}
+	return nil
+}
+
+// describeCollect is the collect-mode line of ebac show and ebac set.
+func describeCollect(w *model.Critic) string {
+	if w.PingEverySec <= 0 {
+		return "collect off (wake on every round with news)"
+	}
+	s := fmt.Sprintf("collect mode, ping every %s", w.PingEvery())
+	if !w.Runtime.LastPing.IsZero() {
+		s += ", last ping " + w.Runtime.LastPing.UTC().Format(time.RFC3339)
+	}
+	return s
+}
+
 // ---------- cast / stop / resume / rm ----------
 
 func cmdCast(ctx context.Context, g globals, args []string) error {

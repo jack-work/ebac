@@ -17,6 +17,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
+  ebac set --critic N --ping-every D        collect mode on a live critic: ping the seat at most every D (0 = off)
   ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--recent 50] [--every 5m]
@@ -111,6 +112,8 @@ func main() {
 		err = cmdAddRoster(ctx, g, args)
 	case "add":
 		err = cmdAdd(ctx, g, args)
+	case "set":
+		err = cmdSet(ctx, g, args)
 	case "set-write":
 		err = cmdSetWrite(ctx, g, args)
 	case "ls", "list":
