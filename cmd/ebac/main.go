@@ -54,6 +54,9 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             no seat, never a wake, writes only on change
   ebac add-releases --name N --repo O/R [--alert @ROLE | --aria SEAT] [--every 15m]
                                             watch a github.com repo's releases: one wake per new tag, with its bump
+  ebac repoint --critic N --alert @new | --all-from @old --to @new [--dry-run]
+                                            rewrite the role addresses critics store (alert roles, scout owners and
+                                            warn role, keel-branches reviewer); the seat stays ebac cast's
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
@@ -123,6 +126,8 @@ func main() {
 		err = cmdAddKeel(ctx, g, args)
 	case "add-releases":
 		err = cmdAddReleases(ctx, g, args)
+	case "repoint":
+		err = cmdRepoint(ctx, g, args)
 	case "add-scout":
 		err = cmdAddScout(ctx, g, args)
 	case "add-keel-branches":
