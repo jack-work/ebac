@@ -48,6 +48,12 @@ const CursorSkew = 2 * time.Minute
 // JobsWindow is how far back the band hub is read for jobs on tracked heads.
 const JobsWindow = 72 * time.Hour
 
+// SchemaVersion is the shape of the entries this code writes. A state written
+// under another one (a code upgrade that changed the entries) re-reads every
+// tracked PR and issue once and rewrites every entry, as a filter change does.
+// Bump it with any change to PREntry or IssueEntry.
+const SchemaVersion = 3
+
 // KeepClosed is the least an entry stays after its PR merged or closed (and,
 // for a PR, until its ledger record is acked), or its issue closed (S2).
 const KeepClosed = 24 * time.Hour
@@ -318,7 +324,8 @@ type State struct {
 	Warned  bool                  `json:"warned,omitempty"`  // the warn role was pinged: open entries alone are past the cap
 	Warning string                `json:"warning,omitempty"` // digest of the warning key last written
 	NoSubs  bool                  `json:"nosubs,omitempty"`  // the forge has no sub-issues: they are not asked for
-	Filter  string                `json:"filter,omitempty"`  // digest of the repo, authors and relevance filter the cursor was read under
+	Filter  string                `json:"filter,omitempty"`
+	Schema  int                   `json:"schema,omitempty"` // the entry shape (SchemaVersion) every entry on the form was written in  // digest of the repo, authors and relevance filter the cursor was read under
 }
 
 // Pass is one round's inputs.
@@ -417,6 +424,13 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			logf("filter changed: full re-read of every open PR and issue")
 		}
 		cursor, st.Filter, st.Skip = "", fd, map[int]string{}
+	}
+	// A new entry shape: every tracked PR and issue is read again by number (the re-read and the tracked-issue batch)
+	// and its entry rewritten (its old-shape digest never matches). Ledger records already sent are not sent again
+	// for the reshape alone.
+	migrating := st.Schema != SchemaVersion
+	if migrating {
+		logf("entry schema %d -> %d: re-reading and rewriting every entry", st.Schema, SchemaVersion)
 	}
 
 	// 1. the catch-up search: one call, one alias per author.
@@ -556,10 +570,10 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// 2. the re-read: tracked open PRs not in the search whose facts may have moved without an update.
 	var reread []int
 	for n, t := range st.PRs {
-		if _, ok := fresh[n]; ok || t.State != "OPEN" {
+		if _, ok := fresh[n]; ok || t.State != "OPEN" && !migrating {
 			continue
 		}
-		if t.Settling || t.Held || t.Inputs != digest([]any{jobsFor(jobs, st.Tests, t.Head), marks.of(n)}) {
+		if migrating || t.Settling || t.Held || t.Inputs != digest([]any{jobsFor(jobs, st.Tests, t.Head), marks.of(n)}) {
 			reread = append(reread, n)
 		}
 	}
@@ -626,6 +640,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 				t.Done = in.Now.Unix() // no close time from GitHub: retention counts from when it was first seen closed
 			}
 			rec, h := record(in.Watch.Repo, n, e)
+			if migrating && t.Record != "" {
+				t.Record = h // the reshape alone is no new record: the one sent stands (and its ack)
+			}
 			if h != t.Record {
 				res.Forms = append(res.Forms, outbox(n, rec))
 				t.Record, t.Outbox, t.Acked = h, in.Now.Unix(), false
@@ -642,10 +659,10 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			linked[k] = true
 		}
 	}
-	var want []int
+	var tracked, want []int
 	for k, t := range st.Issues {
-		if t.Held { // new while the form was at its cap: read again for a place
-			want = append(want, k)
+		if _, seen := freshIssues[k]; !seen && (t.Held || migrating) { // held back at the cap, or a reshape: read again
+			tracked = append(tracked, k)
 		}
 	}
 	for k := range linked {
@@ -656,24 +673,34 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 		want = append(want, k)
 	}
+	sort.Ints(tracked)
 	sort.Ints(want)
-	for i := 0; i < len(want); i += Batch {
-		part := want[i:min(i+Batch, len(want))]
-		for _, k := range part {
-			st.Missing[k] = in.Now.Unix() // cleared below when it reads as an issue
-		}
-		data, err := call(batchQuery(in.Watch.Repo, nil, part, !st.NoSubs))
-		if err != nil {
-			logf("linked issues %v: %v (retried after %s)", part, err, MissingRetry)
-			continue
-		}
-		_, issues, err := decodeBatch(data)
-		if err != nil {
-			logf("linked issues: %v", err)
-			continue
-		}
-		for _, is := range issues {
-			freshIssues[is.Number] = is
+	reshaped := true // every tracked issue read again (when migrating)
+	// Tracked issues in their own batches: a bad linked number fails its whole batch, and must not fail theirs.
+	for li, list := range [][]int{tracked, want} {
+		what := []string{"tracked issues", "linked issues"}[li]
+		for i := 0; i < len(list); i += Batch {
+			part := list[i:min(i+Batch, len(list))]
+			for _, k := range part {
+				if st.Issues[k] == nil {
+					st.Missing[k] = in.Now.Unix() // cleared below when it reads as an issue
+				}
+			}
+			data, err := call(batchQuery(in.Watch.Repo, nil, part, !st.NoSubs))
+			var issues []Issue
+			if err == nil {
+				_, issues, err = decodeBatch(data)
+			}
+			if err != nil {
+				logf("%s %v: %v (retried later)", what, part, err)
+				if li == 0 {
+					reshaped = false
+				}
+				continue
+			}
+			for _, is := range issues {
+				freshIssues[is.Number] = is
+			}
 		}
 	}
 	var pings []plugin.Ping
@@ -778,6 +805,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)
+	if reshaped {
+		st.Schema = SchemaVersion // else the next pass reshapes again
+	}
 	budget(&st, &res, in, logf)
 	res.State = st
 	return res, nil

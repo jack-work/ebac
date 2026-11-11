@@ -134,6 +134,7 @@ type fakeGH struct {
 	pageSize int
 	fail     error
 	noSubs   bool // a forge without sub-issues: a query naming subIssues is refused
+	noIssues bool // issue reads by number fail
 }
 
 var (
@@ -150,6 +151,9 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 	g.queries = append(g.queries, q)
 	if g.fail != nil {
 		return nil, g.fail
+	}
+	if g.noIssues && strings.Contains(q, "issueOrPullRequest") {
+		return nil, fmt.Errorf("graphql: 502")
 	}
 	if g.noSubs && strings.Contains(q, "subIssues") {
 		return nil, fmt.Errorf("graphql: Field 'subIssues' doesn't exist on type 'Issue'")
@@ -996,5 +1000,59 @@ func TestMergeableRecomputing(t *testing.T) {
 	r = w.pass(2 * time.Minute)
 	if r.Set["pr:101"] == nil || ms(r) != "CONFLICTING waiting: conflict" {
 		t.Fatalf("recomputing after a conflict: %s", ms(r))
+	}
+}
+
+// A code upgrade that changed the entry shape (State.Schema behind SchemaVersion): one pass re-reads every tracked PR
+// and issue by number and rewrites every entry; a
+// ledger record already sent and acked is not sent again for the reshape; the next pass is quiet. A failed re-read
+// of tracked issues leaves the schema behind, so the next pass tries again.
+func TestSchemaUpgradeRewritesEveryEntry(t *testing.T) {
+	w := newWorld(t)
+	w.pass(0)
+	p := w.gh.items[201]
+	p.state, p.mergedAt, p.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
+	is := w.gh.items[301] // closed: only a read by number brings it back
+	is.state, is.closedAt, is.updated = "CLOSED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
+	r := w.pass(2 * time.Minute)
+	var h struct {
+		Hash string `json:"hash"`
+	}
+	_ = json.Unmarshal(outboxOf(r)["201"], &h)
+	w.in["ledger_ack"] = model.MustJSON(map[string]any{"201": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	w.pass(2 * time.Minute)
+	for i := 0; i < 3; i++ {
+		w.pass(2 * time.Minute)
+	}
+	if !w.st.PRs[201].Acked || w.st.Schema != SchemaVersion {
+		t.Fatalf("setup: acked %v schema %d", w.st.PRs[201].Acked, w.st.Schema)
+	}
+	// The form as an older binary left it: its own shape, its own schema.
+	w.st.Schema = 2
+	for _, tp := range w.st.PRs {
+		tp.Entry = "0ld0ld00"
+	}
+	w.st.PRs[201].Record = "0ld0ld0ld0ld0ld0" // the record as the old shape hashed it, sent and acked
+	for _, ti := range w.st.Issues {
+		ti.Entry = "0ld0ld00"
+	}
+	w.gh.noIssues = true
+	r = w.pass(2 * time.Minute)
+	if got := strings.Join(setKeys(r), " "); got != "pr:101 pr:102 pr:201" || len(r.Forms) != 0 || w.st.Schema != 2 {
+		t.Fatalf("reshape with the issue read failing: set %s, forms %v, schema %d", got, outboxOf(r), w.st.Schema)
+	}
+	if e := entry(t, r, "pr:201"); e["s"] != "MERGED" || e["m"] == nil || !w.st.PRs[201].Acked {
+		t.Fatalf("merged entry %v acked %v", e, w.st.PRs[201].Acked)
+	}
+	w.gh.noIssues = false
+	r = w.pass(2 * time.Minute)
+	if got := strings.Join(setKeys(r), " "); got != "issue:301" || len(r.Forms) != 0 || w.st.Schema != SchemaVersion {
+		t.Fatalf("reshape retried: set %s, forms %v, schema %d", got, outboxOf(r), w.st.Schema)
+	}
+	if e := entry(t, r, "issue:301"); e["s"] != "CLOSED" || !w.st.PRs[201].Acked {
+		t.Fatalf("merged entry %v acked %v", e, w.st.PRs[201].Acked)
+	}
+	if r := w.pass(2 * time.Minute); len(r.Set)+len(r.Forms) != 0 || r.GHCalls != 1 {
+		t.Fatalf("after the reshape: set %v, %d calls", setKeys(r), r.GHCalls)
 	}
 }
