@@ -72,3 +72,26 @@ func (f fixed) Where() string { return "fixed" }
 func (f fixed) Get(context.Context, string, time.Duration) (int, []byte, error) {
 	return 200, []byte(f), nil
 }
+
+type pathDoor struct{ paths *[]string }
+
+func (d pathDoor) Where() string { return "paths" }
+func (d pathDoor) Get(_ context.Context, path string, _ time.Duration) (int, []byte, error) {
+	*d.paths = append(*d.paths, path)
+	return 200, []byte(`{"paths":{}}`), nil
+}
+
+// ThreadsAt asks keel to place the threads at the given revision; Threads asks at main's head.
+func TestThreadsAtRev(t *testing.T) {
+	var got []string
+	c := &Client{T: pathDoor{&got}}
+	if _, err := c.ThreadsAt(context.Background(), "aether/aether", "8bee10b764d98b5ce43029d83db06c650ff269d2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Threads(context.Background(), "aether/aether"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "/api/r/aether-aether/threads?rev=8bee10b764d98b5ce43029d83db06c650ff269d2 /api/r/aether-aether/threads" {
+		t.Fatalf("paths %v", got)
+	}
+}

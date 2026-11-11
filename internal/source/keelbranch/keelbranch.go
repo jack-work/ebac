@@ -37,7 +37,10 @@ type Keel interface {
 	Refs(ctx context.Context, repo string) ([]keel.Ref, error)
 	Span(ctx context.Context, repo, base, head string) (*keel.Span, error)
 	Log(ctx context.Context, repo, rev string, n int) ([]keel.Commit, error)
-	Threads(ctx context.Context, repo string) (map[string][]keel.Thread, error)
+	// ThreadsAt places the repo's threads at a revision (a branch head).
+	ThreadsAt(ctx context.Context, repo, rev string) (map[string][]keel.Thread, error)
+	// Events is the repo's thread event feed after a sequence number.
+	Events(ctx context.Context, repo string, after int64, wait time.Duration) ([]keel.FeedEvent, int64, error)
 }
 
 // Caps on what one branch form carries: a studied value is cut at 2046
@@ -53,6 +56,11 @@ const (
 	// wait in the state's queue (at most MaxQueue).
 	MaxPingsPerPass = 8
 	MaxQueue        = 50
+	// SweepEvery: every this many passes every branch's threads are read,
+	// whatever the feed said (a backstop for a missed event).
+	SweepEvery = 10
+	// MaxPaths bounds the changed paths a branch keeps to match feed events.
+	MaxPaths = 300
 )
 
 // Branch is what the state keeps per followed branch.
@@ -63,6 +71,8 @@ type Branch struct {
 	Commits   []string          `json:"c,omitempty"` // its commits since the merge base, 12 hex
 	CodeReady bool              `json:"r,omitempty"` // code_ready as last seen
 	Seen      string            `json:"s,omitempty"` // the newest comment time seen in its threads (RFC 3339 nano)
+	Threads   []string          `json:"t,omitempty"` // its threads' ids (feed events on them touch it)
+	Paths     []string          `json:"p,omitempty"` // its changed paths (a feed event on one touches it)
 }
 
 // State is the plugin's opaque state (critic runtime.keel_branches).
@@ -71,6 +81,11 @@ type State struct {
 	Registry string             `json:"registry,omitempty"` // digest of the branches key last written
 	Overflow string             `json:"overflow,omitempty"` // digest of the overflow key last written
 	Queue    []plugin.Ping      `json:"queue,omitempty"`
+	// Feed is the keel event feed's cursor (FeedStarted once it is at the
+	// feed's head); Passes counts passes for the sweep.
+	Feed        int64 `json:"feed,omitempty"`
+	FeedStarted bool  `json:"feed_started,omitempty"`
+	Passes      int   `json:"passes,omitempty"`
 }
 
 // Pass is one round's inputs.
@@ -209,10 +224,31 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 		logf("NOT FOLLOWED (%d): %s", len(overflow), strings.Join(overflow, "; "))
 	}
 
-	threads, err := k.Threads(ctx, repo)
-	res.Calls++
-	if err != nil {
-		return res, fmt.Errorf("threads: %w", err)
+	// Which branches' threads to read this pass: those a feed event touches (a thread of theirs, or a path they
+	// change), those whose head moved, new ones, and every one on a sweep, a first pass or a feed that failed.
+	st.Passes++
+	all := st.Passes%SweepEvery == 0
+	touchT, touchP := map[string]bool{}, map[string]bool{}
+	switch {
+	case !st.FeedStarted:
+		head, err := feedHead(ctx, k, repo, &res)
+		if err != nil {
+			logf("feed: %v (every branch's threads read this pass)", err)
+		} else {
+			st.Feed, st.FeedStarted = head, true
+		}
+		all = true
+	default:
+		evs, next, err := feedRead(ctx, k, repo, st.Feed, &res)
+		if err != nil {
+			logf("feed: %v (every branch's threads read this pass)", err)
+			all = true
+			break
+		}
+		st.Feed = next
+		for _, e := range evs {
+			touchT[e.Thread], touchP[e.Path] = true, true
+		}
 	}
 
 	var pings []plugin.Ping
@@ -261,11 +297,25 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 			facts["merge_base"] = sp.Base.SHA
 			facts["diffstat"], facts["files"] = filesOf(sp.Files)
 			facts["commits"] = commitsOf(log, *sp.Count)
+			b.Paths = pathsOf(sp.Files)
 		}
 		facts["branch"] = name
-		mine := branchThreads(threads, name, b.Commits)
-		facts["threads"] = threadsOf(mine)
-		facts["reviewers"] = reviewersOf(mine)
+		read := all || moved || fresh || touched(b, touchT, touchP)
+		var mine []keel.Thread
+		if read {
+			threads, err := k.ThreadsAt(ctx, repo, ref.SHA)
+			res.Calls++
+			if err != nil {
+				return res, fmt.Errorf("threads of %s at %s: %w", name, short(ref.SHA, 8), err)
+			}
+			mine = branchThreads(threads, name, b.Commits)
+			facts["threads"] = threadsOf(mine)
+			facts["reviewers"] = reviewersOf(mine)
+			b.Threads = b.Threads[:0]
+			for _, t := range mine {
+				b.Threads = append(b.Threads, t.ID)
+			}
+		}
 
 		// Wake the holder on comments newer than the last pass's (a new branch is a baseline).
 		newest, news := b.Seen, []string{}
@@ -596,4 +646,55 @@ func oneLine(s string) string {
 func digest(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
+}
+
+// pathsOf are a span's changed paths (a renamed file under both names), at most MaxPaths.
+func pathsOf(cs []keel.Change) []string {
+	var out []string
+	for _, c := range cs {
+		for _, p := range []string{c.Path, c.RenamedFrom} {
+			if p != "" && len(out) < MaxPaths {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// touched says whether a feed event names one of the branch's threads or a path it changes.
+func touched(b *Branch, threads, paths map[string]bool) bool {
+	for _, t := range b.Threads {
+		if threads[t] {
+			return true
+		}
+	}
+	for _, p := range b.Paths {
+		if paths[p] {
+			return true
+		}
+	}
+	return false
+}
+
+// feedRead reads the feed after a cursor to its end (one call when nothing happened).
+func feedRead(ctx context.Context, k Keel, repo string, after int64, res *Result) ([]keel.FeedEvent, int64, error) {
+	var all []keel.FeedEvent
+	for page := 0; page < 20; page++ {
+		evs, next, err := k.Events(ctx, repo, after, 0)
+		res.Calls++
+		if err != nil {
+			return nil, after, err
+		}
+		if len(evs) == 0 {
+			return all, next, nil
+		}
+		all, after = append(all, evs...), next
+	}
+	return all, after, nil
+}
+
+// feedHead is the feed's current end: where a first pass starts following it.
+func feedHead(ctx context.Context, k Keel, repo string, res *Result) (int64, error) {
+	_, next, err := feedRead(ctx, k, repo, 0, res)
+	return next, err
 }

@@ -20,9 +20,11 @@ const (
 	reviewer = "@189312b5000000000000000000000000"
 )
 
-func sha(c byte, i int) string { return fmt.Sprintf("%c%039d", c, i) }
+// sha is a commit sha unique in its first 12 hex: the branch's letter, then the commit's number.
+func sha(c byte, i int) string { return fmt.Sprintf("%c%011d%028d", c, i, 0) }
 
 type fbranch struct {
+	letter  byte
 	commits []keel.Commit // newest first, since the merge base
 	files   []keel.Change
 	time    int64
@@ -34,10 +36,14 @@ type fakeKeel struct {
 	threads  map[string][]keel.Thread
 	calls    map[string]int
 	fail     map[string]error
+	revs     []string          // the rev of each ThreadsAt call
+	log      []keel.FeedEvent  // the event feed: a thread new or changed since the last Events call
+	seen     map[string]string // thread id -> digest at the last Events call
 }
 
 func newFake() *fakeKeel {
-	return &fakeKeel{branches: map[string]*fbranch{}, threads: map[string][]keel.Thread{}, calls: map[string]int{}, fail: map[string]error{}}
+	return &fakeKeel{branches: map[string]*fbranch{}, threads: map[string][]keel.Thread{}, calls: map[string]int{}, fail: map[string]error{},
+		seen: map[string]string{}}
 }
 
 func (f *fakeKeel) push(name string, n int, files ...string) string {
@@ -46,7 +52,10 @@ func (f *fakeKeel) push(name string, n int, files ...string) string {
 		b = &fbranch{}
 		f.branches[name] = b
 	}
-	c := keel.Commit{SHA: sha(byte('a'+len(f.branches)%20), len(b.commits)+100*n), Subject: fmt.Sprintf("%s commit %d", name, len(b.commits)+1)}
+	if b.letter == 0 {
+		b.letter = byte('a' + len(f.branches)%20)
+	}
+	c := keel.Commit{SHA: sha(b.letter, len(b.commits)+100*n), Subject: fmt.Sprintf("%s commit %d", name, len(b.commits)+1)}
 	b.commits = append([]keel.Commit{c}, b.commits...)
 	b.files = nil
 	for _, p := range files {
@@ -96,12 +105,44 @@ func (f *fakeKeel) Log(_ context.Context, repo, rev string, n int) ([]keel.Commi
 	return append(append([]keel.Commit(nil), b.commits...), keel.Commit{SHA: mainSHA, Subject: "main"}), nil
 }
 
-func (f *fakeKeel) Threads(_ context.Context, repo string) (map[string][]keel.Thread, error) {
+func (f *fakeKeel) ThreadsAt(_ context.Context, repo, rev string) (map[string][]keel.Thread, error) {
 	f.calls["threads"]++
+	f.revs = append(f.revs, rev)
 	if err := f.fail["threads"]; err != nil {
 		return nil, err
 	}
 	return f.threads, nil
+}
+
+// Events turns every thread new or changed since the last call into a feed event, then answers after.
+func (f *fakeKeel) Events(_ context.Context, repo string, after int64, _ time.Duration) ([]keel.FeedEvent, int64, error) {
+	f.calls["events"]++
+	if err := f.fail["events"]; err != nil {
+		return nil, after, err
+	}
+	var paths []string
+	for p := range f.threads {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		for _, t := range f.threads[p] {
+			b, _ := json.Marshal(t)
+			if d := string(b); f.seen[t.ID] != d {
+				f.seen[t.ID] = d
+				f.log = append(f.log, keel.FeedEvent{Seq: int64(len(f.log) + 1), Thread: t.ID, Path: p, Kind: "comment"})
+			}
+		}
+	}
+	var out []keel.FeedEvent
+	next := after
+	for _, e := range f.log {
+		if e.Seq > after {
+			out = append(out, e)
+			next = e.Seq
+		}
+	}
+	return out, next, nil
 }
 
 func (f *fakeKeel) total() int {
@@ -232,7 +273,8 @@ func TestFormsPerBranchAndQuietPass(t *testing.T) {
 	if !strings.Contains(string(f["commits"]), `"count":1`) || strings.Contains(string(f["commits"]), "main") || !strings.Contains(string(ws[cr].Set["files"]), `"M c.go +1 -1"`) {
 		t.Fatalf("commits %s files %s", f["commits"], ws[cr].Set["files"])
 	}
-	if w.k.total() != 6 || len(r.Pings) != 0 || string(r.Set["branches"]) != `{}` {
+	// refs, the feed's head, and per branch span, log and its threads at its head.
+	if w.k.total() != 8 || w.k.calls["events"] != 1 || len(r.Pings) != 0 || string(r.Set["branches"]) != `{}` {
 		t.Fatalf("first pass: %v calls, pings %v", w.k.calls, r.Pings)
 	}
 	// Pass 2: the forms exist now, the registry names them; nothing else moves.
@@ -243,7 +285,7 @@ func TestFormsPerBranchAndQuietPass(t *testing.T) {
 		t.Fatalf("pass 2: forms %d registry %v calls %v", len(r.Forms), reg, w.k.calls)
 	}
 	r = w.pass()
-	if len(r.Forms)+len(r.Set)+len(r.Unset)+len(r.Pings) != 0 || w.k.total() != 2 || w.k.calls["refs"] != 1 || w.k.calls["threads"] != 1 {
+	if len(r.Forms)+len(r.Set)+len(r.Unset)+len(r.Pings) != 0 || w.k.total() != 2 || w.k.calls["refs"] != 1 || w.k.calls["events"] != 1 || w.k.calls["threads"] != 0 {
 		t.Fatalf("quiet pass: %d forms, set %v, calls %v", len(r.Forms), r.Set, w.k.calls)
 	}
 }
@@ -308,8 +350,8 @@ func TestNewCommentWakesTheHolder(t *testing.T) {
 	if r := w.pass(); len(r.Pings) != 0 {
 		t.Fatalf("a seen comment woke again: %v", r.Pings)
 	}
-	w.k.thread("t9", hj, "", "z.go", 1, comment("c9", "rev-a", "new thread", w.now.Add(time.Minute)))
-	if r := w.pass(); len(r.Pings) != 1 || !strings.Contains(r.Pings[0].Text, "z.go:1@") {
+	w.k.thread("t9", hj, "", "a.go", 1, comment("c9", "rev-a", "new thread", w.now.Add(time.Minute)))
+	if r := w.pass(); len(r.Pings) != 1 || !strings.Contains(r.Pings[0].Text, "a.go:1@") {
 		t.Fatalf("new thread: %v", r.Pings)
 	}
 }
@@ -487,5 +529,68 @@ func TestLostStateIsABaseline(t *testing.T) {
 	w.st = State{}
 	if r := w.pass(); len(r.Pings) != 0 {
 		t.Fatalf("a reset state woke: %v", r.Pings)
+	}
+}
+
+// Threads are read per branch AT ITS HEAD (keel blames once per sha), and only when the feed touches the branch (a
+// thread of its, or a path it changes), its head moved, or a sweep (every SweepEvery passes) comes round; a quiet pass
+// is refs and the feed. A thread on a file outside the diff is found by the sweep. A feed that fails reads every branch.
+func TestThreadsPerBranchAtItsHead(t *testing.T) {
+	w := newWorld(t)
+	hj, hc := w.k.head("work/John-Kelliher/effort-x"), w.k.head("work/chiqun/router")
+	w.k.thread("t0", hc, "", "b.go", 1, comment("c0", "rev-a", "before the first pass", w.now)) // history the feed already holds
+	w.pass()
+	revs := strings.Join(w.k.revs, " ")
+	if len(w.k.revs) != 2 || !strings.Contains(revs, hj) || !strings.Contains(revs, hc) {
+		t.Fatalf("revs %v", w.k.revs)
+	}
+	// The first pass started the feed at its head: the history does not touch anything again.
+	w.k.revs = nil
+	if w.pass(); len(w.k.revs) != 0 {
+		t.Fatalf("old feed events re-read: %v", w.k.revs)
+	}
+	// A comment on a path the chiqun branch changes: only that branch is read, at its head.
+	w.k.revs = nil
+	w.k.thread("t1", hc, "", "c.go", 2, comment("c1", "rev-a", "on c.go", w.now))
+	r := w.pass()
+	if len(w.k.revs) != 1 || w.k.revs[0] != hc || !strings.Contains(string(writes(r)[cr].Set["threads"]), `"open":2`) {
+		t.Fatalf("touched by path: revs %v writes %v", w.k.revs, writes(r))
+	}
+	// A new head: that branch's threads are read at the new head.
+	w.k.revs = nil
+	h2 := w.k.push("work/John-Kelliher/effort-x", 2, "a.go")
+	w.pass()
+	if len(w.k.revs) != 1 || w.k.revs[0] != h2 {
+		t.Fatalf("moved: %v", w.k.revs)
+	}
+	// A thread on a file outside every diff: no read until the sweep, which reads every branch.
+	w.k.thread("t5", h2, "", "elsewhere.go", 9, comment("c5", "rev-a", "here", w.now.Add(2*time.Minute)))
+	reads := 0
+	for i := 0; i < SweepEvery; i++ {
+		w.k.revs = nil
+		r := w.pass()
+		reads += len(w.k.revs)
+		if len(w.k.revs) == 2 {
+			if !strings.Contains(string(writes(r)[jk].Set["threads"]), "elsewhere.go:9@") {
+				t.Fatalf("sweep missed the thread: %v", writes(r))
+			}
+			break
+		}
+	}
+	if reads != 2 {
+		t.Fatalf("sweep: %d reads", reads)
+	}
+	// A reply on that thread (a known id, on no changed path): its branch alone.
+	w.k.revs = nil
+	w.k.threads["elsewhere.go"][0].Comments = append(w.k.threads["elsewhere.go"][0].Comments, comment("c6", "rev-b", "reply", w.now.Add(3*time.Minute)))
+	if r := w.pass(); len(w.k.revs) != 1 || w.k.revs[0] != h2 || len(r.Pings) != 1 {
+		t.Fatalf("touched by thread id: revs %v pings %v", w.k.revs, r.Pings)
+	}
+	// The feed fails: every branch is read, and the round still succeeds.
+	w.k.revs = nil
+	w.k.fail["events"] = errors.New("door 403")
+	r = w.pass()
+	if len(w.k.revs) != 2 || !strings.Contains(strings.Join(r.Log, " "), "feed: door 403") {
+		t.Fatalf("feed down: revs %v log %v", w.k.revs, r.Log)
 	}
 }

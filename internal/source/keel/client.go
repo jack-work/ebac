@@ -229,21 +229,34 @@ func (c *Client) get(ctx context.Context, path string, extra time.Duration) ([]b
 	return body, nil
 }
 
-// Threads returns every thread of repo, path by path as keel places them.
-// A body without the paths member is an error, never "no threads".
+// Threads returns every thread of repo, path by path as keel places them
+// (at main's head). A body without the paths member is an error, never "no
+// threads".
 func (c *Client) Threads(ctx context.Context, repo string) (map[string][]Thread, error) {
-	body, err := c.get(ctx, ThreadsPath(repo), 0)
+	return c.threads(ctx, ThreadsPath(repo))
+}
+
+// ThreadsAt is Threads placed at a revision (a branch head sha): keel blames
+// each threaded file at that sha once and caches it, where placing at main's
+// head blames them all again on every new main tip.
+func (c *Client) ThreadsAt(ctx context.Context, repo, rev string) (map[string][]Thread, error) {
+	return c.threads(ctx, ThreadsPath(repo)+"?"+url.Values{"rev": {rev}}.Encode())
+}
+
+func (c *Client) threads(ctx context.Context, path string) (map[string][]Thread, error) {
+	body, err := c.get(ctx, path, 0)
 	if err != nil {
 		return nil, err
 	}
 	var out struct {
 		Paths *map[string][]Thread `json:"paths"`
 	}
+	shown, _, _ := strings.Cut(path, "?")
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("keel GET %s: %w: %s", ThreadsPath(repo), err, snippet(body))
+		return nil, fmt.Errorf("keel GET %s: %w: %s", shown, err, snippet(body))
 	}
 	if out.Paths == nil {
-		return nil, fmt.Errorf("keel GET %s: no paths member: %s", ThreadsPath(repo), snippet(body))
+		return nil, fmt.Errorf("keel GET %s: no paths member: %s", shown, snippet(body))
 	}
 	return *out.Paths, nil
 }
