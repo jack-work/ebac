@@ -70,6 +70,14 @@ type Runtime struct {
 	// LastPing is when a collect-mode critic last pinged its seat.
 	LastPing time.Time `json:"last_ping,omitempty"`
 
+	// Children are the child forms the core keeps for the critic (keel
+	// branches: one per work branch), by the plugin's stable key: key -> @id.
+	// Core-owned.
+	Children map[string]string `json:"children,omitempty"`
+	// KeelBranches is a keel-branches critic's state, opaque to the core
+	// (the plugin's keelbranch.State).
+	KeelBranches json.RawMessage `json:"keel_branches,omitempty"`
+
 	// Scout is a scout's state, opaque to the core (the plugin's
 	// scout.State): the search cursor, each tracked PR's and issue's head
 	// and entry digest, path verdicts, test counts, ledger outbox times.
@@ -178,6 +186,9 @@ type Critic struct {
 	// Scout is a scout's configuration: repo, authors, relevance filter,
 	// owner roles.
 	Scout *ScoutWatch `json:"scout_watch,omitempty"`
+	// Branches is a keel-branches critic's configuration (source
+	// keel-branches).
+	Branches *KeelBranches `json:"keel_branches,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).
@@ -472,7 +483,11 @@ const SourceBandHub = "band-hub"
 // NeedsSeat says whether an empty role is a fault: a mirror is read by its
 // studiers and wakes nobody.
 func (w *Critic) NeedsSeat() bool {
-	return w.SourceName() != SourceBandHub && w.SourceName() != SourceRoster
+	switch w.SourceName() {
+	case SourceBandHub, SourceRoster, SourceScout, SourceKeelBranches:
+		return false // they ping the roles they name (or their child forms' holders), never a seat of their own
+	}
+	return true
 }
 
 // SourceRoster derives the figaro family's role registry (roles, holders,
@@ -594,3 +609,40 @@ type OwnerRule struct {
 	TitleMatch string `json:"title_match,omitempty"`
 	Role       string `json:"role"` // @<form id>
 }
+
+// SourceKeelBranches follows one keel repo's work/* branches (served by
+// ebac-keel): ONE child form per branch, holding its facts (head, base,
+// merge base, diff stat, files, commits, review threads, reviewers'
+// verdicts). The branch's builder holds the form (its target-aria) and owns
+// code_ready and ready on it; the plugin never writes them.
+const SourceKeelBranches = "keel-branches"
+
+// KeelBranches is a keel-branches critic's configuration.
+type KeelBranches struct {
+	Repo   string `json:"repo"`             // keel owner/name, e.g. aether/aether
+	Base   string `json:"base,omitempty"`   // the branch work is measured against; "" is main
+	Prefix string `json:"prefix,omitempty"` // "" is work/
+	// Reviewer is the role (@form) pinged on code_ready and on each new head
+	// once code_ready is set.
+	Reviewer string `json:"reviewer,omitempty"`
+	// URL and TokenCmd read keel over HTTPS; unset reads ebac's keel door.
+	URL      string   `json:"url,omitempty"`
+	TokenCmd []string `json:"token_cmd,omitempty"`
+}
+
+// ChildLease is a child form's lifetime (its system.ttl), renewed each pass:
+// a stuck or removed critic leaks no form for longer than this.
+const ChildLease = 2 * 24 * time.Hour
+
+// MaxChildren caps a critic's child forms: a write past it is refused whole.
+const MaxChildren = 100
+
+// ChildOwnerKeys are the keys a child form's holder owns: the core passes
+// them to the plugin each round and refuses any plugin write of them.
+var ChildOwnerKeys = []string{"code_ready", "ready"}
+
+// ChildWriteRefused are the child-form keys no plugin may write: the owner's
+// keys and the form's own.
+// pr_url and pr_number are keel CI's (K5: the PR it opened for the branch).
+var ChildWriteRefused = map[string]bool{"code_ready": true, "ready": true, "pr_url": true, "pr_number": true, "system": true,
+	"target-aria": true, "name": true, "kind": true, CriticKey: true}

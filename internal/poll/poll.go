@@ -95,6 +95,11 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			err = fmt.Errorf("list arias: %w", err)
 		}
 	}
+	if err == nil && w.SourceName() == model.SourceKeelBranches {
+		// Keel branches cite their child forms and read each one's
+		// holder-owned keys (code_ready, ready) and holder.
+		req.Children, req.Owned = w.Runtime.Children, p.readOwned(ctx, w)
+	}
 	if err == nil && w.SourceName() == model.SourceScout {
 		// The scout reads its owners' inputs form (merge rule, ledger acks)
 		// and the board's owner marks, read-only, through the core.
@@ -144,6 +149,10 @@ var SourceKeys = map[string][]string{
 	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)
 	// One key per PR and per issue, on the scout's own role form.
 	model.SourceScout: {"pr:*", "issue:*"},
+	// Keel branches write their child forms (Reply.Forms) and, on their own
+	// role form, the registry (branch -> child form) and the branches they
+	// could not follow.
+	model.SourceKeelBranches: {"branches", "overflow"},
 }
 
 func keyAllowed(pattern, k string) bool {

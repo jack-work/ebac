@@ -38,15 +38,26 @@ func Socket() string {
 
 // Thread and Comment are the fields ebac reads from keel/viewer/threads.go.
 type Thread struct {
-	ID     string `json:"id"`
-	Anchor *struct {
-		File      string `json:"file"`
-		StartLine int    `json:"startLine"`
-	} `json:"anchor"`
+	ID     string  `json:"id"`
+	Anchor *Anchor `json:"anchor"`
+	// Origin is where the thread was started: Rev the commit sha it was
+	// anchored at, Span the diff span on screen (keel-branches).
+	Origin struct {
+		View string `json:"view,omitempty"`
+		Rev  string `json:"rev,omitempty"`
+		Span string `json:"span,omitempty"`
+	} `json:"origin"`
 	Quote    string    `json:"quote,omitempty"`
 	Resolved bool      `json:"resolved"`
 	Created  time.Time `json:"created"`
 	Comments []Comment `json:"comments"`
+}
+
+// Anchor is where a thread is anchored, at its origin's revision.
+type Anchor struct {
+	File      string `json:"file"`
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine,omitempty"`
 }
 
 type Comment struct {

@@ -32,10 +32,7 @@ func cm(id, author, body string) Comment {
 
 func th(id string, resolved bool, cs ...Comment) Thread {
 	t := Thread{ID: id, Quote: "the selected text", Resolved: resolved, Comments: cs}
-	t.Anchor = &struct {
-		File      string `json:"file"`
-		StartLine int    `json:"startLine"`
-	}{File: "doc/a.md", StartLine: 12}
+	t.Anchor = &Anchor{File: "doc/a.md", StartLine: 12}
 	return t
 }
 

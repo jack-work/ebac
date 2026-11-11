@@ -35,7 +35,7 @@ func For(source string) (string, error) {
 	switch source {
 	case "", "github-pr", "github-author":
 		return "gh", nil
-	case "keel-threads":
+	case "keel-threads", model.SourceKeelBranches:
 		return "keel", nil
 	case "teams-chat":
 		return "tomb", nil

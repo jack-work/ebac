@@ -40,6 +40,14 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             close a ledger record to the inputs form's outbox, the entry kept 7 d;
                                             a material issue change (not inside a plan-sync block, not a bot) pings the
                                             owner role of each open PR linking the issue
+  ebac add-keel-branches --name aether-work --repo aether/aether [--reviewer @ROLE] [--base main] [--prefix work/]
+              [--every 2m] [--keel-url https://H --token-cmd CMD]
+                                            one child form per keel branch <prefix><owner>/<topic>
+                                            (ebac-<name>-<owner>--<topic>: head, base, merge_base, diffstat, files,
+                                            commits, threads, reviewers); code_ready/ready are the holder's,
+                                            pr_url/pr_number keel CI's; wakes the holder on a new comment, pings
+                                            the reviewer when code_ready turns true and on each new head after;
+                                            registry branches -> forms on the critic form; at most 100 forms
   ebac add-roster [--name roles] [--every 1m]
                                             the role roster: roles, holders, lieutenants, fork counts per role (10 min),
                                             derived from the aria store into a studied form (plugin ebac-roster);
@@ -117,6 +125,8 @@ func main() {
 		err = cmdAddReleases(ctx, g, args)
 	case "add-scout":
 		err = cmdAddScout(ctx, g, args)
+	case "add-keel-branches":
+		err = cmdAddKeelBranches(ctx, g, args)
 	case "add-band-hub":
 		err = cmdAddBandHub(ctx, g, args)
 	case "add-roster":

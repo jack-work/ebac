@@ -99,6 +99,11 @@ type Request struct {
 	// Board is the board form's owner marks (keys prs, items), read-only,
 	// read by the core each round (the scout's merge checklist).
 	Board map[string]json.RawMessage `json:"board,omitempty"`
+	// Children are the critic's child forms, key -> @id, and Owned each
+	// child's holder-owned keys (model.ChildOwnerKeys) and its target-aria,
+	// read by the core each round (keel branches).
+	Children map[string]string                     `json:"children,omitempty"`
+	Owned    map[string]map[string]json.RawMessage `json:"owned,omitempty"`
 
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
@@ -115,12 +120,19 @@ type Ping struct {
 	Text string `json:"text"`
 }
 
-// FormWrite is one write to the critic's inputs form (the scout's ledger
-// outbox): Set's ledger_outbox members are merged into the form's, and a null
-// member is removed. Inputs names the target and must be set.
+// FormWrite is one write to a form the core keeps for the critic. Exactly one
+// target: Inputs, the critic's inputs form (the scout's ledger outbox: Set's
+// ledger_outbox members merged into the form's, a null member removed), or
+// Key, a child form (keel branches: minted by the core on its first write,
+// kept in runtime.children with a ChildLease lifetime). Set and Unset are
+// top-level keys; Retire (child only) renames the form ebac-archived-... and
+// stops renewing it, after this write's Set and Unset.
 type FormWrite struct {
 	Inputs bool                       `json:"inputs,omitempty"`
+	Key    string                     `json:"key,omitempty"`
 	Set    map[string]json.RawMessage `json:"set,omitempty"`
+	Unset  []string                   `json:"unset,omitempty"`
+	Retire bool                       `json:"retire,omitempty"`
 }
 
 // Gone is one resource the plugin has given up on (form key gone.<Key>).
@@ -147,11 +159,12 @@ type Reply struct {
 	Set   map[string]json.RawMessage `json:"set,omitempty"`
 	Unset []string                   `json:"unset,omitempty"`
 	Gone  []Gone                     `json:"gone,omitempty"`
-	// Pings are one-line messages to roles (the scout only; ValidatePings).
+	// Pings are one-line messages to roles (the scout and keel branches;
+	// ValidatePings).
 	Pings []Ping `json:"pings,omitempty"`
-	// Forms are writes to the critic's inputs form (the scout's ledger
-	// outbox), validated whole (ValidateForms) before any of the reply is
-	// applied.
+	// Forms are writes to forms the core keeps for the critic (the scout's
+	// inputs form outbox, keel branches' child forms), validated whole
+	// (ValidateForms) before any of the reply is applied.
 	Forms []FormWrite `json:"forms,omitempty"`
 	// Wake are one-off messages for the alert target (blind, gone).
 	Wake []string `json:"wake,omitempty"`
@@ -210,6 +223,7 @@ func Adopt(core, from *model.Critic) {
 	r.Keel = f.Keel
 	r.BandHub = f.BandHub
 	r.Scout = f.Scout
+	r.KeelBranches = f.KeelBranches
 	r.Roster = f.Roster
 	r.Releases = f.Releases
 	r.Stopped = f.Stopped
