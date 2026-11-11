@@ -190,6 +190,9 @@ type Job struct {
 	Tests   string `json:"tests,omitempty"` // the job's tests param
 	Verdict string `json:"verdict,omitempty"`
 	State   string `json:"state,omitempty"`
+	// Crates is a check-ni's crates checked, as the hub counted them (nil:
+	// unknown, read as today). A PASS that checked 0 crates is no verdict.
+	Crates *int `json:"crates,omitempty"`
 }
 
 // Arch is the architect-review[bot] verdict.
@@ -338,6 +341,13 @@ func evBandJobs(c ctx) res {
 		v := j.Verdict
 		if v == "" {
 			v = j.State
+		}
+		switch {
+		case j.Verdict == "PASS" && q == "aether.check-ni" && j.Crates != nil && *j.Crates == 0:
+			ok = false // the rule: a check-ni PASS with 0 crates checked is no verdict
+			v += ", 0 crates checked: no verdict"
+		case j.Crates != nil:
+			v += fmt.Sprintf(", %d crates", *j.Crates)
 		}
 		ev = append(ev, fmt.Sprintf("job %d %s: %s", j.ID, name, v))
 	}

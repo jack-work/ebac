@@ -218,14 +218,23 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 }
 
 type fakeHub struct {
-	jobs  []HubJob
-	tests map[int64]int
+	jobs   []HubJob
+	tests  map[int64]int
+	crates map[int64]int // crates_checked by job id (absent: null)
+	asked  int           // tests route calls
 }
 
 func (h *fakeHub) Jobs(context.Context, time.Time) ([]HubJob, error) { return h.jobs, nil }
-func (h *fakeHub) Tests(_ context.Context, id int64) (int, bool, error) {
-	n, ok := h.tests[id]
-	return n, ok, nil
+func (h *fakeHub) Tests(_ context.Context, id int64) (Counts, error) {
+	h.asked++
+	var c Counts
+	if n, ok := h.tests[id]; ok {
+		c.TestsRun = &n
+	}
+	if n, ok := h.crates[id]; ok {
+		c.Crates = &n
+	}
+	return c, nil
 }
 
 func hubJob(id int64, queue, sha, state string, ok bool) HubJob {
@@ -651,18 +660,54 @@ func TestFilesKind(t *testing.T) {
 }
 
 // The tests route: {"tests_run": n} is a count; 404, null, or a missing key is unknown.
-func TestTestsRun(t *testing.T) {
-	for _, c := range []struct {
-		body string
-		n    int
-		ok   bool
-	}{{`{"id":7,"state":"done","tests_run":1234}`, 1234, true}, {`{"id":7,"tests_run":0}`, 0, true},
-		{`{"id":7,"tests_run":null}`, 0, false}, {`{"id":7}`, 0, false}, {`412`, 0, false}} {
-		var v any
-		_ = json.Unmarshal([]byte(c.body), &v)
-		if n, ok, _ := testsRun(v); n != c.n || ok != c.ok {
-			t.Errorf("%s: %d %v", c.body, n, ok)
+func TestTestsRoute(t *testing.T) {
+	str := func(p *int) string {
+		if p == nil {
+			return "?"
 		}
+		return fmt.Sprint(*p)
+	}
+	for body, want := range map[string]string{
+		`{"id":7,"state":"done","tests_run":1234,"crates_checked":12}`: "1234 12", `{"id":7,"tests_run":0,"crates_checked":0}`: "0 0",
+		`{"id":7,"tests_run":null,"crates_checked":null}`: "? ?", `{"id":7}`: "? ?", `412`: "? ?", `{"crates_checked":"3"}`: "? ?",
+	} {
+		var v any
+		_ = json.Unmarshal([]byte(body), &v)
+		if c := countsOf(v); str(c.TestsRun)+" "+str(c.Crates) != want {
+			t.Errorf("%s: %s %s", body, str(c.TestsRun), str(c.Crates))
+		}
+	}
+}
+
+// A check-ni PASS that checked 0 crates is no verdict (band jobs not met, the evidence says why); unknown (null)
+// reads as a pass, as before the hub counted; a known count passes, is cached (not asked again) and shown in bj.
+func TestCheckNiCratesChecked(t *testing.T) {
+	w := newWorld(t)
+	w.hub.crates = map[int64]int{}
+	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "done", true)}
+	r := w.pass(0)
+	if e := entry(t, r, "pr:101"); e["ms"] == "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[7 check-ni PASS]]" {
+		t.Fatalf("crates unknown: %v %v", e["ms"], e["bj"])
+	}
+	w.hub.crates[7] = 0
+	r = w.pass(2 * time.Minute)
+	if e := entry(t, r, "pr:101"); e["ms"] != "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[7 check-ni PASS <nil> 0]]" || w.st.Crates[7] != 0 {
+		t.Fatalf("0 crates: %v %v", e["ms"], e["bj"])
+	}
+	// A new check-ni that checked 12: band jobs met; the count is asked once.
+	w.hub.jobs = []HubJob{hubJob(8, "aether.check-ni", headA, "done", true)}
+	w.hub.crates[8] = 12
+	r = w.pass(2 * time.Minute)
+	if e := entry(t, r, "pr:101"); e["ms"] == "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[8 check-ni PASS <nil> 12]]" {
+		t.Fatalf("12 crates: %v %v", e["ms"], e["bj"])
+	}
+	asked := w.hub.asked
+	w.pass(2 * time.Minute)
+	if w.hub.asked != asked {
+		t.Fatalf("a known count was asked again: %d -> %d", asked, w.hub.asked)
+	}
+	if _, kept := w.st.Crates[7]; kept {
+		t.Fatal("a count outlived its job")
 	}
 }
 
@@ -874,5 +919,46 @@ func TestSubIssues(t *testing.T) {
 	}
 	if r := w2.pass(2 * time.Minute); r.GHCalls != 1 {
 		t.Fatalf("asked for sub-issues again: %d calls", r.GHCalls)
+	}
+}
+
+// A PR closed without merging carries its close time (cl) and its retention counts from it: kept until its record is
+// acked and KeepClosed after cl. A close GitHub gives no time for counts from when it was first seen closed. A closed
+// issue carries cl too.
+func TestClosedCarriesItsTime(t *testing.T) {
+	w := newWorld(t)
+	w.pass(0)
+	closedAt := w.now.Add(-6 * time.Hour)
+	p := w.gh.items[101]
+	p.state, p.closedAt, p.updated = "CLOSED", closedAt.Format(time.RFC3339), w.now.Add(time.Minute)
+	is := w.gh.items[301]
+	is.state, is.closedAt, is.updated = "CLOSED", closedAt.Format(time.RFC3339), w.now.Add(time.Minute)
+	r := w.pass(2 * time.Minute)
+	e := entry(t, r, "pr:101")
+	if e["s"] != "CLOSED" || e["cl"] != float64(closedAt.Unix()) || e["m"] != nil || w.st.PRs[101].Done != closedAt.Unix() {
+		t.Fatalf("closed PR: %v done %d", e, w.st.PRs[101].Done)
+	}
+	if ie := entry(t, r, "issue:301"); ie["cl"] != float64(closedAt.Unix()) {
+		t.Fatalf("closed issue: %v", ie)
+	}
+	var h struct {
+		Hash string `json:"hash"`
+	}
+	_ = json.Unmarshal(outboxOf(r)["101"], &h)
+	w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	// Acked, 6 h after cl: kept (and the closed issue too); 1 d after cl: both gone.
+	if r := w.pass(2 * time.Minute); len(r.Unset) != 0 {
+		t.Fatalf("pruned 6 h after the close: %v", r.Unset)
+	}
+	if r := w.pass(KeepClosed - 6*time.Hour); strings.Join(r.Unset, " ") != "pr:101 issue:301" {
+		t.Fatalf("not pruned 1 d after cl: %v", r.Unset)
+	}
+	// No close time from GitHub: counted from the pass that saw it closed.
+	w2 := newWorld(t)
+	w2.pass(0)
+	w2.gh.items[201].state, w2.gh.items[201].updated = "CLOSED", w2.now.Add(time.Minute)
+	w2.pass(2 * time.Minute)
+	if d := w2.st.PRs[201].Done; d != w2.now.Unix() {
+		t.Fatalf("no close time: done %d, want %d", d, w2.now.Unix())
 	}
 }

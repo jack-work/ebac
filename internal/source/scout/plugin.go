@@ -84,30 +84,38 @@ func (h hubClient) Jobs(ctx context.Context, since time.Time) ([]HubJob, error) 
 	return jobs, h.c.Get(ctx, "/jobs?"+q.Encode(), &jobs)
 }
 
-// Tests reads GET /jobs/<id>/tests: an object carrying tests_run. Until the
-// route exists (404), or while it answers null, the count is unknown, never a
-// pass.
-func (h hubClient) Tests(ctx context.Context, id int64) (int, bool, error) {
+// Tests reads GET /jobs/<id>/tests: tests_run and crates_checked. Until the
+// route exists (404), each count is unknown.
+func (h hubClient) Tests(ctx context.Context, id int64) (Counts, error) {
 	var v any
 	if err := h.c.Get(ctx, fmt.Sprintf("/jobs/%d/tests", id), &v); err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
-			return 0, false, nil
+			return Counts{}, nil
 		}
-		return 0, false, err
+		return Counts{}, err
 	}
-	return testsRun(v)
+	return countsOf(v), nil
 }
 
-// testsRun reads the tests route's answer: {"tests_run": n}; null, a missing
-// key or a non-number is unknown.
-func testsRun(v any) (int, bool, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return 0, false, nil
+// Counts are a finished job's counts as the hub's tests route answers them;
+// nil is unknown (null, absent, not a number). TestsRun is tests_run (a test
+// job's PASS with an unknown count is evidence, never a requirement);
+// Crates is crates_checked (a check-ni PASS that checked 0 is no verdict; an
+// unknown one reads as a pass, as before the hub counted).
+type Counts struct {
+	TestsRun *int
+	Crates   *int
+}
+
+func countsOf(v any) Counts {
+	m, _ := v.(map[string]any)
+	num := func(k string) *int {
+		f, ok := m[k].(float64)
+		if !ok {
+			return nil
+		}
+		n := int(f)
+		return &n
 	}
-	f, ok := m["tests_run"].(float64)
-	if !ok {
-		return 0, false, nil
-	}
-	return int(f), true, nil
+	return Counts{TestsRun: num("tests_run"), Crates: num("crates_checked")}
 }

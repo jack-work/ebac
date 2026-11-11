@@ -114,7 +114,7 @@ type Hub interface {
 	// Tests is a finished test job's count (GET /jobs/<id>/tests, key
 	// tests_run); ok false while the hub does not answer it (unknown, never
 	// a pass).
-	Tests(ctx context.Context, id int64) (n int, ok bool, err error)
+	Tests(ctx context.Context, id int64) (Counts, error)
 }
 
 // The entries are read by every studier of the scout's form (steward,
@@ -128,11 +128,13 @@ type Hub interface {
 //	          f fail, w pending, x failing names}, ar architect / lk lukas /
 //	          au automaton {v verdict, h head8 read (absent: h), at (ar only)},
 //	          th open threads, mg mergeable, ms merge_state (merged closed draft
-//	          unknown ready "waiting: <step>"), u updated, m merged, cr created,
+//	          unknown ready "waiting: <step>"), u updated, m merged, cl closed
+//	          without merging, cr created,
 //	          rd ready for review (absent and not d: cr), ln [additions,
 //	          deletions], fk files kind (docs tests code), bj band jobs at h
-//	          [[job id, queue, verdict, tests_run?], ...]
-//	issue:<n> a author, t title, s state (OPEN CLOSED), l labels, u updated,
+//	          [[job id, queue, verdict, tests_run?, crates_checked?], ...]
+//	          (tests_run null when unknown before a known crates_checked)
+//	issue:<n> a author, t title, s state (OPEN CLOSED), l labels, u updated, cl closed,
 //	          p parent issue, sub sub-issues, dg digests "body.checklist.labels.humans"
 
 // Verdict is one reviewer's latest verdict and the head it read.
@@ -168,6 +170,7 @@ type PREntry struct {
 	MergeState string   `json:"ms"`
 	Updated    int64    `json:"u"`
 	Merged     int64    `json:"m,omitempty"`
+	Closed     int64    `json:"cl,omitempty"` // closed without merging
 	Created    int64    `json:"cr,omitempty"`
 	Ready      int64    `json:"rd,omitempty"`
 	Lines      [2]int   `json:"ln"`
@@ -175,12 +178,21 @@ type PREntry struct {
 	Band       []Band   `json:"bj,omitempty"`
 }
 
-// MarshalJSON writes a band job as [id, queue, verdict] or [id, queue, verdict, tests_run].
+// MarshalJSON writes a band job as [id, queue, verdict, tests_run, crates_checked], the trailing unknowns left out
+// and an unknown tests_run before a known crates_checked written null.
 func (b Band) MarshalJSON() ([]byte, error) {
-	if b.Tests != nil {
-		return json.Marshal([]any{b.ID, b.Queue, b.Verdict, *b.Tests})
+	a := []any{b.ID, b.Queue, b.Verdict}
+	switch {
+	case b.Crates != nil:
+		var n any
+		if b.Tests != nil {
+			n = *b.Tests
+		}
+		a = append(a, n, *b.Crates)
+	case b.Tests != nil:
+		a = append(a, *b.Tests)
 	}
-	return json.Marshal([]any{b.ID, b.Queue, b.Verdict})
+	return json.Marshal(a)
 }
 
 // Band is one band job's evidence at the head (h): the newest per queue and
@@ -190,6 +202,7 @@ type Band struct {
 	Queue   string `json:"q"` // without aether.
 	Verdict string `json:"v,omitempty"`
 	Tests   *int   `json:"n,omitempty"` // tests_run, when the hub has counted
+	Crates  *int   `json:"k,omitempty"` // a check-ni's crates_checked, when the hub has counted
 }
 
 // bandOf is the evidence: the newest job per (queue, tests param) of the fast queues, at most six.
@@ -209,6 +222,7 @@ func bandOf(js headJobs) []Band {
 		if n, ok := js.tests[j.ID]; ok {
 			b.Tests = &n
 		}
+		b.Crates = j.Crates
 		out = append(out, b)
 	}
 	return out
@@ -221,6 +235,7 @@ type IssueEntry struct {
 	State   string   `json:"s"`
 	Labels  []string `json:"l"`
 	Updated int64    `json:"u"`
+	Closed  int64    `json:"cl,omitempty"`
 	Parent  int      `json:"p,omitempty"`
 	Subs    []int    `json:"sub,omitempty"`
 	Digests string   `json:"dg"`
@@ -297,6 +312,7 @@ type State struct {
 	Skip    map[int]string        `json:"skip,omitempty"`    // untracked PR -> the head (12 hex) whose files missed the filter
 	Missing map[int]int64         `json:"missing,omitempty"` // linked number that is not a readable issue -> when tried (unix)
 	Tests   map[int64]int         `json:"tests,omitempty"`   // known test counts by job id (a done job's count never changes)
+	Crates  map[int64]int         `json:"crates,omitempty"`  // known check-ni crates checked by job id
 	Queue   []plugin.Ping         `json:"queue,omitempty"`   // issue pings beyond MaxIssuePings, oldest first
 	Warned  bool                  `json:"warned,omitempty"`  // the warn role was pinged: open entries alone are past the cap
 	Warning string                `json:"warning,omitempty"` // digest of the warning key last written
@@ -364,6 +380,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	}
 	if st.Tests == nil {
 		st.Tests = map[int64]int{}
+	}
+	if st.Crates == nil {
+		st.Crates = map[int64]int{}
 	}
 	res := Result{Set: map[string]json.RawMessage{}}
 	logf := func(f string, a ...any) { res.Log = append(res.Log, fmt.Sprintf(f, a...)) }
@@ -509,11 +528,23 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			case j.State == "failed" || j.State == "dead":
 				mj.Verdict = "FAIL"
 			}
-			if mj.Verdict == "PASS" && contains(mergecheck.TestJobs, j.Queue) {
-				if _, known := st.Tests[j.ID]; !known {
-					if n, ok, err := hub.Tests(ctx, j.ID); err == nil && ok {
-						st.Tests[j.ID] = n
+			if mj.Verdict == "PASS" {
+				_, knownT := st.Tests[j.ID]
+				_, knownC := st.Crates[j.ID]
+				wantT := contains(mergecheck.TestJobs, j.Queue) && !knownT
+				wantC := j.Queue == "aether.check-ni" && !knownC
+				if wantT || wantC {
+					if c, err := hub.Tests(ctx, j.ID); err == nil {
+						if c.TestsRun != nil {
+							st.Tests[j.ID] = *c.TestsRun
+						}
+						if c.Crates != nil && j.Queue == "aether.check-ni" {
+							st.Crates[j.ID] = *c.Crates
+						}
 					}
+				}
+				if n, ok := st.Crates[j.ID]; ok {
+					mj.Crates = &n
 				}
 			}
 			jobs[sha] = append(jobs[sha], mj)
@@ -572,9 +603,15 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			t.Entry, t.Size, t.Held = d, entrySize(PRKey(n), raw), false
 		}
 		if p.Facts.State != "OPEN" {
-			t.Done = unix(p.MergedAt)
-			if t.Done == 0 {
-				t.Done = unix(p.ClosedAt)
+			done := unix(p.MergedAt)
+			if done == 0 {
+				done = unix(p.ClosedAt)
+			}
+			switch {
+			case done != 0:
+				t.Done = done
+			case t.Done == 0:
+				t.Done = in.Now.Unix() // no close time from GitHub: retention counts from when it was first seen closed
 			}
 			rec, h := record(in.Watch.Repo, n, e)
 			if h != t.Record {
@@ -645,16 +682,23 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if e.Labels == nil {
 			e.Labels = []string{}
 		}
+		if is.State == "CLOSED" {
+			e.Closed = unix(is.ClosedAt)
+		}
 		if t.Entry != "" { // a baseline is never news
 			if what, by := material(t, is, d, lastHuman); len(what) > 0 {
 				pings = append(pings, issuePings(st.PRs, is, what, by, logf)...)
 			}
 		}
 		t.D, t.LastHuman = d, unix(lastHuman)
-		t.State, t.Done = is.State, 0
-		if is.State != "OPEN" {
-			t.Done = unix(is.ClosedAt)
+		if is.State == "OPEN" {
+			t.Done = 0
+		} else if done := unix(is.ClosedAt); done != 0 {
+			t.Done = done
+		} else if t.Done == 0 {
+			t.Done = in.Now.Unix() // no close time: counted from when it was first seen closed
 		}
+		t.State = is.State
 		if d := digest(e); d != t.Entry {
 			raw := model.MustJSON(e)
 			if t.Entry == "" {
@@ -716,6 +760,11 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			delete(st.Tests, id)
 		}
 	}
+	for id := range st.Crates {
+		if !keep[id] {
+			delete(st.Crates, id)
+		}
+	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)
 	budget(&st, &res, in, logf)
 	res.State = st
@@ -738,6 +787,9 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 		Checks: checksOf(p), Threads: p.Facts.Unresolved, Mergeable: p.Facts.Mergeable, MergeState: mergecheck.StateOf(&p.Facts, steps),
 		Automaton: p.Automaton, Updated: unix(p.Updated), Merged: unix(p.MergedAt), Created: unix(p.Created), Ready: unix(p.ReadyAt),
 		Lines: [2]int{p.Additions, p.Deletions}, FilesKind: mergecheck.KindOf(p.KindFiles()), Band: bandOf(js)}
+	if p.Facts.State == "CLOSED" {
+		e.Closed = unix(p.ClosedAt)
+	}
 	if e.Base == "main" {
 		e.Base = ""
 	}

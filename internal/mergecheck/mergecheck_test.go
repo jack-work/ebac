@@ -141,3 +141,22 @@ func TestPolicyDrift(t *testing.T) {
 		t.Fatalf("self check %+v", c)
 	}
 }
+
+// The rule: a check-ni PASS with 0 crates checked is no verdict (not met, said in the note); an unknown count reads as
+// a pass; a known count is shown.
+func TestCheckNiZeroCrates(t *testing.T) {
+	rule, _, _ := loadGolden(t)
+	p := Parse(rule)
+	f := Facts{Oid: "abc", State: "OPEN", Heavy: true}
+	n0, n1, n5 := 0, 1, 5
+	for _, c := range []struct {
+		crates *int
+		ok     bool
+		note   string
+	}{{&n0, false, "job 1 check-ni: PASS, 0 crates checked: no verdict"}, {nil, true, "job 1 check-ni: PASS"}, {&n5, true, "job 1 check-ni: PASS, 5 crates"}, {&n1, true, "job 1 check-ni: PASS, 1 crates"}} {
+		row := Checklist(p, f, []Job{{ID: 1, Queue: "aether.check-ni", Verdict: "PASS", Crates: c.crates}}, Marks{}, nil, nil, []string{"a.rs"})[0]
+		if row.OK != c.ok || row.Status == "pending" || !strings.Contains(row.Note, c.note) {
+			t.Errorf("crates %v: %+v", c.crates, row)
+		}
+	}
+}
