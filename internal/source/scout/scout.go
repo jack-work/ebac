@@ -330,11 +330,12 @@ type State struct {
 
 // Pass is one round's inputs.
 type Pass struct {
-	Cap    int // the form's cap in bytes (0: FormCapBytes)
-	Watch  model.ScoutWatch
-	Inputs map[string]json.RawMessage
-	Board  map[string]json.RawMessage
-	Now    time.Time
+	Cap     int      // the form's cap in bytes (0: FormCapBytes)
+	OwnKeys []string // the pr:* and issue:* keys on the form now (an untracked one is removed)
+	Watch   model.ScoutWatch
+	Inputs  map[string]json.RawMessage
+	Board   map[string]json.RawMessage
+	Now     time.Time
 }
 
 // Result is one round's outputs: the role-form keys to set and unset, the
@@ -802,6 +803,27 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	for id := range st.Crates {
 		if !keep[id] {
 			delete(st.Crates, id)
+		}
+	}
+	// Entries on the form the state no longer tracks (left by a lost or older state): removed. Not on a pass that
+	// starts from nothing, which has not read everything yet.
+	if len(prev.PRs)+len(prev.Issues) > 0 {
+		gone := map[string]bool{}
+		for _, k := range res.Unset {
+			gone[k] = true
+		}
+		var orphans []string
+		for _, k := range in.OwnKeys {
+			kind, num, _ := strings.Cut(k, ":")
+			n, err := strconv.Atoi(num)
+			tracked := err == nil && (kind == "pr" && st.PRs[n] != nil || kind == "issue" && st.Issues[n] != nil)
+			if !tracked && !gone[k] && res.Set[k] == nil {
+				orphans = append(orphans, k)
+			}
+		}
+		if len(orphans) > 0 {
+			res.Unset = append(res.Unset, orphans...)
+			logf("%d entr(y/ies) no longer tracked removed: %v", len(orphans), orphans)
 		}
 	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)

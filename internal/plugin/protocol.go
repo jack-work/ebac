@@ -102,8 +102,12 @@ type Request struct {
 	// Children are the critic's child forms, key -> @id, and Owned each
 	// child's holder-owned keys (model.ChildOwnerKeys) and its target-aria,
 	// read by the core each round (keel branches).
-	Children map[string]string                     `json:"children,omitempty"`
-	Owned    map[string]map[string]json.RawMessage `json:"owned,omitempty"`
+	Children map[string]string `json:"children,omitempty"`
+	// OwnKeys are the role-form keys the source's own patterns name (the
+	// scout's pr:* and issue:*), as on the form this round: what the plugin
+	// wrote and may need to remove.
+	OwnKeys []string                              `json:"own_keys,omitempty"`
+	Owned   map[string]map[string]json.RawMessage `json:"owned,omitempty"`
 
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`

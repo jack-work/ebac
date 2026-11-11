@@ -284,6 +284,7 @@ type world struct {
 	in    map[string]json.RawMessage
 	watch model.ScoutWatch
 	cap   int
+	own   []string // the entry keys on the form (Pass.OwnKeys)
 }
 
 // newWorld: 101 ours (title tag), 102 ours draft (label), 201 Chiqun's (path hit), 103 ours unrelated (no hit), 301 an
@@ -320,7 +321,7 @@ func (w *world) pass(dt time.Duration) Result {
 func (w *world) try(dt time.Duration) (Result, error) {
 	w.now = w.now.Add(dt)
 	w.gh.calls = 0
-	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap})
+	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap, OwnKeys: w.own})
 	if err == nil {
 		w.st = r.State
 	}
@@ -1054,5 +1055,24 @@ func TestSchemaUpgradeRewritesEveryEntry(t *testing.T) {
 	}
 	if r := w.pass(2 * time.Minute); len(r.Set)+len(r.Forms) != 0 || r.GHCalls != 1 {
 		t.Fatalf("after the reshape: set %v, %d calls", setKeys(r), r.GHCalls)
+	}
+}
+
+// An entry on the form the state does not track (left by a lost or older state: an untracked issue, a PR long gone)
+// is removed; tracked ones stay; a pass starting from no state removes nothing (it has not read everything yet).
+func TestUntrackedEntriesRemoved(t *testing.T) {
+	w := newWorld(t)
+	w.own = []string{"issue:9999", "pr:5"}
+	if r := w.pass(0); strings.Contains(strings.Join(r.Unset, " "), ":") {
+		t.Fatalf("removed from a first pass: %v", r.Unset)
+	}
+	w.own = []string{"issue:301", "issue:9999", "pr:101", "pr:102", "pr:201", "pr:5"}
+	r := w.pass(2 * time.Minute)
+	if strings.Join(r.Unset, " ") != "issue:9999 pr:5" || !strings.Contains(strings.Join(r.Log, " "), "2 entr(y/ies) no longer tracked removed") {
+		t.Fatalf("orphans: unset %v log %v", r.Unset, r.Log)
+	}
+	w.own = []string{"issue:301", "pr:101", "pr:102", "pr:201"}
+	if r := w.pass(2 * time.Minute); len(r.Unset) != 0 {
+		t.Fatalf("tracked entries removed: %v", r.Unset)
 	}
 }

@@ -61,6 +61,11 @@ const (
 	SweepEvery = 10
 	// MaxPaths bounds the changed paths a branch keeps to match feed events.
 	MaxPaths = 300
+	// MaxThreadReads bounds the threads?rev reads of one pass: a cold keel
+	// blames each threaded file at a new sha, and the reads must not stack
+	// past the plugin's timeout. Branches due beyond it wait (Due), oldest
+	// first, for later passes.
+	MaxThreadReads = 2
 )
 
 // Branch is what the state keeps per followed branch.
@@ -73,6 +78,7 @@ type Branch struct {
 	Seen      string            `json:"s,omitempty"` // the newest comment time seen in its threads (RFC 3339 nano)
 	Threads   []string          `json:"t,omitempty"` // its threads' ids (feed events on them touch it)
 	Paths     []string          `json:"p,omitempty"` // its changed paths (a feed event on one touches it)
+	Due       int               `json:"d,omitempty"` // the pass its threads became due to be read (0: not due)
 }
 
 // State is the plugin's opaque state (critic runtime.keel_branches).
@@ -257,6 +263,40 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+
+	// Due: what was due and not read yet, plus what this pass makes due. Read: the MaxThreadReads longest due.
+	type due struct {
+		name  string
+		since int
+	}
+	var queue []due
+	dueNow := map[string]bool{}
+	for _, name := range names {
+		b := st.Branches[name]
+		now := b == nil || all || live[name].SHA != b.Head || in.Children[b.Key] == "" || touched(b, touchT, touchP)
+		dueNow[name] = now
+		switch {
+		case b != nil && b.Due > 0:
+			queue = append(queue, due{name, b.Due})
+		case now:
+			queue = append(queue, due{name, st.Passes})
+		}
+	}
+	sort.Slice(queue, func(i, j int) bool {
+		if queue[i].since != queue[j].since {
+			return queue[i].since < queue[j].since
+		}
+		return queue[i].name < queue[j].name
+	})
+	readNow := map[string]bool{}
+	for i, q := range queue {
+		if i == MaxThreadReads {
+			logf("threads of %d branch(es) deferred to later passes (at most %d reads a pass)", len(queue)-i, MaxThreadReads)
+			break
+		}
+		readNow[q.name] = true
+	}
+
 	for _, name := range names {
 		ref := live[name]
 		b := st.Branches[name]
@@ -300,20 +340,28 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 			b.Paths = pathsOf(sp.Files)
 		}
 		facts["branch"] = name
-		read := all || moved || fresh || touched(b, touchT, touchP)
+		if (dueNow[name] || moved) && b.Due == 0 {
+			b.Due = st.Passes
+		}
 		var mine []keel.Thread
-		if read {
+		if readNow[name] {
 			threads, err := k.ThreadsAt(ctx, repo, ref.SHA)
 			res.Calls++
 			if err != nil {
-				return res, fmt.Errorf("threads of %s at %s: %w", name, short(ref.SHA, 8), err)
+				// One branch's threads not read (a cold keel blaming past the timeout) fails nothing else: its
+				// last known threads stand, and it stays due for a later pass.
+				logf("threads of %s at %s: %v (kept the last known, retried later)", name, short(ref.SHA, 8), err)
+				threads = nil
 			}
-			mine = branchThreads(threads, name, b.Commits)
-			facts["threads"] = threadsOf(mine)
-			facts["reviewers"] = reviewersOf(mine)
-			b.Threads = b.Threads[:0]
-			for _, t := range mine {
-				b.Threads = append(b.Threads, t.ID)
+			if err == nil {
+				b.Due = 0
+				mine = branchThreads(threads, name, b.Commits)
+				facts["threads"] = threadsOf(mine)
+				facts["reviewers"] = reviewersOf(mine)
+				b.Threads = b.Threads[:0]
+				for _, t := range mine {
+					b.Threads = append(b.Threads, t.ID)
+				}
 			}
 		}
 

@@ -81,7 +81,7 @@ func (d pathDoor) Get(_ context.Context, path string, _ time.Duration) (int, []b
 	return 200, []byte(`{"paths":{}}`), nil
 }
 
-// ThreadsAt asks keel to place the threads at the given revision; Threads asks at main's head.
+// ThreadsAt asks keel for the threads at the given revision, unplaced (place=0); Threads asks at main's head.
 func TestThreadsAtRev(t *testing.T) {
 	var got []string
 	c := &Client{T: pathDoor{&got}}
@@ -91,7 +91,7 @@ func TestThreadsAtRev(t *testing.T) {
 	if _, err := c.Threads(context.Background(), "aether/aether"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, " ") != "/api/r/aether-aether/threads?rev=8bee10b764d98b5ce43029d83db06c650ff269d2 /api/r/aether-aether/threads" {
+	if strings.Join(got, " ") != "/api/r/aether-aether/threads?rev=8bee10b764d98b5ce43029d83db06c650ff269d2&place=0 /api/r/aether-aether/threads" {
 		t.Fatalf("paths %v", got)
 	}
 }

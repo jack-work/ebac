@@ -101,6 +101,20 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 		req.Children, req.Owned = w.Runtime.Children, p.readOwned(ctx, w)
 	}
 	if err == nil && w.SourceName() == model.SourceScout {
+		// The scout learns which of its entries are on its form (an entry it no longer tracks is removed).
+		var f *form.CriticForm
+		if f, err = p.Store.ReadForm(ctx, w.FormID); err == nil {
+			for k := range f.Keys {
+				for _, pat := range SourceKeys[model.SourceScout] {
+					if strings.HasSuffix(pat, "*") && keyAllowed(pat, k) {
+						req.OwnKeys = append(req.OwnKeys, k)
+					}
+				}
+			}
+			sort.Strings(req.OwnKeys)
+		}
+	}
+	if err == nil && w.SourceName() == model.SourceScout {
 		// The scout reads its owners' inputs form (merge rule, ledger acks)
 		// and the board's owner marks, read-only, through the core.
 		req.Inputs, err = p.readInputs(ctx, w)

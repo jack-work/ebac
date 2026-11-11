@@ -53,7 +53,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		}
 	}
 	rep := &plugin.Reply{Critic: w, Done: true}
-	r, err := Run(ctx, gh, hub, prev, Pass{Watch: *w.Scout, Inputs: req.Inputs, Board: req.Board, Now: now()})
+	r, err := Run(ctx, gh, hub, prev, Pass{Watch: *w.Scout, Inputs: req.Inputs, Board: req.Board, Now: now(), OwnKeys: req.OwnKeys})
 	for _, l := range r.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}

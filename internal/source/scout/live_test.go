@@ -85,12 +85,19 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 		t.Fatalf("last_success %v after a good pass", load().Runtime.LastSuccess)
 	}
 
+	// An entry the state does not track (an older state's): removed by the next pass, through the core.
+	if err := f.SetJSON(ctx, role, "issue:4242", map[string]string{"title": "orphan"}); err != nil {
+		t.Fatal(err)
+	}
 	now = now.Add(2 * time.Minute)
 	wd.gh.calls = 0
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("pass 2: %v\n%s", err, out.String())
 	}
-	if wd.gh.calls != 1 || !strings.Contains(out.String(), "1 GitHub call(s), 0 entr(y/ies) written") {
+	if keys, _, _ := f.FormRaw(ctx, role); keys["issue:4242"] != nil || keys["pr:101"] == nil {
+		t.Fatalf("orphan kept (%s) or entry lost", keys["issue:4242"])
+	}
+	if wd.gh.calls != 1 || !strings.Contains(out.String(), "1 GitHub call(s), 0 entr(y/ies) written, 1 removed") {
 		t.Fatalf("quiet pass: %d GitHub calls\n%s", wd.gh.calls, out.String())
 	}
 	if c := load(); !c.Runtime.LastSuccess.Equal(now) {

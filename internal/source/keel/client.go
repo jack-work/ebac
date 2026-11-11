@@ -236,11 +236,13 @@ func (c *Client) Threads(ctx context.Context, repo string) (map[string][]Thread,
 	return c.threads(ctx, ThreadsPath(repo))
 }
 
-// ThreadsAt is Threads placed at a revision (a branch head sha): keel blames
-// each threaded file at that sha once and caches it, where placing at main's
-// head blames them all again on every new main tip.
+// ThreadsAt is Threads at a revision (a branch head sha), UNPLACED (place=0:
+// the threads as stored, anchors and resolved state as written, no blame and
+// no loc): keel-branches only counts and resolves, and placing blames every
+// threaded file at that sha (cold: past the client timeout). A keel that does
+// not know place=0 yet ignores it and places at rev, as before.
 func (c *Client) ThreadsAt(ctx context.Context, repo, rev string) (map[string][]Thread, error) {
-	return c.threads(ctx, ThreadsPath(repo)+"?"+url.Values{"rev": {rev}}.Encode())
+	return c.threads(ctx, ThreadsPath(repo)+"?rev="+url.QueryEscape(rev)+"&place=0")
 }
 
 func (c *Client) threads(ctx context.Context, path string) (map[string][]Thread, error) {

@@ -37,6 +37,7 @@ type fakeKeel struct {
 	calls    map[string]int
 	fail     map[string]error
 	revs     []string          // the rev of each ThreadsAt call
+	failRev  map[string]error  // ThreadsAt at this rev fails
 	log      []keel.FeedEvent  // the event feed: a thread new or changed since the last Events call
 	seen     map[string]string // thread id -> digest at the last Events call
 }
@@ -109,6 +110,9 @@ func (f *fakeKeel) ThreadsAt(_ context.Context, repo, rev string) (map[string][]
 	f.calls["threads"]++
 	f.revs = append(f.revs, rev)
 	if err := f.fail["threads"]; err != nil {
+		return nil, err
+	}
+	if err := f.failRev[rev]; err != nil {
 		return nil, err
 	}
 	return f.threads, nil
@@ -450,7 +454,7 @@ func TestLostFormIsRewrittenWhole(t *testing.T) {
 
 // A read that fails fails the round: last_success, the state and the failure count say so; recovery resets them.
 func TestFailedReadKeepsLastSuccess(t *testing.T) {
-	for _, what := range []string{"refs", "threads", "span"} {
+	for _, what := range []string{"refs", "span"} {
 		w := newWorld(t)
 		now := w.now
 		pl := Plugin{Keel: w.k, Now: func() time.Time { return now }}
@@ -592,5 +596,63 @@ func TestThreadsPerBranchAtItsHead(t *testing.T) {
 	r = w.pass()
 	if len(w.k.revs) != 2 || !strings.Contains(strings.Join(r.Log, " "), "feed: door 403") {
 		t.Fatalf("feed down: revs %v log %v", w.k.revs, r.Log)
+	}
+}
+
+// A threads read that fails (a cold keel past the timeout) fails nothing else: the pass completes, the other branches
+// are read, that branch's last known threads stand and it stays due, read on a later pass. At most MaxThreadReads
+// reads a pass, the longest due first; the rest wait.
+func TestThreadReadsNonFatalAndCapped(t *testing.T) {
+	w := newWorld(t)
+	for _, b := range []string{"work/a/one", "work/b/two", "work/c/three"} {
+		w.k.push(b, 1, b+".go")
+	}
+	// Five branches due on the first pass: two read now, the rest on the next passes, oldest due first.
+	r := w.pass()
+	if len(w.k.revs) != MaxThreadReads || !strings.Contains(strings.Join(r.Log, " "), "threads of 3 branch(es) deferred") {
+		t.Fatalf("first pass: %d reads, log %v", len(w.k.revs), r.Log)
+	}
+	// The two read move on (due again now): the three waiting since the first pass go before them.
+	w.k.push("work/John-Kelliher/effort-x", 3, "a.go")
+	w.k.push("work/a/one", 3, "work/a/one.go")
+	w.k.revs = nil
+	w.pass()
+	if strings.Join(w.k.revs, " ") != w.k.head("work/b/two")+" "+w.k.head("work/c/three") {
+		t.Fatalf("not oldest due first: %v", w.k.revs)
+	}
+	read := map[string]bool{w.k.head("work/b/two"): true, w.k.head("work/c/three"): true}
+	for i := 0; i < 4 && len(read) < 5; i++ {
+		w.k.revs = nil
+		w.pass()
+		if len(w.k.revs) > MaxThreadReads {
+			t.Fatalf("pass %d: %d reads", i+2, len(w.k.revs))
+		}
+		for _, rv := range w.k.revs {
+			read[rv] = true
+		}
+	}
+	if len(read) != 5 {
+		t.Fatalf("not every branch read: %v", read)
+	}
+	w.k.revs = nil
+	if w.pass(); len(w.k.revs) != 0 {
+		t.Fatalf("quiet pass read %v", w.k.revs)
+	}
+	// One branch's read fails: the pass succeeds, its threads stay as last known, it is retried later.
+	hj := w.k.push("work/John-Kelliher/effort-x", 2, "a.go")
+	w.k.push("work/chiqun/router", 2, "b.go", "c.go")
+	w.k.failRev = map[string]error{hj: errors.New("context deadline exceeded")}
+	w.k.revs = nil
+	r, err := w.try()
+	if err != nil || len(w.k.revs) != 2 || writes(r)[jk].Set["threads"] != nil || writes(r)[cr].Set["head"] == nil ||
+		w.st.Branches["work/John-Kelliher/effort-x"].Due == 0 || w.st.Branches["work/chiqun/router"].Due != 0 ||
+		!strings.Contains(strings.Join(r.Log, " "), "kept the last known, retried later") {
+		t.Fatalf("failed read: err %v revs %v writes %v log %v", err, w.k.revs, writes(r), r.Log)
+	}
+	w.k.failRev = nil
+	w.k.revs = nil
+	w.pass()
+	if len(w.k.revs) != 1 || w.k.revs[0] != hj || w.st.Branches["work/John-Kelliher/effort-x"].Due != 0 {
+		t.Fatalf("retry: revs %v due %d", w.k.revs, w.st.Branches["work/John-Kelliher/effort-x"].Due)
 	}
 }
