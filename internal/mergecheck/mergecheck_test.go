@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// golden.json was produced by minister-control's states.py (846872c) over the policy file and 34 cases
+// golden.json was produced by minister-control's states.py (846872c, ev_conflict replaced by the Minister's 11-11 rule) over the policy file and 40 cases
 // (testdata/gen_golden.py): the Go port must give byte-for-byte the same checklist rows and the same state for every
 // one.
 type goldenCase struct {

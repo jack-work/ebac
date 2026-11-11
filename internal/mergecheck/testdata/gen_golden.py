@@ -13,6 +13,26 @@ sys.path.insert(0, str(mc))
 import states  # noqa: E402
 
 states.POLICY = rule
+
+
+def ev_conflict(c):
+    """The Minister's conflict rule (11-11), ahead of states.py 846872c: only mergeable CONFLICTING or merge state DIRTY
+    is a conflict; UNKNOWN is GitHub recomputing, never a wait, the last known value standing meanwhile; BEHIND and
+    BLOCKED are not conflicts. Proposed to the dashboard steward as states.py's own; drop this override once it lands."""
+    ms, mg = c["f"].get("merge_state") or "", c["f"].get("mergeable") or ""
+    last = c["f"].get("last_mergeable") or ""
+    recomputing = mg in ("", "UNKNOWN")
+    if recomputing and last:
+        mg = last
+    conflict = mg == "CONFLICTING" or ms == "DIRTY"
+    note = (f"mergeable: recomputing (last known {mg.lower()})" if recomputing and last else
+            "mergeable: recomputing" if recomputing else f"mergeable {mg.lower()}")
+    note += f", merge state {ms.lower() or '?'}" + (": rebase on main" if conflict else "")
+    return states._res(not conflict, note)
+
+
+states.ev_conflict = ev_conflict
+states.EVALUATORS["conflict"] = ev_conflict
 here = pathlib.Path(__file__).parent
 old = json.loads((here / "golden.json").read_text())
 CHECK_NI = {"id": 13, "queue": "aether.check-ni", "verdict": "PASS", "state": "done"}
@@ -59,6 +79,12 @@ case("files not read", files=None, jobs=[ni()])
 case("empty file list is code", files=[], jobs=[])
 case("review required", files=["a.rs"], jobs=[ni()], merge_state="CLEAN", review="REVIEW_REQUIRED")
 case("merge state unknown", files=["a.rs"], jobs=[ni()], merge_state="UNKNOWN", review="")
+for nm, mg, ms, last in [("mergeable recomputing, none known", "UNKNOWN", "UNKNOWN", None),
+                         ("mergeable recomputing, last mergeable", "UNKNOWN", "BLOCKED", "MERGEABLE"),
+                         ("mergeable recomputing, last conflicting", "UNKNOWN", "UNKNOWN", "CONFLICTING"),
+                         ("behind is no conflict", "MERGEABLE", "BEHIND", None), ("dirty", "MERGEABLE", "DIRTY", None),
+                         ("conflicting", "CONFLICTING", "BLOCKED", None)]:
+    case(nm, files=["a.rs"], jobs=[ni()], mergeable=mg, merge_state=ms, **({"last_mergeable": last} if last else {}))
 nf = copy.deepcopy(base)
 nf["name"], nf["files"], nf["row"] = "+fyi evidence", ["a.rs"], nf["row"] | {"chiqun_notified": {"at": "2026-11-11T03:00Z", "chat": "dm"}}
 cases.append(nf)

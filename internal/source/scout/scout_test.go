@@ -962,3 +962,39 @@ func TestClosedCarriesItsTime(t *testing.T) {
 		t.Fatalf("no close time: done %d, want %d", d, w2.now.Unix())
 	}
 }
+
+// Mergeability recomputing (UNKNOWN) never blocks and never flaps the entry: the last settled value stands in mg and
+// for the conflict step; only CONFLICTING (or DIRTY) waits on conflict.
+func TestMergeableRecomputing(t *testing.T) {
+	w := newWorld(t)
+	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "done", true)}
+	ms := func(r Result) string { e := entry(t, r, "pr:101"); return fmt.Sprint(e["mg"], " ", e["ms"]) }
+	w.gh.items[101].mergeable = "UNKNOWN" // never settled yet: not a wait
+	if got := ms(w.pass(0)); got == "UNKNOWN waiting: conflict" || strings.HasSuffix(got, "waiting: conflict") {
+		t.Fatalf("unknown, nothing known: %s", got)
+	}
+	w.gh.items[101].mergeable, w.gh.items[101].updated = "MERGEABLE", w.now.Add(time.Minute)
+	before := ms(w.pass(2 * time.Minute))
+	if strings.HasPrefix(before, "UNKNOWN") || strings.HasSuffix(before, "waiting: conflict") {
+		t.Fatalf("mergeable: %s", before)
+	}
+	// GitHub recomputes: the entry does not move at all.
+	w.gh.items[101].mergeable, w.gh.items[101].updated = "UNKNOWN", w.now.Add(time.Minute)
+	r := w.pass(2 * time.Minute)
+	if r.Set["pr:101"] == nil || ms(r) != before {
+		t.Fatalf("recomputing moved mg or ms: %s -> %s", before, ms(r))
+	}
+	if w.st.PRs[101].Mergeable != "MERGEABLE" {
+		t.Fatalf("last known lost: %q", w.st.PRs[101].Mergeable)
+	}
+	// A real conflict waits, and stands while GitHub recomputes after it.
+	w.gh.items[101].mergeable, w.gh.items[101].updated = "CONFLICTING", w.now.Add(time.Minute)
+	if got := ms(w.pass(2 * time.Minute)); got != "CONFLICTING waiting: conflict" {
+		t.Fatalf("conflicting: %s", got)
+	}
+	w.gh.items[101].mergeable, w.gh.items[101].updated = "UNKNOWN", w.now.Add(time.Minute)
+	r = w.pass(2 * time.Minute)
+	if r.Set["pr:101"] == nil || ms(r) != "CONFLICTING waiting: conflict" {
+		t.Fatalf("recomputing after a conflict: %s", ms(r))
+	}
+}

@@ -278,19 +278,20 @@ func IssueKey(n int) string { return "issue:" + strconv.Itoa(n) }
 // TrackedPR is what the state keeps per tracked PR between passes, kept small:
 // it sits on the same form as the entries.
 type TrackedPR struct {
-	State    string `json:"s"`              // OPEN, MERGED, CLOSED
-	Head     string `json:"h"`              // 12 hex
-	Entry    string `json:"e"`              // digest of the entry last written
-	Inputs   string `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
-	Settling bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
-	Owner    string `json:"o,omitempty"`    // its owner role (S5), resolved when last read
-	Links    []int  `json:"l,omitempty"`    // issue numbers its body links
-	Size     int    `json:"b,omitempty"`    // bytes of its entry on the form
-	Held     bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
-	Done     int64  `json:"z,omitempty"`    // merged or closed (unix)
-	Outbox   int64  `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
-	Record   string `json:"rh,omitempty"`   // that record's hash, 16 hex
-	Acked    bool   `json:"k,omitempty"`    // the steward acked that record
+	State     string `json:"s"`              // OPEN, MERGED, CLOSED
+	Head      string `json:"h"`              // 12 hex
+	Entry     string `json:"e"`              // digest of the entry last written
+	Inputs    string `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
+	Settling  bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
+	Owner     string `json:"o,omitempty"`    // its owner role (S5), resolved when last read
+	Mergeable string `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
+	Links     []int  `json:"l,omitempty"`    // issue numbers its body links
+	Size      int    `json:"b,omitempty"`    // bytes of its entry on the form
+	Held      bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
+	Done      int64  `json:"z,omitempty"`    // merged or closed (unix)
+	Outbox    int64  `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
+	Record    string `json:"rh,omitempty"`   // that record's hash, 16 hex
+	Acked     bool   `json:"k,omitempty"`    // the steward acked that record
 }
 
 // TrackedIssue is what the state keeps per tracked issue.
@@ -588,11 +589,22 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if p.Facts.State == "OPEN" && t.State != "" && t.State != "OPEN" {
 			t.Done, t.Outbox, t.Record, t.Acked = 0, 0, "", false // reopened: a later close is a new record
 		}
+		// GitHub recomputing mergeability (UNKNOWN) is no news: the last settled value stands, in the entry and for
+		// the conflict step.
+		switch p.Facts.Mergeable {
+		case "MERGEABLE", "CONFLICTING":
+			t.Mergeable = p.Facts.Mergeable
+		default:
+			p.Facts.LastMergeable = t.Mergeable
+		}
 		head := cut(p.Facts.Oid, 12)
 		js := jobsFor(jobs, st.Tests, head)
 		mk := marks.of(n)
 		e := prEntry(p, pol, js, mk)
 		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, roleOf(owners, p.Author, p.Title)
+		if p.Facts.State != "OPEN" {
+			t.Mergeable = "" // only an open PR's mergeability is asked again
+		}
 		t.Inputs, t.Settling = digest([]any{js, mk}), settling(p)
 		if d := digest(e); d != t.Entry {
 			raw := model.MustJSON(e)
@@ -789,6 +801,9 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 		Lines: [2]int{p.Additions, p.Deletions}, FilesKind: mergecheck.KindOf(p.KindFiles()), Band: bandOf(js)}
 	if p.Facts.State == "CLOSED" {
 		e.Closed = unix(p.ClosedAt)
+	}
+	if p.Facts.LastMergeable != "" {
+		e.Mergeable = p.Facts.LastMergeable // recomputing: the last settled value stands
 	}
 	if e.Base == "main" {
 		e.Base = ""

@@ -171,16 +171,19 @@ type Review struct {
 
 // Facts are a PR's GitHub facts.
 type Facts struct {
-	Oid        string    `json:"oid"`
-	State      string    `json:"state"` // OPEN, MERGED, CLOSED
-	Draft      bool      `json:"draft"`
-	Heavy      bool      `json:"heavy"` // full facts (checks, threads, reviews) were read
-	Mergeable  string    `json:"mergeable,omitempty"`
-	MergeState string    `json:"merge_state,omitempty"`
-	Review     string    `json:"review,omitempty"` // GitHub's review decision
-	Unresolved int       `json:"unresolved"`
-	Contexts   []Context `json:"contexts,omitempty"`
-	Reviews    []Review  `json:"reviews,omitempty"`
+	Oid        string `json:"oid"`
+	State      string `json:"state"` // OPEN, MERGED, CLOSED
+	Draft      bool   `json:"draft"`
+	Heavy      bool   `json:"heavy"` // full facts (checks, threads, reviews) were read
+	Mergeable  string `json:"mergeable,omitempty"`
+	MergeState string `json:"merge_state,omitempty"`
+	Review     string `json:"review,omitempty"` // GitHub's review decision
+	// LastMergeable is the last mergeable GitHub settled on, read while it
+	// recomputes (UNKNOWN).
+	LastMergeable string    `json:"last_mergeable,omitempty"`
+	Unresolved    int       `json:"unresolved"`
+	Contexts      []Context `json:"contexts,omitempty"`
+	Reviews       []Review  `json:"reviews,omitempty"`
 }
 
 // Job is one band-hub job for the head, newest first.
@@ -460,20 +463,31 @@ func lowerOr(s string) string {
 	return strings.ToLower(s)
 }
 
+// evConflict (Minister 11-11): only mergeable CONFLICTING or merge state DIRTY
+// is a conflict. UNKNOWN is GitHub recomputing: never a wait; the last known
+// value stands meanwhile. BLOCKED (branch protection) and BEHIND are not
+// conflicts.
 func evConflict(c ctx) res {
-	// mergeStateStatus BLOCKED only means branch protection is unmet: later steps, not a conflict.
 	ms, mg := c.f.MergeState, c.f.Mergeable
-	ok := mg == "MERGEABLE" && ms != "DIRTY" && ms != "BEHIND"
-	pend := mg == "UNKNOWN" || ms == "UNKNOWN"
-	note := fmt.Sprintf("mergeable %s, merge state %s", lowerOr(mg), lowerOr(ms))
-	if !ok && !pend {
+	recomputing := mg == "" || mg == "UNKNOWN"
+	if recomputing && c.f.LastMergeable != "" {
+		mg = c.f.LastMergeable
+	}
+	conflict := mg == "CONFLICTING" || ms == "DIRTY"
+	var note string
+	switch {
+	case recomputing && c.f.LastMergeable != "":
+		note = "mergeable: recomputing (last known " + strings.ToLower(mg) + ")"
+	case recomputing:
+		note = "mergeable: recomputing"
+	default:
+		note = "mergeable " + strings.ToLower(mg)
+	}
+	note += ", merge state " + lowerOr(ms)
+	if conflict {
 		note += ": rebase on main"
 	}
-	st := ""
-	if !ok && pend {
-		st = "pending"
-	}
-	return mk(ok, note, "", nil, st)
+	return mk(!conflict, note, "", nil, "")
 }
 
 func evThreads(c ctx) res {
