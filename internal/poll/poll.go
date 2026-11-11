@@ -162,7 +162,7 @@ var SourceKeys = map[string][]string{
 	// segment, no dots, so it cannot reach a nested key).
 	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)
 	// One key per PR and per issue, on the scout's own role form.
-	model.SourceScout: {"pr:*", "issue:*", "warning"},
+	model.SourceScout: {"pr:*", "issue:*", "claim:*", "warning"},
 	// Keel branches write their child forms (Reply.Forms) and, on their own
 	// role form, the registry (branch -> child form) and the branches they
 	// could not follow.

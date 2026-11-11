@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -32,6 +33,10 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	fs.Var(&owners, "owner", "AUTHOR[/TITLE_REGEX]=@ROLE, repeatable, first match wins: who gets a material change on an issue\n"+
 		"its PRs link (e.g. 'John-Kelliher/(?i)ledger=@<ledger lead>' before 'John-Kelliher=@<knight>')")
 	warn := fs.String("warn", "", "the role (@form) pinged once when open entries alone pass the form cap (the Decisions Minister)")
+	claimBy := fs.String("claim-by", "", "claims: the login whose comment containing --claim-phrase on an issue makes it a claim (claim:<issue>)")
+	claimPhrase := fs.String("claim-phrase", "Praxis claimed", "claims: the phrase of a claim comment")
+	claimLabel := fs.String("claim-label", "", "claims: an issue carrying this label is a claim (e.g. praxis:pr-open)")
+	filesTitle := fs.String("files-title", "", "open PRs whose title matches this regex carry their changed files (fs)")
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 2*time.Minute, "poll interval")
 	_ = fs.Parse(args)
@@ -39,7 +44,15 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	sw := &model.ScoutWatch{Repo: *repo, Authors: splitList(*authors), Labels: splitList(*labels), TitleMatch: *title, Paths: splitList(*paths),
-		Owners: owners, WarnTo: *warn}
+		Owners: owners, WarnTo: *warn, ClaimBy: *claimBy, ClaimLabel: *claimLabel, FilesTitle: *filesTitle}
+	if sw.ClaimBy != "" {
+		sw.ClaimPhrase = *claimPhrase
+	}
+	if sw.FilesTitle != "" {
+		if _, err := regexp.Compile(sw.FilesTitle); err != nil {
+			return fmt.Errorf("--files-title: %w", err)
+		}
+	}
 	if len(sw.Authors) == 0 || !strings.Contains(sw.Repo, "/") {
 		return fmt.Errorf("--authors and --repo owner/name are required")
 	}

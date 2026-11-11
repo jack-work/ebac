@@ -41,6 +41,7 @@ type item struct {
 	parent     int              // issue: its parent issue
 	subs       []int            // issue: its sub-issues
 	readyAt    string           // PR: its last ready-for-review event
+	closedBy   []int            // issue: the PRs that close it
 	events     []map[string]any // issue: label and state events, oldest first
 }
 
@@ -138,12 +139,14 @@ type fakeGH struct {
 }
 
 var (
-	searchRE = regexp.MustCompile(`a(\d+): search\(type:ISSUE, first:\d+(?:, after:"([^"]*)")?, query:"([^"]*)"\)`)
-	cursorRE = regexp.MustCompile(`updated:>=(\S+)`)
-	authorRE = regexp.MustCompile(`author:(\S+)`)
-	prRE     = regexp.MustCompile(`p(\d+): pullRequest`)
-	issueRE  = regexp.MustCompile(`i(\d+): issueOrPullRequest`)
-	filesRE  = regexp.MustCompile(`pullRequest\(number:(\d+)\)\{files\(first:100, after:"([^"]*)"\)`)
+	searchRE  = regexp.MustCompile(`([ac]\d+): search\(type:ISSUE, first:\d+(?:, after:"([^"]*)")?, query:"((?:[^"\\]|\\.)*)"\)`)
+	claimByRE = regexp.MustCompile(`commenter:(\S+) \\"([^\\]*)\\"`)
+	labelRE   = regexp.MustCompile(`label:(\S+)`)
+	cursorRE  = regexp.MustCompile(`updated:>=(\S+)`)
+	authorRE  = regexp.MustCompile(`author:(\S+)`)
+	prRE      = regexp.MustCompile(`p(\d+): pullRequest`)
+	issueRE   = regexp.MustCompile(`i(\d+): issueOrPullRequest`)
+	filesRE   = regexp.MustCompile(`pullRequest\(number:(\d+)\)\{files\(first:100, after:"([^"]*)"\)`)
 )
 
 func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
@@ -169,12 +172,38 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 					g.t.Fatalf("cursor %q: %v", c[1], err)
 				}
 			}
-			author := authorRE.FindStringSubmatch(query)[1]
 			open := strings.Contains(query, "is:open")
+			claims := strings.HasPrefix(m[1], "c")
 			var match []*item
 			for _, it := range g.items {
-				if it.author != author || open && it.state != "OPEN" || !open && it.updated.Before(since) {
+				if open && it.state != "OPEN" || !open && it.updated.Before(since) {
 					continue
+				}
+				switch {
+				case !claims:
+					if it.author != authorRE.FindStringSubmatch(query)[1] {
+						continue
+					}
+				case claimByRE.MatchString(query):
+					cm := claimByRE.FindStringSubmatch(query)
+					hit := false
+					for _, c := range it.comments {
+						a, _ := c["author"].(map[string]any)
+						body, _ := c["body"].(string)
+						hit = hit || it.issue && a != nil && a["login"] == cm[1] && strings.Contains(body, cm[2])
+					}
+					if !hit {
+						continue
+					}
+				default:
+					l := labelRE.FindStringSubmatch(query)[1]
+					hit := false
+					for _, x := range it.labels {
+						hit = hit || it.issue && x == l
+					}
+					if !hit {
+						continue
+					}
 				}
 				match = append(match, it)
 			}
@@ -186,9 +215,21 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 			}
 			nodes := []any{}
 			for _, it := range match[from:end] {
-				nodes = append(nodes, it.gql())
+				node := it.gql()
+				refs := []any{}
+				for _, pn := range it.closedBy {
+					pr := g.items[pn]
+					fs := []any{}
+					for _, f := range pr.files {
+						fs = append(fs, map[string]any{"path": f})
+					}
+					refs = append(refs, map[string]any{"number": pn, "state": pr.state, "mergedAt": pr.mergedAt, "closedAt": pr.closedAt,
+						"files": map[string]any{"nodes": fs}})
+				}
+				node["closedByPullRequestsReferences"] = map[string]any{"nodes": refs}
+				nodes = append(nodes, node)
 			}
-			out["a"+m[1]] = map[string]any{"pageInfo": map[string]any{"hasNextPage": end < len(match), "endCursor": strconv.Itoa(end)}, "nodes": nodes}
+			out[m[1]] = map[string]any{"pageInfo": map[string]any{"hasNextPage": end < len(match), "endCursor": strconv.Itoa(end)}, "nodes": nodes}
 		}
 		return model.MustJSON(out), nil
 	}
@@ -324,8 +365,33 @@ func (w *world) try(dt time.Duration) (Result, error) {
 	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap, OwnKeys: w.own})
 	if err == nil {
 		w.st = r.State
+		// The inputs form's outbox as the core merges the writes into it.
+		box := model.ObjectOf(w.in["ledger_outbox"])
+		for _, f := range r.Forms {
+			for k, v := range model.ObjectOf(f.Set["ledger_outbox"]) {
+				if string(v) == "null" {
+					delete(box, k)
+				} else {
+					box[k] = v
+				}
+			}
+		}
+		if len(r.Forms) > 0 {
+			w.in["ledger_outbox"] = model.MustJSON(box)
+		}
 	}
 	return r, err
+}
+
+// commit is the steward committing the outbox member for n and acking it as ledger_committer.py does: the sha256
+// of the committed bytes. It returns the hash.
+func (w *world) commit(n string) string {
+	member := model.ObjectOf(w.in["ledger_outbox"])[n]
+	h := CommittedHash(member)
+	acks := model.ObjectOf(w.in["ledger_ack"])
+	acks[n] = model.MustJSON(map[string]string{"sha": "c0ffee", "path": "prs/" + n + ".json", "at": w.now.Format(time.RFC3339), "hash": h})
+	w.in["ledger_ack"] = model.MustJSON(acks)
+	return h
 }
 
 // created is every fake item's creation time.
@@ -731,8 +797,9 @@ func TestBoardMarksMoveMergeState(t *testing.T) {
 }
 
 // S2: on merge the final entry goes to the inputs form's ledger outbox, once; a changed final entry is sent again;
-// an ack (newer than the send, for that record) clears the outbox member; the entry stays until its record is acked
-// and at least KeepClosed after the merge, however long the ack takes.
+// the steward's ack (the sha256 of the committed record, ledger_committer.py) matches only the member it committed:
+// an ack of an older record, or of something else, leaves the member; the ack of the member clears it; the entry
+// stays until its record is acked and at least KeepClosed after the merge, however long the ack takes.
 func TestLedgerRecordAckAndPrune(t *testing.T) {
 	w := newWorld(t)
 	w.pass(0)
@@ -743,11 +810,7 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 	if !strings.Contains(rec, `"kind":"pr-final"`) || !strings.Contains(rec, `"s":"MERGED"`) || !strings.Contains(rec, `"hash"`) || entry(t, r, "pr:101")["s"] != "MERGED" {
 		t.Fatalf("record %s", rec)
 	}
-	var h struct {
-		Hash string `json:"hash"`
-	}
-	_ = json.Unmarshal([]byte(rec), &h)
-	sent := time.Unix(w.st.PRs[101].Outbox, 0).UTC().Format(time.RFC3339)
+	w.commit("101") // the steward commits the first record
 
 	// A comment after the merge (updatedAt moves, the entry's u with it): the record changes, sent again.
 	p.updated = w.now.Add(time.Minute)
@@ -756,33 +819,63 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 	if rec2 == "" || rec2 == rec {
 		t.Fatal("a changed final entry was not re-sent")
 	}
-	_ = json.Unmarshal([]byte(rec2), &h)
 	if r := w.pass(2 * time.Minute); len(r.Forms) != 0 {
-		t.Fatalf("an unchanged record was re-sent: %v", outboxOf(r))
+		t.Fatalf("an unchanged record was re-sent (or the ack of the older one matched): %v", outboxOf(r))
 	}
-
-	// Unacked: the entry stays past KeepClosed.
-	if r := w.pass(KeepClosed + time.Hour); len(r.Unset) != 0 {
-		t.Fatalf("pruned before its ack: %v", r.Unset)
+	// Unacked (the ack is the older record's): the entry stays past KeepClosed.
+	if r := w.pass(KeepClosed + time.Hour); len(r.Unset)+len(r.Forms) != 0 {
+		t.Fatalf("pruned or cleared before the member's ack: %v %v", r.Unset, outboxOf(r))
 	}
-
-	// Acks: older than the send, or for another record: nothing. Newer and for this record: the member is cleared,
-	// and the entry (KeepClosed old by now) goes.
-	ackAt := func(at, hash string) {
-		w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"sha": "k1", "path": "p", "at": at, "hash": hash}})
-	}
-	ackAt(sent, h.Hash)
-	if r := w.pass(2 * time.Minute); len(r.Forms)+len(r.Unset) != 0 {
-		t.Fatal("cleared on an ack older than the send")
-	}
-	ackAt(w.now.Format(time.RFC3339), "0000")
+	w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"at": w.now.Format(time.RFC3339), "hash": strings.Repeat("0", 64)}})
 	if r := w.pass(2 * time.Minute); len(r.Forms)+len(r.Unset) != 0 {
 		t.Fatal("cleared on an ack for another record")
 	}
-	ackAt(w.now.Format(time.RFC3339), h.Hash)
+	w.commit("101") // the steward commits the record in the outbox now
 	r = w.pass(2 * time.Minute)
 	if string(outboxOf(r)["101"]) != "null" || strings.Join(r.Unset, " ") != "pr:101" || w.st.PRs[101] != nil {
 		t.Fatalf("ack: outbox %v unset %v", outboxOf(r), r.Unset)
+	}
+}
+
+// The live shape: ledger_committer.py's ack hash is the sha256 of json.dumps(record, indent=2, sort_keys=True,
+// ensure_ascii=False) + "\n"; CommittedHash reproduces it on records and acks taken from the live inputs form.
+func TestCommittedHashMatchesTheStewardsAcks(t *testing.T) {
+	b, err := os.ReadFile("testdata/ledger-acks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]struct {
+		Record json.RawMessage `json:"record"`
+		Ack    struct {
+			At, Hash, Path, Sha string
+		} `json:"ack"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil || len(m) < 2 {
+		t.Fatalf("testdata: %d %v", len(m), err)
+	}
+	for n, c := range m {
+		if got := CommittedHash(c.Record); got != c.Ack.Hash || len(got) != 64 {
+			t.Errorf("#%s: %s, the steward acked %s", n, got, c.Ack.Hash)
+		}
+	}
+	// HTML characters stay as they are, numbers keep their text, non-ASCII stays UTF-8 (hashes from Python).
+	for rec, want := range map[string]string{
+		`{"title": "<a & b>", "n": 1}`:        "404e5a6345c176fdf90353f19f4d6cc0b21c9d812cc3437abc658889511a31e9",
+		`{"x": 1.0, "y": [1, 2.5], "z": "é"}`: "f7f8db099a229646d79ece792db82c27a39db5348df1633d8273f08090f4c06c",
+	} {
+		if got := CommittedHash(json.RawMessage(rec)); got != want {
+			t.Errorf("%s: %s, Python %s", rec, got, want)
+		}
+	}
+	// Through a pass: a closed PR whose outbox member is acked with that hash becomes prunable.
+	w := newWorld(t)
+	w.pass(0)
+	p := w.gh.items[101]
+	p.state, p.mergedAt, p.updated = "MERGED", w.now.Add(-48*time.Hour).Format(time.RFC3339), w.now.Add(time.Minute)
+	w.pass(2 * time.Minute)
+	w.commit("101")
+	if r := w.pass(2 * time.Minute); strings.Join(r.Unset, " ") != "pr:101" {
+		t.Fatalf("an acked closed PR KeepClosed old was not pruned: %v", r.Unset)
 	}
 }
 
@@ -792,12 +885,8 @@ func TestAckedEntryStaysKeepClosed(t *testing.T) {
 	w.pass(0)
 	p := w.gh.items[101]
 	p.state, p.mergedAt, p.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
-	r := w.pass(2 * time.Minute)
-	var h struct {
-		Hash string `json:"hash"`
-	}
-	_ = json.Unmarshal(outboxOf(r)["101"], &h)
-	w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	w.pass(2 * time.Minute)
+	w.commit("101")
 	if r := w.pass(2 * time.Minute); string(outboxOf(r)["101"]) != "null" || len(r.Unset) != 0 {
 		t.Fatalf("early ack: outbox %v unset %v", outboxOf(r), r.Unset)
 	}
@@ -946,11 +1035,7 @@ func TestClosedCarriesItsTime(t *testing.T) {
 	if ie := entry(t, r, "issue:301"); ie["cl"] != float64(closedAt.Unix()) {
 		t.Fatalf("closed issue: %v", ie)
 	}
-	var h struct {
-		Hash string `json:"hash"`
-	}
-	_ = json.Unmarshal(outboxOf(r)["101"], &h)
-	w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	w.commit("101")
 	// Acked, 6 h after cl: kept (and the closed issue too); 1 d after cl: both gone.
 	if r := w.pass(2 * time.Minute); len(r.Unset) != 0 {
 		t.Fatalf("pruned 6 h after the close: %v", r.Unset)
@@ -1016,11 +1101,7 @@ func TestSchemaUpgradeRewritesEveryEntry(t *testing.T) {
 	is := w.gh.items[301] // closed: only a read by number brings it back
 	is.state, is.closedAt, is.updated = "CLOSED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
 	r := w.pass(2 * time.Minute)
-	var h struct {
-		Hash string `json:"hash"`
-	}
-	_ = json.Unmarshal(outboxOf(r)["201"], &h)
-	w.in["ledger_ack"] = model.MustJSON(map[string]any{"201": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	w.commit("201")
 	w.pass(2 * time.Minute)
 	for i := 0; i < 3; i++ {
 		w.pass(2 * time.Minute)

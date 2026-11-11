@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gluck/ebac/internal/mergecheck"
+	"github.com/gluck/ebac/internal/model"
 )
 
 // prFields is everything a pass reads about one PR, in one GraphQL selection:
@@ -54,32 +55,66 @@ func noSubIssues(err error) bool {
 	return strings.Contains(s, "subIssues") || strings.Contains(s, "'parent'") || strings.Contains(s, "\"parent\"")
 }
 
-// searchQuery is ONE GraphQL call: one aliased search per author (a<i>), each
-// for the author's PRs and issues in repo updated at or after the cursor
-// (every state, so merges and closes are seen), or, with no cursor, every
-// open one. after holds the page cursor of an alias still paging; a nil
-// after map is the first page of every alias, and an alias absent from a
-// non-nil map is done.
-func searchQuery(repo string, authors []string, cursor string, after map[int]string, subs bool) string {
+// claimFields are what a claim needs of an issue: the claimer's comments
+// (with bodies, to find the claim phrase), labels, state, and the PRs that
+// close it with their state and files.
+const claimFields = `number title state closedAt updatedAt labels(first:20){nodes{name}}
+comments(last:50){nodes{author{login} createdAt body}}
+closedByPullRequestsReferences(first:5){nodes{number state mergedAt closedAt files(first:50){nodes{path}}}}`
+
+// alias is one aliased search of the scout's one search call.
+type alias struct {
+	name, query string
+	claims      bool // claim selection (claimFields) instead of the author one
+}
+
+// searches are the pass's aliased searches: one per author (a<i>: PRs and
+// issues), and with claims configured c0 (the claimer's phrase in comments)
+// and c1 (the claim label). With no cursor, open items only.
+func searches(w model.ScoutWatch, cursor string) []alias {
+	since := " is:open"
+	if cursor != "" {
+		since = " updated:>=" + cursor
+	}
+	var out []alias
+	for i, a := range w.Authors {
+		out = append(out, alias{name: fmt.Sprintf("a%d", i), query: fmt.Sprintf("repo:%s author:%s", w.Repo, a) + since})
+	}
+	if w.ClaimBy != "" {
+		phrase := w.ClaimPhrase
+		if phrase == "" {
+			phrase = "Praxis claimed"
+		}
+		out = append(out, alias{name: "c0", claims: true,
+			query: fmt.Sprintf("repo:%s is:issue commenter:%s %q in:comments", w.Repo, w.ClaimBy, phrase) + since})
+	}
+	if w.ClaimLabel != "" {
+		out = append(out, alias{name: "c1", claims: true, query: fmt.Sprintf("repo:%s is:issue label:%s", w.Repo, w.ClaimLabel) + since})
+	}
+	return out
+}
+
+// searchQuery is ONE GraphQL call: every alias, each its own search. after
+// holds the page cursor of an alias still paging; a nil after map is the
+// first page of every alias, and an alias absent from a non-nil map is done.
+func searchQuery(as []alias, after map[string]string, subs bool) string {
 	var b strings.Builder
 	b.WriteString("{")
-	for i, a := range authors {
+	for _, a := range as {
 		pg := ""
 		if after != nil {
-			c, ok := after[i]
+			c, ok := after[a.name]
 			if !ok {
 				continue
 			}
 			pg = fmt.Sprintf(`, after:%q`, c)
 		}
-		q := fmt.Sprintf("repo:%s author:%s", repo, a)
-		if cursor == "" {
-			q += " is:open"
-		} else {
-			q += " updated:>=" + cursor
+		sel := fmt.Sprintf(`... on PullRequest{%s} ... on Issue{%s}`, prFields, issueSel(subs))
+		if a.claims {
+			sel = fmt.Sprintf(`... on Issue{%s}`, claimFields)
 		}
-		fmt.Fprintf(&b, `a%d: search(type:ISSUE, first:%d%s, query:%q){pageInfo{hasNextPage endCursor} nodes{__typename ... on PullRequest{%s} ... on Issue{%s}}} `,
-			i, Batch, pg, q, prFields, issueSel(subs))
+		fmt.Fprintf(&b, `%s: search(type:ISSUE, first:%d%s, query:%q){pageInfo{hasNextPage endCursor} nodes{__typename %s}} `,
+			a.name, Batch, pg, a.query, sel)
 	}
 	b.WriteString("}")
 	return b.String()
@@ -202,6 +237,15 @@ type ghNode struct {
 			Body      string `json:"body"`
 		} `json:"nodes"`
 	} `json:"comments"`
+	ClosedBy struct {
+		Nodes []struct {
+			Number   int       `json:"number"`
+			State    string    `json:"state"`
+			MergedAt string    `json:"mergedAt"`
+			ClosedAt string    `json:"closedAt"`
+			Files    filesPage `json:"files"`
+		} `json:"nodes"`
+	} `json:"closedByPullRequestsReferences"`
 	LastEditedAt string `json:"lastEditedAt"`
 	Editor       *login `json:"editor"`
 	Timeline     struct {
@@ -567,4 +611,94 @@ func (p PR) KindFiles() []string {
 		return p.Files
 	}
 	return nil
+}
+
+// Claim is one Praxis claim as a pass read it: the issue, the claimer's
+// newest claim comment, the PR that closes it (if any).
+type Claim struct {
+	Issue    int
+	Title    string
+	State    string // the issue's: OPEN, CLOSED
+	ClosedAt string
+	At       string // the claim comment's time ("" when only the label says so)
+	Label    bool
+	PR       int
+	PRState  string // OPEN, MERGED, CLOSED
+	PRDone   string // the PR's merge or close time
+	Files    []string
+}
+
+// toClaim reads a claim-search node; ok false when it is not a claim (no
+// claim comment by, no claim label).
+func toClaim(n ghNode, by, phrase, label string) (Claim, bool) {
+	if phrase == "" {
+		phrase = "Praxis claimed"
+	}
+	c := Claim{Issue: n.Number, Title: n.Title, State: n.State, ClosedAt: n.ClosedAt}
+	for _, cm := range n.Comments.Nodes {
+		if by != "" && cm.Author != nil && strings.EqualFold(cm.Author.Login, by) && strings.Contains(cm.Body, phrase) && cm.CreatedAt > c.At {
+			c.At = cm.CreatedAt
+		}
+	}
+	for _, l := range n.Labels.names() {
+		if label != "" && strings.EqualFold(l, label) {
+			c.Label = true
+		}
+	}
+	// The PR Praxis opened for it: an open one first, else a merged one, else any; the newest of a kind.
+	rank := map[string]int{"OPEN": 3, "MERGED": 2, "CLOSED": 1}
+	best := -1
+	for i, p := range n.ClosedBy.Nodes {
+		if best < 0 || rank[p.State] > rank[n.ClosedBy.Nodes[best].State] ||
+			rank[p.State] == rank[n.ClosedBy.Nodes[best].State] && p.Number > n.ClosedBy.Nodes[best].Number {
+			best = i
+		}
+	}
+	if best >= 0 {
+		p := n.ClosedBy.Nodes[best]
+		c.PR, c.PRState = p.Number, p.State
+		c.PRDone = p.MergedAt
+		if c.PRDone == "" {
+			c.PRDone = p.ClosedAt
+		}
+		for _, f := range p.Files.Nodes {
+			c.Files = append(c.Files, f.Path)
+		}
+	}
+	return c, c.At != "" || c.Label
+}
+
+// Status is the claim's state: merged (its PR merged), closed (the issue or
+// its PR closed without a merge), pr-open (a PR is open, or the label says
+// so), else claimed.
+func (c Claim) Status() string {
+	switch {
+	case c.PRState == "MERGED":
+		return "merged"
+	case c.State == "CLOSED" || c.PRState == "CLOSED":
+		return "closed"
+	case c.PRState == "OPEN" || c.Label:
+		return "pr-open"
+	}
+	return "claimed"
+}
+
+// Grouped are paths by directory ({"dir/": ["name", ...]}, a top-level file
+// under ""), the first max paths, in their order within a directory.
+func Grouped(paths []string, max int) map[string][]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := map[string][]string{}
+	for i, p := range paths {
+		if i == max {
+			break
+		}
+		dir, name := "", p
+		if j := strings.LastIndex(p, "/"); j >= 0 {
+			dir, name = p[:j+1], p[j+1:]
+		}
+		out[dir] = append(out[dir], name)
+	}
+	return out
 }

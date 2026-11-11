@@ -604,6 +604,15 @@ type ScoutWatch struct {
 	// WarnTo is the role (@form) pinged once when open entries alone pass
 	// the form cap (the Decisions Minister).
 	WarnTo string `json:"warn_to,omitempty"`
+	// Claims (Praxis): an issue in the repo is a claim when ClaimBy posted a
+	// comment containing ClaimPhrase on it, or it carries ClaimLabel; it is
+	// written as claim:<issue>. Empty ClaimBy and ClaimLabel: no claims.
+	ClaimBy     string `json:"claim_by,omitempty"`
+	ClaimPhrase string `json:"claim_phrase,omitempty"`
+	ClaimLabel  string `json:"claim_label,omitempty"`
+	// FilesTitle: an open PR whose title matches it carries its changed
+	// files on its entry (fs).
+	FilesTitle string `json:"files_title,omitempty"`
 }
 
 // OwnerRule maps a PR to its owner role: author, optionally a title regex.

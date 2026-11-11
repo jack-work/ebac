@@ -34,6 +34,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-scout --name effort-github --authors A[,B] --repo O/R --board @FORM --inputs @FORM [--every 2m]
               [--labels L[,L]] [--title-match REGEX] [--paths GLOB[,GLOB]]
               [--owner AUTHOR[/TITLE_REGEX]=@ROLE ...]
+              [--claim-by LOGIN [--claim-phrase P] --claim-label L] [--files-title REGEX]
                                             the GitHub scout: one entry pr:<n> / issue:<n> on its own role form per
                                             relevant PR and issue of A, B (label OR title OR paths), merge_state from
                                             the inputs form's rule and the board's marks (read-only); on merge or

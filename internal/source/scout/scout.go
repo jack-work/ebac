@@ -22,6 +22,7 @@
 package scout
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -52,11 +53,18 @@ const JobsWindow = 72 * time.Hour
 // under another one (a code upgrade that changed the entries) re-reads every
 // tracked PR and issue once and rewrites every entry, as a filter change does.
 // Bump it with any change to PREntry or IssueEntry.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // KeepClosed is the least an entry stays after its PR merged or closed (and,
 // for a PR, until its ledger record is acked), or its issue closed (S2).
 const KeepClosed = 24 * time.Hour
+
+// KeepClaimClosed is how long a merged or closed claim stays (its last
+// status seen by the steward for a few passes).
+const KeepClaimClosed = 2 * time.Hour
+
+// MaxFiles caps the changed files an entry carries (fs, a claim's files).
+const MaxFiles = 50
 
 // The form's size: figaro's FormStateBudget is 192 KB for the whole form,
 // and the entries and this state share it. Past FormCapBytes the oldest merged or
@@ -182,6 +190,9 @@ type PREntry struct {
 	Lines      [2]int   `json:"ln"`
 	FilesKind  string   `json:"fk,omitempty"`
 	Band       []Band   `json:"bj,omitempty"`
+	// Files are an open PR's changed files by directory, when its title
+	// matches the config's files_title (at most MaxFiles).
+	Files map[string][]string `json:"fs,omitempty"`
 }
 
 // MarshalJSON writes a band job as [id, queue, verdict, tests_run, crates_checked], the trailing unknowns left out
@@ -277,6 +288,29 @@ func (d *IssueDigests) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// ClaimEntry is a Praxis claim (key claim:<issue>), its fields named (a new
+// family the steward projects): the issue, the PR Praxis opened for it, the
+// issue's title, that PR's changed files by directory, the claim comment's
+// time (unix), and its status (claimed, pr-open, merged, closed).
+type ClaimEntry struct {
+	Issue  int                 `json:"issue"`
+	PR     int                 `json:"pr,omitempty"`
+	Title  string              `json:"title"`
+	Files  map[string][]string `json:"files,omitempty"`
+	At     int64               `json:"at,omitempty"`
+	Status string              `json:"status"`
+}
+
+// ClaimKey is a claim's role-form key.
+func ClaimKey(n int) string { return "claim:" + strconv.Itoa(n) }
+
+// TrackedClaim is what the state keeps per claim.
+type TrackedClaim struct {
+	Entry string `json:"e"`
+	Done  int64  `json:"z,omitempty"` // merged or closed (unix)
+	Size  int    `json:"b,omitempty"`
+}
+
 // PRKey and IssueKey are the role-form keys of an entry.
 func PRKey(n int) string    { return "pr:" + strconv.Itoa(n) }
 func IssueKey(n int) string { return "issue:" + strconv.Itoa(n) }
@@ -285,11 +319,11 @@ func IssueKey(n int) string { return "issue:" + strconv.Itoa(n) }
 // it sits on the same form as the entries.
 type TrackedPR struct {
 	State     string `json:"s"`              // OPEN, MERGED, CLOSED
-	Head      string `json:"h"`              // 12 hex
+	Head      string `json:"h,omitempty"`    // 12 hex
 	Entry     string `json:"e"`              // digest of the entry last written
 	Inputs    string `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
 	Settling  bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
-	Owner     string `json:"o,omitempty"`    // its owner role (S5), resolved when last read
+	Owner     int    `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
 	Mergeable string `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
 	Links     []int  `json:"l,omitempty"`    // issue numbers its body links
 	Size      int    `json:"b,omitempty"`    // bytes of its entry on the form
@@ -325,7 +359,8 @@ type State struct {
 	Warning string                `json:"warning,omitempty"` // digest of the warning key last written
 	NoSubs  bool                  `json:"nosubs,omitempty"`  // the forge has no sub-issues: they are not asked for
 	Filter  string                `json:"filter,omitempty"`
-	Schema  int                   `json:"schema,omitempty"` // the entry shape (SchemaVersion) every entry on the form was written in  // digest of the repo, authors and relevance filter the cursor was read under
+	Schema  int                   `json:"schema,omitempty"`
+	Claims  map[int]*TrackedClaim `json:"claims,omitempty"` // the entry shape (SchemaVersion) every entry on the form was written in  // digest of the repo, authors and relevance filter the cursor was read under
 }
 
 // Pass is one round's inputs.
@@ -387,6 +422,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	if st.Issues == nil {
 		st.Issues = map[int]*TrackedIssue{}
 	}
+	if st.Claims == nil {
+		st.Claims = map[int]*TrackedClaim{}
+	}
 	if st.Tests == nil {
 		st.Tests = map[int64]int{}
 	}
@@ -412,6 +450,12 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	if err != nil {
 		return res, err
 	}
+	var filesRE *regexp.Regexp
+	if in.Watch.FilesTitle != "" {
+		if filesRE, err = regexp.Compile(in.Watch.FilesTitle); err != nil {
+			return res, fmt.Errorf("files_title: %w", err)
+		}
+	}
 	pol := mergecheck.Parse(inputString(in.Inputs["rule"]))
 	if len(pol.Steps) == 0 {
 		logf("no merge policy on the inputs form (key rule): merge_state not computed")
@@ -420,7 +464,8 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// A changed filter (repo, authors, labels, title, paths) re-reads every open item: an untouched PR that the new
 	// filter takes in would never come back through updated>=cursor. Its path verdicts were the old filter's.
 	cursor := prev.Cursor
-	if fd := digest([]any{in.Watch.Repo, in.Watch.Authors, in.Watch.Labels, in.Watch.TitleMatch, in.Watch.Paths}); fd != st.Filter {
+	if fd := digest([]any{in.Watch.Repo, in.Watch.Authors, in.Watch.Labels, in.Watch.TitleMatch, in.Watch.Paths,
+		in.Watch.ClaimBy, in.Watch.ClaimPhrase, in.Watch.ClaimLabel, in.Watch.FilesTitle}); fd != st.Filter {
 		if st.Filter != "" {
 			logf("filter changed: full re-read of every open PR and issue")
 		}
@@ -438,14 +483,16 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	start := in.Now.UTC()
 	fresh := map[int]PR{}
 	freshIssues := map[int]Issue{}
-	var after map[int]string
+	freshClaims := map[int]ghNode{}
+	as := searches(in.Watch, cursor)
+	var after map[string]string
 	for page := 0; page < 20; page++ {
-		data, err := call(searchQuery(in.Watch.Repo, in.Watch.Authors, cursor, after, !st.NoSubs))
+		data, err := call(searchQuery(as, after, !st.NoSubs))
 		if err != nil && !st.NoSubs && noSubIssues(err) {
 			// A forge without sub-issues: say so once, ask without them from now on.
 			st.NoSubs = true
 			logf("the forge has no sub-issues (%v): issue entries carry no p/sub", err)
-			data, err = call(searchQuery(in.Watch.Repo, in.Watch.Authors, cursor, after, false))
+			data, err = call(searchQuery(as, after, false))
 		}
 		if err != nil {
 			return res, fmt.Errorf("search: %w", err)
@@ -454,11 +501,13 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if err != nil {
 			return res, err
 		}
-		next := map[int]string{}
+		next := map[string]string{}
 		for alias, a := range sp {
 			for _, n := range a.Nodes {
 				switch {
 				case n.Number == 0:
+				case strings.HasPrefix(alias, "c"):
+					freshClaims[n.Number] = n
 				case n.isPR():
 					fresh[n.Number] = toPR(n)
 				default:
@@ -466,8 +515,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 				}
 			}
 			if a.PageInfo.HasNextPage {
-				i, _ := strconv.Atoi(strings.TrimPrefix(alias, "a"))
-				next[i] = a.PageInfo.EndCursor
+				next[alias] = a.PageInfo.EndCursor
 			}
 		}
 		if len(next) == 0 {
@@ -594,6 +642,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	}
 
 	// PR entries.
+	sentNow := map[int]bool{} // ledger records sent this pass: an ack can only be of an older one
 	for _, n := range sortedKeys(fresh) {
 		p := fresh[n]
 		t := st.PRs[n]
@@ -616,7 +665,10 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		js := jobsFor(jobs, st.Tests, head)
 		mk := marks.of(n)
 		e := prEntry(p, pol, js, mk)
-		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, roleOf(owners, p.Author, p.Title)
+		if filesRE != nil && p.Facts.State == "OPEN" && filesRE.MatchString(p.Title) {
+			e.Files = Grouped(p.Files, MaxFiles)
+		}
+		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, ownerOf(owners, p.Author, p.Title)
 		if p.Facts.State != "OPEN" {
 			t.Mergeable = "" // only an open PR's mergeability is asked again
 		}
@@ -645,6 +697,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 				t.Record = h // the reshape alone is no new record: the one sent stands (and its ack)
 			}
 			if h != t.Record {
+				sentNow[n] = true
 				res.Forms = append(res.Forms, outbox(n, rec))
 				t.Record, t.Outbox, t.Acked = h, in.Now.Unix(), false
 				logf("PR #%d %s: ledger record to the outbox", n, strings.ToLower(p.Facts.State))
@@ -727,7 +780,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 		if t.Entry != "" { // a baseline is never news
 			if what, by := material(t, is, d, lastHuman); len(what) > 0 {
-				pings = append(pings, issuePings(st.PRs, is, what, by, logf)...)
+				pings = append(pings, issuePings(st.PRs, owners, is, what, by, logf)...)
 			}
 		}
 		t.D, t.LastHuman = d, unix(lastHuman)
@@ -754,18 +807,70 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 
+	// Claims: written on change; a claim no longer one (comment and label gone) removed; a merged or closed one kept
+	// KeepClaimClosed after it closed.
+	for _, num := range sortedKeys(freshClaims) {
+		c, ok := toClaim(freshClaims[num], in.Watch.ClaimBy, in.Watch.ClaimPhrase, in.Watch.ClaimLabel)
+		t := st.Claims[num]
+		if !ok {
+			if t != nil {
+				res.Unset = append(res.Unset, ClaimKey(num))
+				delete(st.Claims, num)
+			}
+			continue
+		}
+		if t == nil {
+			t = &TrackedClaim{}
+			st.Claims[num] = t
+		}
+		e := ClaimEntry{Issue: num, PR: c.PR, Title: c.Title, Files: Grouped(c.Files, MaxFiles), At: unix(c.At), Status: c.Status()}
+		switch e.Status {
+		case "merged", "closed":
+			done := unix(c.PRDone)
+			if c.PRState != "MERGED" && c.State == "CLOSED" {
+				done = unix(c.ClosedAt)
+			}
+			if done != 0 {
+				t.Done = done
+			} else if t.Done == 0 {
+				t.Done = in.Now.Unix() // no time from GitHub: counted from when it was first seen closed
+			}
+		default:
+			t.Done = 0
+		}
+		if d := digest(e); d != t.Entry {
+			raw := model.MustJSON(e)
+			if t.Entry == "" {
+				res.added = append(res.added, ClaimKey(num))
+			}
+			res.Set[ClaimKey(num)] = raw
+			t.Entry, t.Size = d, entrySize(ClaimKey(num), raw)
+		}
+	}
+	for _, num := range sortedKeys(st.Claims) {
+		if t := st.Claims[num]; t.Done > 0 && in.Now.Unix()-t.Done > int64(KeepClaimClosed/time.Second) {
+			res.Unset = append(res.Unset, ClaimKey(num))
+			delete(st.Claims, num)
+		}
+	}
+
 	res.Pings = queuePings(&st, pings, logf)
 
 	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member.
+	// The steward (board-inputs ledger_committer.py) commits an outbox member as prs/<n>.json and acks it with the
+	// sha256 of the committed bytes: the member matches its ack when CommittedHash(member) is the ack's hash. A
+	// member we replaced since (a newer record) does not match until the steward commits that one.
 	acks := ledgerAcks(in.Inputs)
+	box := model.ObjectOf(in.Inputs["ledger_outbox"])
 	for _, n := range sortedKeys(st.PRs) {
 		t := st.PRs[n]
 		if t.State == "OPEN" || t.Record == "" || t.Acked {
 			continue
 		}
 		a, ok := acks[n]
-		if !ok || unix(a.At) <= t.Outbox || a.Hash != "" && !strings.HasPrefix(a.Hash, t.Record) {
-			continue
+		member, inBox := box[strconv.Itoa(n)]
+		if !ok || !inBox || sentNow[n] || a.Hash != CommittedHash(member) {
+			continue // no ack, nothing of ours in the outbox, a newer record just sent, or an ack of another record
 		}
 		t.Acked = true
 		res.Forms = append(res.Forms, outbox(n, nil))
@@ -816,7 +921,8 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		for _, k := range in.OwnKeys {
 			kind, num, _ := strings.Cut(k, ":")
 			n, err := strconv.Atoi(num)
-			tracked := err == nil && (kind == "pr" && st.PRs[n] != nil || kind == "issue" && st.Issues[n] != nil)
+			tracked := err == nil && (kind == "pr" && st.PRs[n] != nil || kind == "issue" && st.Issues[n] != nil ||
+				kind == "claim" && st.Claims[n] != nil)
 			if !tracked && !gone[k] && res.Set[k] == nil {
 				orphans = append(orphans, k)
 			}
@@ -824,6 +930,12 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if len(orphans) > 0 {
 			res.Unset = append(res.Unset, orphans...)
 			logf("%d entr(y/ies) no longer tracked removed: %v", len(orphans), orphans)
+		}
+	}
+	// A merged or closed PR keeps only what its retention and ledger need.
+	for _, t := range st.PRs {
+		if t.State != "OPEN" {
+			t.Head, t.Inputs, t.Settling, t.Owner, t.Links, t.Mergeable = "", "", false, 0, nil, ""
 		}
 	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)
@@ -945,7 +1057,28 @@ func ledgerAcks(inputs map[string]json.RawMessage) map[int]ack {
 	return out
 }
 
-// later says whether RFC 3339 time a is after b (false when either is unreadable).
+// CommittedHash is the sha256 (hex) of a ledger record as the steward commits
+// it: Python's json.dumps(record, indent=2, sort_keys=True,
+// ensure_ascii=False) + "\n". Numbers keep their text, keys sort, HTML
+// characters stay as they are.
+func CommittedHash(raw json.RawMessage) string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if dec.Decode(&v) != nil {
+		return ""
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if enc.Encode(v) != nil {
+		return ""
+	}
+	h := sha256.Sum256(b.Bytes())
+	return hex.EncodeToString(h[:])
+}
+
 func unix(rfc3339 string) int64 {
 	t, err := time.Parse(time.RFC3339, rfc3339)
 	if err != nil {
@@ -1133,12 +1266,20 @@ func CheckOwners(rules []model.OwnerRule) error {
 	return err
 }
 
-// roleOf is the owner role of a PR: the first rule matching its author (and title), or "".
-func roleOf(owners []owner, author, title string) string {
-	for _, o := range owners {
+// ownerOf is the owner rule of a PR (1-based): the first matching its author (and title), or 0.
+func ownerOf(owners []owner, author, title string) int {
+	for i, o := range owners {
 		if strings.EqualFold(o.author, author) && (o.title == nil || o.title.MatchString(title)) {
-			return o.role
+			return i + 1
 		}
+	}
+	return 0
+}
+
+// roleOf is the owner role of a PR, or "".
+func roleOf(owners []owner, author, title string) string {
+	if i := ownerOf(owners, author, title); i > 0 {
+		return owners[i-1].role
 	}
 	return ""
 }
@@ -1244,7 +1385,7 @@ func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman string) ([]st
 }
 
 // issuePings are one line per owner role of the open tracked PRs linking the issue.
-func issuePings(prs map[int]*TrackedPR, is Issue, what, by []string, logf func(string, ...any)) []plugin.Ping {
+func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []string, logf func(string, ...any)) []plugin.Ping {
 	byRole := map[string][]string{}
 	var roles []string
 	for _, n := range sortedKeys(prs) {
@@ -1252,7 +1393,10 @@ func issuePings(prs map[int]*TrackedPR, is Issue, what, by []string, logf func(s
 		if t.State != "OPEN" || !containsInt(t.Links, is.Number) {
 			continue
 		}
-		role := t.Owner
+		role := ""
+		if t.Owner > 0 && t.Owner <= len(owners) {
+			role = owners[t.Owner-1].role
+		}
 		if role == "" {
 			logf("issue #%d changed: PR #%d has no owner rule", is.Number, n)
 			continue
@@ -1328,24 +1472,34 @@ func budget(st *State, res *Result, in Pass, logf func(string, ...any)) {
 	var pruned, held []string
 	if total > limit {
 		type cand struct {
-			key  string
-			done int64
-			drop func()
+			key   string
+			claim bool // merged or closed claims go first
+			done  int64
+			drop  func()
 		}
 		var cs []cand
+		for n, t := range st.Claims {
+			if t.Done > 0 && t.Size > 0 {
+				n := n
+				cs = append(cs, cand{ClaimKey(n), true, t.Done, func() { delete(st.Claims, n) }})
+			}
+		}
 		for n, t := range st.PRs {
 			if t.State != "OPEN" && t.Record != "" && t.Size > 0 {
 				n := n
-				cs = append(cs, cand{PRKey(n), t.Done, func() { delete(st.PRs, n) }})
+				cs = append(cs, cand{PRKey(n), false, t.Done, func() { delete(st.PRs, n) }})
 			}
 		}
 		for n, t := range st.Issues {
 			if t.State != "OPEN" && t.Size > 0 {
 				n := n
-				cs = append(cs, cand{IssueKey(n), t.Done, func() { delete(st.Issues, n) }})
+				cs = append(cs, cand{IssueKey(n), false, t.Done, func() { delete(st.Issues, n) }})
 			}
 		}
 		sort.Slice(cs, func(i, j int) bool {
+			if cs[i].claim != cs[j].claim {
+				return cs[i].claim
+			}
 			if cs[i].done != cs[j].done {
 				return cs[i].done < cs[j].done
 			}
@@ -1366,12 +1520,19 @@ func budget(st *State, res *Result, in Pass, logf func(string, ...any)) {
 			key := res.added[i]
 			kind, num, _ := strings.Cut(key, ":")
 			n, _ := strconv.Atoi(num)
-			if kind == "pr" {
+			switch kind {
+			case "pr":
 				if t := st.PRs[n]; t != nil {
 					t.Entry, t.Size, t.Held = "", 0, true
 				}
-			} else if t := st.Issues[n]; t != nil {
-				t.Entry, t.Size, t.Held = "", 0, true
+			case "issue":
+				if t := st.Issues[n]; t != nil {
+					t.Entry, t.Size, t.Held = "", 0, true
+				}
+			case "claim": // written when the search next returns it with room on the form
+				if t := st.Claims[n]; t != nil {
+					t.Entry, t.Size = "", 0
+				}
 			}
 			delete(res.Set, key)
 			held = append(held, key)
@@ -1424,6 +1585,12 @@ func FormSize(st *State) (total, open int) {
 	for _, t := range st.Issues {
 		total += t.Size
 		if t.State == "OPEN" {
+			open += t.Size
+		}
+	}
+	for _, t := range st.Claims {
+		total += t.Size
+		if t.Done == 0 {
 			open += t.Size
 		}
 	}

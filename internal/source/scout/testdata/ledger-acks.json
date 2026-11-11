@@ -1,0 +1,104 @@
+{
+ "107253": {
+  "record": {
+   "entry": {
+    "a": "Chiqun-Zhang",
+    "ar": {
+     "at": 1794307932,
+     "h": "2ecd0f8d",
+     "v": "APPROVE"
+    },
+    "c": {
+     "f": 3,
+     "p": 5,
+     "r": "FAILURE",
+     "x": [
+      "Aether Runtime PR Pipeline",
+      "Aether Runtime PR Pipeline (Checks Trailer, frozen-path, registry, dashboard, CSC and supply-chain gates)",
+      "Aether Rust PR Pipeline"
+     ]
+    },
+    "cl": 1794393468,
+    "cr": 1794305624,
+    "fk": "code",
+    "h": "05abe083",
+    "ln": [
+     238,
+     113
+    ],
+    "mg": "MERGEABLE",
+    "ms": "closed",
+    "rd": 1794305634,
+    "s": "CLOSED",
+    "t": "[Effort dispatch overlaid modelId][2-2] The dispatch reads the handed modelId from the stream's catalog",
+    "th": 1,
+    "u": 1794393468
+   },
+   "hash": "9b29272f36367816bd1f81059ab80a8edb66ef30e9a3e09f71d4e1038e11a9d2",
+   "kind": "pr-final",
+   "pr": 107253,
+   "repo": "bic/aether"
+  },
+  "ack": {
+   "at": "2026-11-11T10:39:02Z",
+   "hash": "cd446ae0d6692347b2ce8fdfb00fc1744313c2c8fa389fdd72b9281a6f0b2ae8",
+   "path": "prs/107253.json",
+   "sha": "25dd8c09da42d633cccfa6695d178af2fb891335"
+  }
+ },
+ "108334": {
+  "record": {
+   "entry": {
+    "a": "John-Kelliher",
+    "ar": {
+     "at": 1794393203,
+     "h": "0a006364",
+     "v": "APPROVE"
+    },
+    "bj": [
+     [
+      6309,
+      "clippy-pr",
+      "FAIL"
+     ],
+     [
+      6274,
+      "check-ni",
+      "PASS"
+     ]
+    ],
+    "c": {
+     "p": 8,
+     "r": "SUCCESS"
+    },
+    "cr": 1794338823,
+    "fk": "tests",
+    "h": "32c60a67",
+    "lk": {
+     "v": "APPROVED"
+    },
+    "ln": [
+     87,
+     0
+    ],
+    "m": 1794391443,
+    "mg": "UNKNOWN",
+    "ms": "merged",
+    "rd": 1794374029,
+    "s": "MERGED",
+    "t": "[Effort router gate][5-10] test(effort): the rollback gate and the live apply share one router read",
+    "u": 1794393203
+   },
+   "hash": "6133af2ac77dfa593c46a92acc37e4477956af38699635421bedbf0dd7088b1d",
+   "kind": "pr-final",
+   "pr": 108334,
+   "repo": "bic/aether"
+  },
+  "ack": {
+   "at": "2026-11-11T10:35:01Z",
+   "hash": "b08c0ad73abeb31608b1e99ad1af7c2e32fd04ef617b82ae9e86a2b62b835619",
+   "path": "prs/108334.json",
+   "sha": "b71a4b41a74ad5d425fce6cbfebf0457201cb258"
+  }
+ }
+}
