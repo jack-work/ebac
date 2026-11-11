@@ -1,5 +1,5 @@
 {
- "rule": "# Chiqun merge-ready criteria\n\nBoss rule 2026-11-10 ~20Z: CHIQUN MERGE-READY CRITERIA (when to DM Chiqun for an admin merge of one of our PRs)\n\nFormat (dashboard steward, 2026-11-10 ~23:45Z): one section per step, `## <step-id>: <label>`, in the order the steps are checked. The minister-control dashboard parses this file on every refresh: step order, labels and tooltip text come from here, and a PR's state is \"waiting: <label>\" of its first unmet step. Edit the prose freely; adding, removing or renaming a step id changes what the dashboard checks (a step with no automated check shows as \"not automated\"). Sections without a step id (WHEN, FOLLOW-UP) are policy only.\n\n## band-jobs: band jobs\n1. Do NOT wait on the Rust PR pipeline. Validate on band-work with the fast jobs that mirror it best: aether.check-ni (compile incl. tests), aether.gate-kit (actors crates), aether.gate-ext with tests=<the changed crate> (aether_grpc / aether_routing), aether.gate-services when storage/services change, aether.clippy-pr. Read the test count on every PASS (0 tests = no verdict).\n\n## runtime-ci: Runtime CI\n2. The fast GitHub pipeline (Aether Runtime PR Pipeline) is GREEN.\n\n## rust-triage: Rust triage\n3. If the Rust PR pipeline is RED: prove it is not ours: code read of the failing step against our diff, plus running the failing test ad hoc on band-work at our head (and at main to show it fails there too). If not ours: good to go; say so with evidence.\n\n## conflict: conflict\n4. No conflicts with main (mergeable CLEAN).\n\n## threads: threads\n(Added from the Minister's state list, Boss order 2026-11-10 ~23:15Z.) No unresolved review threads: every reviewer finding is fixed, or answered and resolved.\n\n## ilya: Ilya\n5. MOST IMPORTANT: at least ILYA's approval (Ilya-Grebnov). Get there by iterating with the bots on small PRs: go through a couple of rounds, close out scope creep (reject with one line + where it is filed), dismiss trivial objections, fix real ones. Lukas and the other reviewers are added confidence, not required.\n5a. (Minister 2026-11-10 ~23Z) The architect verdict is the architect-review[bot] issue comment; APPROVE counts, and so does APPROVE_WITH_NOTES (\"nothing blocks merge\"), labelled as such, provided each Major in its notes is fixed in the PR or filed as a follow-up issue named in the Chiqun notice. An Ilya-Grebnov auto-approve review is the usual receipt but is not required.\n\n## lukas-carryover: Lukas\n5b. (Boss 2026-11-10 ~22:15Z) Architect carry-over: if the architect-review bot APPROVED an EARLIER head, and the changes since are marginal (rebase, tests, docs/comments, or small fixes to review findings with no new behavior), and Lukas's bot (login lukas) APPROVES the CURRENT head, criterion 5 holds: DM Chiqun. A behavior change after the architect APPROVE still needs a fresh architect verdict. The notice names the architect head, the current head and one line on why the interdiff is marginal.\n\n## notified: notice to Chiqun\n(Added from the Minister's state list, Boss order 2026-11-10 ~23:15Z.) All steps above hold and the Secretary has sent Chiqun the merge-ready message (see WHEN): the PR is then \"ready\" and we wait for his admin merge. The Secretary writes chiqun_notified {at, chat, followups} on the PR's board entry when it sends.\n\n## WHEN\nWHEN 1-5 hold: the Knight tells the Secretary; the Secretary DMs Chiqun for the admin merge (small -> Chiqun DM; large/critical -> Akshay+Chiqun group).\n\n## FOLLOW-UP\nFOLLOW-UP (Boss 2026-11-10 ~23:35Z, replaces \"one follow-up per new approval\"): Chiqun is close; ping him freely. The moment a PR becomes ready, the Secretary DMs him at once (standing approval, no per-message Boss yes): \"New for your review: <PR link + title>. Still waiting on you: <every other ready, unmerged PR from the board, link + title>\". Every newly ready PR triggers one such DM (the delta plus the full outstanding list); a merge drops a PR from the list. No batching windows, no waiting.\n",
+ "rule": "# Chiqun merge-ready criteria\n\nBoss rule 2026-11-10 ~20Z: CHIQUN MERGE-READY CRITERIA (when to DM Chiqun for an admin merge of one of our PRs)\n\nFormat (dashboard steward, 2026-11-10 ~23:45Z): one section per step, `## <step-id>: <label>`, in the order the steps are checked. The minister-control dashboard parses this file on every refresh: step order, labels and tooltip text come from here, and a PR's state is \"waiting: <label>\" of its first unmet step. Edit the prose freely; adding, removing or renaming a step id changes what the dashboard checks (a step with no automated check shows as \"not automated\"). Sections without a step id (WHEN, FOLLOW-UP) are policy only.\n\n## band-jobs: band jobs\n1. (Updated 2026-11-11 ~06Z, Boss greenlight L3.) Band runs fast pre-checks only: aether.check-ni (compile incl. tests) at the head; aether.clippy-pr only for a head that is NOT an open PR head (an open PR head's clippy verdict is ADO's Rust PR Pipeline, rule.clippy_ado, Minister 11-11 ~05:10Z; never wait on a clippy-pr for it). Read the result on every PASS (a check-ni PASS with 0 crates checked is no verdict). The test verdict is ADO (Rust PR Pipeline). gate-ext / gate-services / decision-build / gate-kit are opt-in, targeted runs (tests=<spec>) used only when a finding needs a local reproduction, never a default merge requirement. Docs-only PRs need no band job; tests-only PRs need check-ni only.\n\n## runtime-ci: Runtime CI\n2. The fast GitHub pipeline (Aether Runtime PR Pipeline) is GREEN.\n\n## rust-triage: Rust triage\n3. If the Rust PR pipeline is RED: prove it is not ours: code read of the failing step against our diff, plus running the failing test ad hoc on band-work at our head (and at main to show it fails there too). If not ours: good to go; say so with evidence.\n\n## conflict: conflict\n4. No conflicts with main (mergeable CLEAN).\n\n## threads: threads\n(Added from the Minister's state list, Boss order 2026-11-10 ~23:15Z.) No unresolved review threads: every reviewer finding is fixed, or answered and resolved.\n\n## ilya: Ilya\n5. MOST IMPORTANT: at least ILYA's approval (Ilya-Grebnov). Get there by iterating with the bots on small PRs: go through a couple of rounds, close out scope creep (reject with one line + where it is filed), dismiss trivial objections, fix real ones. Lukas and the other reviewers are added confidence, not required.\n5a. (Minister 2026-11-10 ~23Z) The architect verdict is the architect-review[bot] issue comment; APPROVE counts, and so does APPROVE_WITH_NOTES (\"nothing blocks merge\"), labelled as such, provided each Major in its notes is fixed in the PR or filed as a follow-up issue named in the Chiqun notice. An Ilya-Grebnov auto-approve review is the usual receipt but is not required.\n\n## lukas-carryover: Lukas\n5b. (Boss 2026-11-10 ~22:15Z) Architect carry-over: if the architect-review bot APPROVED an EARLIER head, and the changes since are marginal (rebase, tests, docs/comments, or small fixes to review findings with no new behavior), and Lukas's bot (login lukas) APPROVES the CURRENT head, criterion 5 holds: DM Chiqun. A behavior change after the architect APPROVE still needs a fresh architect verdict. The notice names the architect head, the current head and one line on why the interdiff is marginal.\n\n## notified: self-merge on green\n(Boss 2026-11-11 ~02:20Z, replaces the admin-merge request.) All steps above hold AND GitHub shows the PR mergeable (2 approvals after the last push incl. 1 code owner: architect-review auto-approve under Ilya-Grebnov + lukas; Runtime PR Pipeline green; Rust PR Pipeline green or NEUTRAL; no standing CHANGES_REQUESTED): the front's owner (Knight, ledger lead) MERGES IT ITSELF (squash). No admin, no bypass. Our own PRs only; never another author's PR. Board: \"ready\" = mergeable now, \"merged\" after. The Secretary then sends Chiqun an FYI (link + merge sha) and writes chiqun_notified {at, chat, followups:0}.\n\n## WHEN\nWHEN 1-5 hold and the PR is mergeable: the owner merges it, tells the Knight one line (PR, sha), and the Knight tells the Secretary for the FYI. If GitHub refuses the merge (a ruleset the facts above missed), stop, report the refusal text to @2ea091e5, and fall back to the Chiqun admin-merge request for that PR.\n\n## FOLLOW-UP\nFOLLOW-UP (Boss 2026-11-11 ~02:20Z): no merge requests to Chiqun. One FYI per merge (link + sha, short). A standing CHANGES_REQUESTED from lukas or automaton is cleared by fixing or answering it and re-requesting review, never by asking Chiqun to override.\n",
  "self_check": {
   "orphan_evaluators": [],
   "not_automated": [],
@@ -14,7 +14,7 @@
     "draft": false,
     "heavy": true,
     "mergeable": "MERGEABLE",
-    "merge_state": "BLOCKED",
+    "merge_state": "CLEAN",
     "unresolved": 0,
     "contexts": [
      {
@@ -33,9 +33,16 @@
       "state": "APPROVED",
       "oid": "abcdef1234567890abcdef1234567890abcdef12"
      }
-    ]
+    ],
+    "review": "APPROVED"
    },
    "jobs": [
+    {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
     {
      "id": 11,
      "queue": "aether.gate-kit",
@@ -73,16 +80,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -116,7 +125,7 @@
      "k": "conflict",
      "ok": true,
      "status": "yes",
-     "note": "mergeable mergeable, merge state blocked",
+     "note": "mergeable mergeable, merge state clean",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -153,10 +162,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": true,
      "status": "yes",
-     "note": "sent 2026-11-10T21:00:00Z in Chiqun DM; follow-ups 1",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -195,6 +204,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -224,16 +239,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -304,16 +321,16 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
     }
    ],
-   "state": "waiting: notice to Chiqun"
+   "state": "waiting: self-merge on green"
   },
   {
    "name": "draft",
@@ -346,6 +363,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -375,16 +398,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -455,10 +480,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -497,6 +522,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -526,6 +557,7 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": null,
    "state": "merged"
   },
@@ -577,15 +609,17 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": false,
      "status": "no",
-     "note": "job 13 gate-kit: FAIL",
+     "note": "check-ni at the head (files not read yet); check-ni: not run on this head; opt-in job 13 gate-kit: FAIL",
      "ev": [
-      "job 13 gate-kit: FAIL"
+      "check-ni: not run on this head",
+      "opt-in job 13 gate-kit: FAIL"
      ],
      "at": "abcdef12",
      "stale": false
@@ -656,10 +690,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -712,15 +746,17 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": false,
-     "status": "pending",
-     "note": "job 14 gate-ext: leased",
+     "status": "no",
+     "note": "check-ni at the head (files not read yet); check-ni: not run on this head; opt-in job 14 gate-ext: leased",
      "ev": [
-      "job 14 gate-ext: leased"
+      "check-ni: not run on this head",
+      "opt-in job 14 gate-ext: leased"
      ],
      "at": "abcdef12",
      "stale": false
@@ -791,10 +827,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -862,16 +898,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": false,
      "status": "no",
-     "note": "job 11 gate-kit: PASS, 0 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); check-ni: not run on this head; opt-in job 11 gate-kit: PASS, 0 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 0 tests",
-      "job 12 clippy-pr: PASS"
+      "check-ni: not run on this head",
+      "opt-in job 11 gate-kit: PASS, 0 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -942,10 +980,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -994,14 +1032,17 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": false,
      "status": "no",
-     "note": "no fast job on this head",
-     "ev": [],
+     "note": "check-ni at the head (files not read yet); check-ni: not run on this head",
+     "ev": [
+      "check-ni: not run on this head"
+     ],
      "at": "abcdef12",
      "stale": false
     },
@@ -1071,10 +1112,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -1108,6 +1149,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1137,16 +1184,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1215,10 +1264,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -1257,6 +1306,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1286,16 +1341,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1366,10 +1423,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -1408,6 +1465,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1439,16 +1502,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1519,16 +1584,16 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
     }
    ],
-   "state": "waiting: notice to Chiqun"
+   "state": "waiting: self-merge on green"
   },
   {
    "name": "conflict dirty",
@@ -1561,6 +1626,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1590,16 +1661,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1670,10 +1743,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state dirty, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -1712,6 +1785,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1741,16 +1820,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1821,10 +1902,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
-     "status": "no",
-     "note": "not yet",
+     "status": "pending",
+     "note": "GitHub: merge state unknown, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -1863,6 +1944,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -1892,16 +1979,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -1972,10 +2061,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -2014,6 +2103,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2042,16 +2137,18 @@
     "sha": "abcdef1234567890abcdef1234567890abcdef12",
     "at": "t1"
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2122,10 +2219,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -2164,6 +2261,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2195,16 +2298,18 @@
     "sha": "abcdef1234567890abcdef1234567890abcdef12",
     "at": "t1"
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2275,16 +2380,16 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
     }
    ],
-   "state": "waiting: notice to Chiqun"
+   "state": "waiting: self-merge on green"
   },
   {
    "name": "arch hold",
@@ -2317,6 +2422,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2347,16 +2458,18 @@
     "hold": true,
     "hold_at": "t2"
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2427,10 +2540,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -2469,6 +2582,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2493,16 +2612,18 @@
     "11": 412
    },
    "arch": null,
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2573,10 +2694,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -2615,6 +2736,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2646,16 +2773,18 @@
     "sha": "0123456789abcdef0123456789abcdef01234567",
     "at": "t0"
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2726,16 +2855,16 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
     }
    ],
-   "state": "waiting: notice to Chiqun"
+   "state": "waiting: self-merge on green"
   },
   {
    "name": "not marginal",
@@ -2768,6 +2897,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2798,16 +2933,18 @@
     "sha": "0123456789abcdef0123456789abcdef01234567",
     "at": "t0"
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -2878,10 +3015,10 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
      "ok": false,
      "status": "no",
-     "note": "not yet",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
      "ev": [],
      "at": "abcdef12",
      "stale": false
@@ -2920,6 +3057,12 @@
    },
    "jobs": [
     {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
      "id": 11,
      "queue": "aether.gate-kit",
      "verdict": "PASS",
@@ -2951,16 +3094,18 @@
     "at": "2026-11-10T20:00:00Z",
     "hold": false
    },
+   "files": null,
    "steps": [
     {
      "id": "band-jobs",
      "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "job 11 gate-kit: PASS, 412 tests; job 12 clippy-pr: PASS",
+     "note": "check-ni at the head (files not read yet); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
      "ev": [
-      "job 11 gate-kit: PASS, 412 tests",
-      "job 12 clippy-pr: PASS"
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
      ],
      "at": "abcdef12",
      "stale": false
@@ -3031,10 +3176,1970 @@
     },
     {
      "id": "notified",
-     "k": "notice to Chiqun",
+     "k": "self-merge on green",
+     "ok": false,
+     "status": "no",
+     "note": "GitHub: merge state blocked, review decision none: not mergeable yet",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: self-merge on green"
+  },
+  {
+   "name": "+108334 tests-only, check-ni PASS",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "aether_rust/crates/aether_grpc/src/effort_stamp_tests.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
      "ok": true,
      "status": "yes",
-     "note": "sent: yes, 21:00Z",
+     "note": "tests-only PR: check-ni only; job 21 check-ni: PASS",
+     "ev": [
+      "job 21 check-ni: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+108717 code, check-ni PASS, opt-in gate-kit FAIL",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 30,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "done"
+    },
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "aether_rust/crates/x/src/lib.rs",
+    "aether_rust/crates/x/tests/a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: PASS; opt-in job 30 gate-kit: FAIL",
+     "ev": [
+      "job 21 check-ni: PASS",
+      "opt-in job 30 gate-kit: FAIL"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+108459 code+docs, check-ni PASS, clippy-pr FAIL",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 31,
+     "queue": "aether.clippy-pr",
+     "verdict": "FAIL",
+     "state": "done"
+    },
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "docs/x.md",
+    "aether_rust/crates/x/src/a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: PASS; opt-in job 31 clippy-pr: FAIL",
+     "ev": [
+      "job 21 check-ni: PASS",
+      "opt-in job 31 clippy-pr: FAIL"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+docs-only, no job",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "README.md",
+    "aether_rust/docs/design.md"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "docs-only PR: no band job needed",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+tests-only, no job",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "aether_rust/crates/x/tests/t.rs",
+    "py/test_x.py"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "tests-only PR: check-ni only; check-ni: not run on this head",
+     "ev": [
+      "check-ni: not run on this head"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "+check-ni running",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": null,
+     "state": "leased"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "pending",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: leased",
+     "ev": [
+      "job 21 check-ni: leased"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "+check-ni FAIL, older PASS",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 41,
+     "queue": "aether.check-ni",
+     "verdict": "FAIL",
+     "state": "failed"
+    },
+    {
+     "id": 40,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 41 check-ni: FAIL",
+     "ev": [
+      "job 41 check-ni: FAIL"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "+opt-in with tests",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 50,
+     "queue": "aether.gate-ext",
+     "verdict": "PASS",
+     "state": "done",
+     "tests": "decision_judge"
+    },
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "50": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: PASS; opt-in job 50 gate-ext(decision_judge): PASS, 412 tests",
+     "ev": [
+      "job 21 check-ni: PASS",
+      "opt-in job 50 gate-ext(decision_judge): PASS, 412 tests"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+files not read",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": null,
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (files not read yet); job 21 check-ni: PASS",
+     "ev": [
+      "job 21 check-ni: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "name": "+empty file list is code",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": false,
+     "status": "no",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); check-ni: not run on this head",
+     "ev": [
+      "check-ni: not run on this head"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: band jobs"
+  },
+  {
+   "name": "+review required",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "REVIEW_REQUIRED"
+   },
+   "jobs": [
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: PASS",
+     "ev": [
+      "job 21 check-ni: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": false,
+     "status": "no",
+     "note": "GitHub: merge state clean, review decision review required: not mergeable yet; Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: self-merge on green"
+  },
+  {
+   "name": "+merge state unknown",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "UNKNOWN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": ""
+   },
+   "jobs": [
+    {
+     "id": 21,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-10T21:00:00Z",
+     "chat": "Chiqun DM",
+     "followups": 1,
+     "head": "abcdef1234567890abcdef1234567890abcdef12"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 21 check-ni: PASS",
+     "ev": [
+      "job 21 check-ni: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state unknown",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": false,
+     "status": "pending",
+     "note": "GitHub: merge state unknown, review decision none: not mergeable yet; Chiqun FYI sent 2026-11-10T21:00:00Z in Chiqun DM",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    }
+   ],
+   "state": "waiting: self-merge on green"
+  },
+  {
+   "name": "+fyi evidence",
+   "facts": {
+    "oid": "abcdef1234567890abcdef1234567890abcdef12",
+    "state": "OPEN",
+    "draft": false,
+    "heavy": true,
+    "mergeable": "MERGEABLE",
+    "merge_state": "CLEAN",
+    "unresolved": 0,
+    "contexts": [
+     {
+      "name": "Aether Runtime PR Pipeline",
+      "state": "SUCCESS",
+      "build": "123"
+     },
+     {
+      "name": "Aether Rust PR Pipeline (rust)",
+      "state": "SUCCESS"
+     }
+    ],
+    "reviews": [
+     {
+      "login": "Ilya-Grebnov",
+      "state": "APPROVED",
+      "oid": "abcdef1234567890abcdef1234567890abcdef12"
+     }
+    ],
+    "review": "APPROVED"
+   },
+   "jobs": [
+    {
+     "id": 13,
+     "queue": "aether.check-ni",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 11,
+     "queue": "aether.gate-kit",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 12,
+     "queue": "aether.clippy-pr",
+     "verdict": "PASS",
+     "state": "done"
+    },
+    {
+     "id": 10,
+     "queue": "aether.gate-kit",
+     "verdict": "FAIL",
+     "state": "failed"
+    }
+   ],
+   "row": {
+    "chiqun_notified": {
+     "at": "2026-11-11T03:00Z",
+     "chat": "dm"
+    }
+   },
+   "item": {},
+   "tests": {
+    "11": 412
+   },
+   "arch": {
+    "verdict": "APPROVE",
+    "sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "at": "2026-11-10T20:00:00Z",
+    "hold": false
+   },
+   "files": [
+    "a.rs"
+   ],
+   "steps": [
+    {
+     "id": "band-jobs",
+     "k": "band jobs",
+     "ok": true,
+     "status": "yes",
+     "note": "check-ni at the head (clippy verdict = ADO Rust); job 13 check-ni: PASS; opt-in job 11 gate-kit: PASS, 412 tests; opt-in job 12 clippy-pr: PASS",
+     "ev": [
+      "job 13 check-ni: PASS",
+      "opt-in job 11 gate-kit: PASS, 412 tests",
+      "opt-in job 12 clippy-pr: PASS"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "runtime-ci",
+     "k": "Runtime CI",
+     "ok": true,
+     "status": "yes",
+     "note": "Aether Runtime PR Pipeline: success (build 123)",
+     "ev": [
+      "Aether Runtime PR Pipeline: success (build 123)"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "rust-triage",
+     "k": "Rust triage",
+     "ok": true,
+     "status": "yes",
+     "note": "Rust PR Pipeline green",
+     "ev": [
+      "Aether Rust PR Pipeline (rust): success"
+     ],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "conflict",
+     "k": "conflict",
+     "ok": true,
+     "status": "yes",
+     "note": "mergeable mergeable, merge state clean",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "threads",
+     "k": "threads",
+     "ok": true,
+     "status": "yes",
+     "note": "0 unresolved review threads",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "ilya",
+     "k": "Ilya",
+     "ok": true,
+     "status": "yes",
+     "note": "architect approve at abcdef12 (2026-11-10T20:00:00Z); Ilya-Grebnov review: approved at abcdef12",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "lukas-carryover",
+     "k": "Lukas",
+     "ok": true,
+     "status": "yes",
+     "note": "not needed: the architect approved this head",
+     "ev": [],
+     "at": "abcdef12",
+     "stale": false
+    },
+    {
+     "id": "notified",
+     "k": "self-merge on green",
+     "ok": true,
+     "status": "yes",
+     "note": "GitHub: merge state clean, review decision approved: mergeable now, the owner merges it (squash); Chiqun FYI sent 2026-11-11T03:00Z in dm",
      "ev": [],
      "at": "abcdef12",
      "stale": false

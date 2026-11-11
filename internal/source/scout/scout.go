@@ -48,9 +48,20 @@ const CursorSkew = 2 * time.Minute
 // JobsWindow is how far back the band hub is read for jobs on tracked heads.
 const JobsWindow = 72 * time.Hour
 
-// Keep is how long an entry stays after its PR merged or closed, or its
-// issue closed (S2).
-const Keep = 7 * 24 * time.Hour
+// KeepClosed is the least an entry stays after its PR merged or closed (and,
+// for a PR, until its ledger record is acked), or its issue closed (S2).
+const KeepClosed = 24 * time.Hour
+
+// The form's size: figaro's FormStateBudget is 192 KB for the whole form,
+// and the entries and this state share it. Past FormCapBytes the oldest merged or
+// closed entries go first (a PR's only once its ledger record is sent); if
+// that is not enough, new entries wait (Held) and the warn role is pinged
+// once. FormOverhead is the rest of the form (critic, harness, keys).
+const (
+	FormCapBytes = 150 << 10
+	FormOverhead = 4 << 10
+	budgetSlack  = 256
+)
 
 // MissingRetry is how long a linked number that did not read as an issue
 // waits before it is tried again.
@@ -81,7 +92,10 @@ type HubJob struct {
 		Params map[string]json.RawMessage `json:"params"`
 	} `json:"payload"`
 	Result struct {
-		OK *bool `json:"ok"`
+		OK               *bool           `json:"ok"`
+		Verdict          string          `json:"verdict"`
+		PassByDescendant json.RawMessage `json:"pass_by_descendant"`
+		CancelledBy      json.RawMessage `json:"cancelled_by"`
 	} `json:"result"`
 }
 
@@ -103,94 +117,176 @@ type Hub interface {
 	Tests(ctx context.Context, id int64) (n int, ok bool, err error)
 }
 
+// The entries are read by every studier of the scout's form (steward,
+// Knight, Secretary) and the whole form sits under figaro's FormStateBudget,
+// so their keys are short and empty values are left out. Times are unix
+// seconds. The key map (dashboard-steward read list, 2026-11-11, plus the
+// board-sync v2 brief's list):
+//
+//	pr:<n>    a author, t title, s state (OPEN MERGED CLOSED), d draft (1),
+//	          h head8, b base (absent: main), c checks {r rollup, p pass,
+//	          f fail, w pending, x failing names}, ar architect / lk lukas /
+//	          au automaton {v verdict, h head8 read (absent: h), at (ar only)},
+//	          th open threads, mg mergeable, ms merge_state (merged closed draft
+//	          unknown ready "waiting: <step>"), u updated, m merged, cr created,
+//	          rd ready for review (absent and not d: cr), ln [additions,
+//	          deletions], fk files kind (docs tests code), bj band jobs at h
+//	          [[job id, queue, verdict, tests_run?], ...]
+//	issue:<n> a author, t title, s state (OPEN CLOSED), l labels, u updated,
+//	          p parent issue, sub sub-issues, dg digests "body.checklist.labels.humans"
+
 // Verdict is one reviewer's latest verdict and the head it read.
 type Verdict struct {
-	Verdict string `json:"verdict"`
-	Head    string `json:"head,omitempty"` // 8 hex
-	At      string `json:"at,omitempty"`
+	Verdict string `json:"v"`
+	Head    string `json:"h,omitempty"` // 8 hex
+	At      int64  `json:"at,omitempty"`
 }
 
 // Checks is the checks summary of a PR's head.
 type Checks struct {
-	Rollup  string   `json:"rollup"`
-	Pass    int      `json:"pass"`
-	Fail    int      `json:"fail"`
-	Pending int      `json:"pending"`
-	Failing []string `json:"failing,omitempty"` // at most three names
+	Rollup  string   `json:"r"`
+	Pass    int      `json:"p,omitempty"`
+	Fail    int      `json:"f,omitempty"`
+	Pending int      `json:"w,omitempty"`
+	Failing []string `json:"x,omitempty"` // at most three names
 }
 
-// PREntry is a PR's entry (key pr:<n>): exactly the board-sync v2 field list.
+// PREntry is a PR's entry (key pr:<n>).
 type PREntry struct {
-	N          int      `json:"n"`
-	Kind       string   `json:"kind"` // pr
-	Author     string   `json:"author"`
-	Title      string   `json:"title"`
-	State      string   `json:"state"` // OPEN, MERGED, CLOSED
-	Draft      bool     `json:"draft"`
-	Head8      string   `json:"head8"`
-	Base       string   `json:"base"`
-	Checks     Checks   `json:"checks"`
-	Architect  *Verdict `json:"architect,omitempty"`
-	Lukas      *Verdict `json:"lukas,omitempty"`
-	Automaton  *Verdict `json:"automaton,omitempty"`
-	Threads    int      `json:"threads"` // open review threads
-	Mergeable  string   `json:"mergeable"`
-	UpdatedAt  string   `json:"updated_at"`
-	MergedAt   string   `json:"merged_at,omitempty"`
-	MergeState string   `json:"merge_state"` // merged, closed, draft, unknown, ready, or "waiting: <first unmet step>"
+	Author     string   `json:"a"`
+	Title      string   `json:"t"`
+	State      string   `json:"s"`
+	Draft      int      `json:"d,omitempty"` // 1 when draft
+	Head8      string   `json:"h"`
+	Base       string   `json:"b,omitempty"` // "" is main
+	Checks     Checks   `json:"c"`
+	Architect  *Verdict `json:"ar,omitempty"`
+	Lukas      *Verdict `json:"lk,omitempty"`
+	Automaton  *Verdict `json:"au,omitempty"`
+	Threads    int      `json:"th,omitempty"`
+	Mergeable  string   `json:"mg"`
+	MergeState string   `json:"ms"`
+	Updated    int64    `json:"u"`
+	Merged     int64    `json:"m,omitempty"`
+	Created    int64    `json:"cr,omitempty"`
+	Ready      int64    `json:"rd,omitempty"`
+	Lines      [2]int   `json:"ln"`
+	FilesKind  string   `json:"fk,omitempty"`
+	Band       []Band   `json:"bj,omitempty"`
+}
+
+// MarshalJSON writes a band job as [id, queue, verdict] or [id, queue, verdict, tests_run].
+func (b Band) MarshalJSON() ([]byte, error) {
+	if b.Tests != nil {
+		return json.Marshal([]any{b.ID, b.Queue, b.Verdict, *b.Tests})
+	}
+	return json.Marshal([]any{b.ID, b.Queue, b.Verdict})
+}
+
+// Band is one band job's evidence at the head (h): the newest per queue and
+// tests param, as the band-jobs step reads them.
+type Band struct {
+	ID      int64  `json:"i"`
+	Queue   string `json:"q"` // without aether.
+	Verdict string `json:"v,omitempty"`
+	Tests   *int   `json:"n,omitempty"` // tests_run, when the hub has counted
+}
+
+// bandOf is the evidence: the newest job per (queue, tests param) of the fast queues, at most six.
+func bandOf(js headJobs) []Band {
+	seen := map[string]bool{}
+	var out []Band
+	for _, j := range js.jobs {
+		k := j.Queue + "|" + j.Tests
+		if seen[k] || !contains(mergecheck.FastJobs, j.Queue) || len(out) == 6 {
+			continue
+		}
+		seen[k] = true
+		b := Band{ID: j.ID, Queue: strings.TrimPrefix(j.Queue, "aether."), Verdict: j.Verdict}
+		if j.Tests != "" {
+			b.Queue += "(" + j.Tests + ")"
+		}
+		if n, ok := js.tests[j.ID]; ok {
+			b.Tests = &n
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // IssueEntry is an issue's entry (key issue:<n>).
 type IssueEntry struct {
-	N         int          `json:"n"`
-	Kind      string       `json:"kind"` // issue
-	Author    string       `json:"author"`
-	Title     string       `json:"title"`
-	State     string       `json:"state"` // OPEN, CLOSED
-	Labels    []string     `json:"labels"`
-	UpdatedAt string       `json:"updated_at"`
-	Digests   IssueDigests `json:"digests"`
+	Author  string   `json:"a"`
+	Title   string   `json:"t"`
+	State   string   `json:"s"`
+	Labels  []string `json:"l"`
+	Updated int64    `json:"u"`
+	Parent  int      `json:"p,omitempty"`
+	Subs    []int    `json:"sub,omitempty"`
+	Digests string   `json:"dg"`
 }
 
 // IssueDigests are what a material change is measured on (S5): the body
 // without its checklist, the checklist (both over the body with every
-// plan-sync block stripped), the labels (8-byte hex digests), and the count
-// of recent human comments (not a bot).
+// plan-sync block stripped), the labels (8-hex digests), and the count of
+// recent human comments (not a bot).
 type IssueDigests struct {
-	Body          string `json:"body"`
-	Checklist     string `json:"checklist"`
-	Labels        string `json:"labels"`
-	HumanComments int    `json:"human_comments"`
+	Body          string `json:"b"`
+	Checklist     string `json:"c"`
+	Labels        string `json:"l"`
+	HumanComments int    `json:"n,omitempty"`
+}
+
+// String is the digests as an entry carries them: body.checklist.labels.humans.
+func (d IssueDigests) String() string {
+	return fmt.Sprintf("%s.%s.%s.%d", d.Body, d.Checklist, d.Labels, d.HumanComments)
+}
+
+// MarshalText and UnmarshalText keep the digests in the state as that string.
+func (d IssueDigests) MarshalText() ([]byte, error) { return []byte(d.String()), nil }
+
+func (d *IssueDigests) UnmarshalText(b []byte) error {
+	parts := strings.Split(string(b), ".")
+	if len(parts) != 4 {
+		*d = IssueDigests{}
+		return nil
+	}
+	n, _ := strconv.Atoi(parts[3])
+	*d = IssueDigests{Body: parts[0], Checklist: parts[1], Labels: parts[2], HumanComments: n}
+	return nil
 }
 
 // PRKey and IssueKey are the role-form keys of an entry.
 func PRKey(n int) string    { return "pr:" + strconv.Itoa(n) }
 func IssueKey(n int) string { return "issue:" + strconv.Itoa(n) }
 
-// TrackedPR is what the state keeps per tracked PR between passes.
+// TrackedPR is what the state keeps per tracked PR between passes, kept small:
+// it sits on the same form as the entries.
 type TrackedPR struct {
-	Author   string `json:"a,omitempty"`
-	Title    string `json:"t,omitempty"`
-	State    string `json:"s"` // OPEN, MERGED, CLOSED
-	Head     string `json:"h"`
-	Entry    string `json:"e"`           // digest of the entry last written
-	Jobs     string `json:"j,omitempty"` // digest of the band jobs + counts the checklist last saw
-	Marks    string `json:"m,omitempty"` // digest of the owner marks the checklist last saw
-	Settling bool   `json:"r,omitempty"` // checks pending or mergeability unknown: re-read next pass
-	Links    []int  `json:"l,omitempty"` // issue numbers its body links
-	Done     string `json:"z,omitempty"` // merged_at or closed_at
-	Outbox   string `json:"o,omitempty"` // when the ledger record was last sent (RFC 3339)
-	Record   string `json:"rh,omitempty"`
-	Acked    string `json:"k,omitempty"` // the record hash the steward acked
+	State    string `json:"s"`              // OPEN, MERGED, CLOSED
+	Head     string `json:"h"`              // 12 hex
+	Entry    string `json:"e"`              // digest of the entry last written
+	Inputs   string `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
+	Settling bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
+	Owner    string `json:"o,omitempty"`    // its owner role (S5), resolved when last read
+	Links    []int  `json:"l,omitempty"`    // issue numbers its body links
+	Size     int    `json:"b,omitempty"`    // bytes of its entry on the form
+	Held     bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
+	Done     int64  `json:"z,omitempty"`    // merged or closed (unix)
+	Outbox   int64  `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
+	Record   string `json:"rh,omitempty"`   // that record's hash, 16 hex
+	Acked    bool   `json:"k,omitempty"`    // the steward acked that record
 }
 
 // TrackedIssue is what the state keeps per tracked issue.
 type TrackedIssue struct {
 	State     string       `json:"s"`
 	Entry     string       `json:"e"`
-	Done      string       `json:"z,omitempty"` // closed_at
-	D         IssueDigests `json:"d"`
-	LastHuman string       `json:"h,omitempty"` // the newest human comment's time
+	Done      int64        `json:"z,omitempty"`  // closed (unix)
+	D         IssueDigests `json:"d"`            // as the entry's dg string
+	LastHuman int64        `json:"hh,omitempty"` // the newest human comment's time (unix)
+	Size      int          `json:"b,omitempty"`
+	Held      bool         `json:"held,omitempty"`
 }
 
 // State is the plugin's opaque state (critic runtime.scout).
@@ -198,14 +294,19 @@ type State struct {
 	Cursor  string                `json:"cursor,omitempty"`
 	PRs     map[int]*TrackedPR    `json:"prs,omitempty"`
 	Issues  map[int]*TrackedIssue `json:"issues,omitempty"`
-	Skip    map[int]string        `json:"skip,omitempty"`    // untracked PR -> the head whose files missed the filter
-	Missing map[int]string        `json:"missing,omitempty"` // linked number that is not a readable issue -> when tried
+	Skip    map[int]string        `json:"skip,omitempty"`    // untracked PR -> the head (12 hex) whose files missed the filter
+	Missing map[int]int64         `json:"missing,omitempty"` // linked number that is not a readable issue -> when tried (unix)
 	Tests   map[int64]int         `json:"tests,omitempty"`   // known test counts by job id (a done job's count never changes)
 	Queue   []plugin.Ping         `json:"queue,omitempty"`   // issue pings beyond MaxIssuePings, oldest first
+	Warned  bool                  `json:"warned,omitempty"`  // the warn role was pinged: open entries alone are past the cap
+	Warning string                `json:"warning,omitempty"` // digest of the warning key last written
+	NoSubs  bool                  `json:"nosubs,omitempty"`  // the forge has no sub-issues: they are not asked for
+	Filter  string                `json:"filter,omitempty"`  // digest of the repo, authors and relevance filter the cursor was read under
 }
 
 // Pass is one round's inputs.
 type Pass struct {
+	Cap    int // the form's cap in bytes (0: FormCapBytes)
 	Watch  model.ScoutWatch
 	Inputs map[string]json.RawMessage
 	Board  map[string]json.RawMessage
@@ -221,6 +322,7 @@ type Result struct {
 	Forms   []plugin.FormWrite
 	Pings   []plugin.Ping
 	GHCalls int
+	added   []string // entry keys written for the first time this pass
 	Log     []string
 }
 
@@ -248,10 +350,11 @@ func (m matcher) quick(title string, labels []string) bool {
 // Run is one pass.
 func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, error) {
 	st := prev
-	for _, m := range []*map[int]string{&st.Skip, &st.Missing} {
-		if *m == nil {
-			*m = map[int]string{}
-		}
+	if st.Skip == nil {
+		st.Skip = map[int]string{}
+	}
+	if st.Missing == nil {
+		st.Missing = map[int]int64{}
 	}
 	if st.PRs == nil {
 		st.PRs = map[int]*TrackedPR{}
@@ -286,13 +389,29 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		logf("no merge policy on the inputs form (key rule): merge_state not computed")
 	}
 
+	// A changed filter (repo, authors, labels, title, paths) re-reads every open item: an untouched PR that the new
+	// filter takes in would never come back through updated>=cursor. Its path verdicts were the old filter's.
+	cursor := prev.Cursor
+	if fd := digest([]any{in.Watch.Repo, in.Watch.Authors, in.Watch.Labels, in.Watch.TitleMatch, in.Watch.Paths}); fd != st.Filter {
+		if st.Filter != "" {
+			logf("filter changed: full re-read of every open PR and issue")
+		}
+		cursor, st.Filter, st.Skip = "", fd, map[int]string{}
+	}
+
 	// 1. the catch-up search: one call, one alias per author.
 	start := in.Now.UTC()
 	fresh := map[int]PR{}
 	freshIssues := map[int]Issue{}
 	var after map[int]string
 	for page := 0; page < 20; page++ {
-		data, err := call(searchQuery(in.Watch.Repo, in.Watch.Authors, prev.Cursor, after))
+		data, err := call(searchQuery(in.Watch.Repo, in.Watch.Authors, cursor, after, !st.NoSubs))
+		if err != nil && !st.NoSubs && noSubIssues(err) {
+			// A forge without sub-issues: say so once, ask without them from now on.
+			st.NoSubs = true
+			logf("the forge has no sub-issues (%v): issue entries carry no p/sub", err)
+			data, err = call(searchQuery(in.Watch.Repo, in.Watch.Authors, cursor, after, false))
+		}
 		if err != nil {
 			return res, fmt.Errorf("search: %w", err)
 		}
@@ -329,7 +448,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			continue
 		}
 		hit := m.quick(p.Title, p.Labels)
-		if !hit && f.HasPaths() && st.Skip[n] != p.Facts.Oid {
+		if !hit && f.HasPaths() && st.Skip[n] != cut(p.Facts.Oid, 12) {
 			files, more := p.Files, p.FilesMore
 			hit = f.PathHit(files)
 			for pg := 0; !hit && more != "" && pg < MaxFilePages; pg++ {
@@ -343,7 +462,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 				hit = f.PathHit(files)
 			}
 			if !hit && p.Facts.State == "OPEN" {
-				st.Skip[n] = p.Facts.Oid
+				st.Skip[n] = cut(p.Facts.Oid, 12)
 			}
 		}
 		if !hit {
@@ -364,7 +483,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 	for _, p := range fresh {
-		heads[p.Facts.Oid] = true
+		heads[cut(p.Facts.Oid, 12)] = true
 	}
 	jobs := map[string][]mergecheck.Job{}
 	if hub != nil {
@@ -373,18 +492,22 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			logf("band hub: %v (band jobs unknown this pass)", err)
 		}
 		for _, j := range hj {
-			sha := j.param("sha")
+			sha := cut(j.param("sha"), 12)
 			if !heads[sha] || !strings.HasPrefix(j.Queue, "aether.") {
 				continue
 			}
-			mj := mergecheck.Job{ID: j.ID, Queue: j.Queue, Tests: j.param("tests"), State: j.State}
-			switch {
-			case j.State == "done" && j.Result.OK != nil && *j.Result.OK:
-				mj.Verdict = "PASS"
-			case j.State == "done" || j.State == "failed":
-				mj.Verdict = "FAIL"
-			case j.State == "cancelled" || j.State == "superseded":
+			if present(j.Result.CancelledBy) || j.State == "cancelled" {
 				continue
+			}
+			// As minister-control graph.py: the hub's verdict, else PASS when ok or passed by a descendant (a
+			// check-ni a descendant head passed counts at this head), else FAIL when failed or dead, else none yet.
+			mj := mergecheck.Job{ID: j.ID, Queue: j.Queue, Tests: j.param("tests"), State: j.State, Verdict: j.Result.Verdict}
+			switch {
+			case mj.Verdict != "":
+			case j.Result.OK != nil && *j.Result.OK || present(j.Result.PassByDescendant):
+				mj.Verdict = "PASS"
+			case j.State == "failed" || j.State == "dead":
+				mj.Verdict = "FAIL"
 			}
 			if mj.Verdict == "PASS" && contains(mergecheck.TestJobs, j.Queue) {
 				if _, known := st.Tests[j.ID]; !known {
@@ -404,13 +527,13 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if _, ok := fresh[n]; ok || t.State != "OPEN" {
 			continue
 		}
-		if t.Settling || t.Jobs != digest(jobsFor(jobs, st.Tests, t.Head)) || t.Marks != digest(marks.of(n)) {
+		if t.Settling || t.Held || t.Inputs != digest([]any{jobsFor(jobs, st.Tests, t.Head), marks.of(n)}) {
 			reread = append(reread, n)
 		}
 	}
 	sort.Ints(reread)
 	for i := 0; i < len(reread); i += Batch {
-		data, err := call(batchQuery(in.Watch.Repo, reread[i:min(i+Batch, len(reread))], nil))
+		data, err := call(batchQuery(in.Watch.Repo, reread[i:min(i+Batch, len(reread))], nil, false))
 		if err != nil {
 			return res, fmt.Errorf("re-read: %w", err)
 		}
@@ -432,26 +555,31 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			st.PRs[n] = t
 		}
 		if p.Facts.State == "OPEN" && t.State != "" && t.State != "OPEN" {
-			t.Done, t.Outbox, t.Record, t.Acked = "", "", "", "" // reopened: a later close is a new record
+			t.Done, t.Outbox, t.Record, t.Acked = 0, 0, "", false // reopened: a later close is a new record
 		}
-		js := jobsFor(jobs, st.Tests, p.Facts.Oid)
+		head := cut(p.Facts.Oid, 12)
+		js := jobsFor(jobs, st.Tests, head)
 		mk := marks.of(n)
 		e := prEntry(p, pol, js, mk)
-		t.Author, t.Title, t.State, t.Head, t.Links = p.Author, p.Title, p.Facts.State, p.Facts.Oid, p.Links
-		t.Jobs, t.Marks, t.Settling = digest(js), digest(mk), settling(p)
+		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, roleOf(owners, p.Author, p.Title)
+		t.Inputs, t.Settling = digest([]any{js, mk}), settling(p)
 		if d := digest(e); d != t.Entry {
-			res.Set[PRKey(n)] = model.MustJSON(e)
-			t.Entry = d
+			raw := model.MustJSON(e)
+			if t.Entry == "" {
+				res.added = append(res.added, PRKey(n))
+			}
+			res.Set[PRKey(n)] = raw
+			t.Entry, t.Size, t.Held = d, entrySize(PRKey(n), raw), false
 		}
 		if p.Facts.State != "OPEN" {
-			t.Done = p.MergedAt
-			if t.Done == "" {
-				t.Done = p.ClosedAt
+			t.Done = unix(p.MergedAt)
+			if t.Done == 0 {
+				t.Done = unix(p.ClosedAt)
 			}
-			rec, h := record(in.Watch.Repo, e)
+			rec, h := record(in.Watch.Repo, n, e)
 			if h != t.Record {
 				res.Forms = append(res.Forms, outbox(n, rec))
-				t.Record, t.Outbox, t.Acked = h, in.Now.UTC().Format(time.RFC3339), ""
+				t.Record, t.Outbox, t.Acked = h, in.Now.Unix(), false
 				logf("PR #%d %s: ledger record to the outbox", n, strings.ToLower(p.Facts.State))
 			}
 		}
@@ -466,6 +594,11 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 	var want []int
+	for k, t := range st.Issues {
+		if t.Held { // new while the form was at its cap: read again for a place
+			want = append(want, k)
+		}
+	}
 	for k := range linked {
 		_, isPR := st.PRs[k]
 		_, seen := freshIssues[k]
@@ -478,9 +611,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	for i := 0; i < len(want); i += Batch {
 		part := want[i:min(i+Batch, len(want))]
 		for _, k := range part {
-			st.Missing[k] = in.Now.UTC().Format(time.RFC3339) // cleared below when it reads as an issue
+			st.Missing[k] = in.Now.Unix() // cleared below when it reads as an issue
 		}
-		data, err := call(batchQuery(in.Watch.Repo, nil, part))
+		data, err := call(batchQuery(in.Watch.Repo, nil, part, !st.NoSubs))
 		if err != nil {
 			logf("linked issues %v: %v (retried after %s)", part, err, MissingRetry)
 			continue
@@ -507,24 +640,28 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			st.Issues[n] = t
 		}
 		d, lastHuman := issueDigests(is)
-		e := IssueEntry{N: n, Kind: "issue", Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, UpdatedAt: is.Updated,
-			Digests: d}
+		e := IssueEntry{Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, Updated: unix(is.Updated),
+			Parent: is.Parent, Subs: is.Subs, Digests: d.String()}
 		if e.Labels == nil {
 			e.Labels = []string{}
 		}
 		if t.Entry != "" { // a baseline is never news
 			if what, by := material(t, is, d, lastHuman); len(what) > 0 {
-				pings = append(pings, issuePings(st.PRs, owners, is, what, by, logf)...)
+				pings = append(pings, issuePings(st.PRs, is, what, by, logf)...)
 			}
 		}
-		t.D, t.LastHuman = d, lastHuman
-		t.State, t.Done = is.State, ""
+		t.D, t.LastHuman = d, unix(lastHuman)
+		t.State, t.Done = is.State, 0
 		if is.State != "OPEN" {
-			t.Done = is.ClosedAt
+			t.Done = unix(is.ClosedAt)
 		}
 		if d := digest(e); d != t.Entry {
-			res.Set[IssueKey(n)] = model.MustJSON(e)
-			t.Entry = d
+			raw := model.MustJSON(e)
+			if t.Entry == "" {
+				res.added = append(res.added, IssueKey(n))
+			}
+			res.Set[IssueKey(n)] = raw
+			t.Entry, t.Size, t.Held = d, entrySize(IssueKey(n), raw), false
 		}
 	}
 	for k := range st.Missing {
@@ -535,37 +672,33 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 
 	res.Pings = queuePings(&st, pings, logf)
 
-	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member; the entry
-	// stays until Keep after the close.
+	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member.
 	acks := ledgerAcks(in.Inputs)
 	for _, n := range sortedKeys(st.PRs) {
 		t := st.PRs[n]
-		if t.State == "OPEN" || t.Record == "" || t.Acked == t.Record {
+		if t.State == "OPEN" || t.Record == "" || t.Acked {
 			continue
 		}
 		a, ok := acks[n]
-		if !ok || !later(a.At, t.Outbox) || a.Hash != "" && a.Hash != t.Record {
+		if !ok || unix(a.At) <= t.Outbox || a.Hash != "" && !strings.HasPrefix(a.Hash, t.Record) {
 			continue
 		}
-		t.Acked = t.Record
+		t.Acked = true
 		res.Forms = append(res.Forms, outbox(n, nil))
 		logf("PR #%d: ledger record acked (%s), outbox member cleared", n, a.Sha)
 	}
 
-	// S2: prune Keep after the close.
+	// S2: a merged or closed PR's entry stays until its ledger record is acked, and at least KeepClosed; a closed
+	// issue's KeepClosed.
+	now := in.Now.Unix()
 	for _, n := range sortedKeys(st.PRs) {
-		t := st.PRs[n]
-		if t.State == "OPEN" || !older(t.Done, in.Now, Keep) {
-			continue
+		if t := st.PRs[n]; t.State != "OPEN" && t.Acked && now-t.Done > int64(KeepClosed/time.Second) {
+			res.Unset = append(res.Unset, PRKey(n))
+			delete(st.PRs, n)
 		}
-		res.Unset = append(res.Unset, PRKey(n))
-		if t.Record != "" && t.Acked != t.Record {
-			logf("PR #%d: pruned %s after close with its ledger record unacked (left in the outbox)", n, Keep)
-		}
-		delete(st.PRs, n)
 	}
 	for _, n := range sortedKeys(st.Issues) {
-		if t := st.Issues[n]; t.State != "OPEN" && older(t.Done, in.Now, Keep) {
+		if t := st.Issues[n]; t.State != "OPEN" && t.Done > 0 && now-t.Done > int64(KeepClosed/time.Second) {
 			res.Unset = append(res.Unset, IssueKey(n))
 			delete(st.Issues, n)
 		}
@@ -584,6 +717,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)
+	budget(&st, &res, in, logf)
 	res.State = st
 	return res, nil
 }
@@ -591,21 +725,41 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREntry {
 	var steps []mergecheck.Row
 	if p.Facts.State == "OPEN" && len(pol.Steps) > 0 {
-		steps = mergecheck.Checklist(pol, p.Facts, js.jobs, mk, js.tests, p.Arch)
+		steps = mergecheck.Checklist(pol, p.Facts, js.jobs, mk, js.tests, p.Arch, p.KindFiles())
 	}
-	e := PREntry{N: p.Number, Kind: "pr", Author: p.Author, Title: p.Title, State: p.Facts.State, Draft: p.Facts.Draft,
-		Head8: short(p.Facts.Oid), Base: p.Base, Checks: checksOf(p), Threads: p.Facts.Unresolved, Mergeable: p.Facts.Mergeable,
-		UpdatedAt: p.Updated, MergedAt: p.MergedAt, MergeState: mergecheck.StateOf(&p.Facts, steps), Automaton: p.Automaton}
+	head8 := short(p.Facts.Oid)
+	at := func(sha string) string { // a verdict at the entry's own head leaves h out
+		if s := short(sha); s != head8 {
+			return s
+		}
+		return ""
+	}
+	e := PREntry{Author: p.Author, Title: p.Title, State: p.Facts.State, Head8: head8, Base: p.Base,
+		Checks: checksOf(p), Threads: p.Facts.Unresolved, Mergeable: p.Facts.Mergeable, MergeState: mergecheck.StateOf(&p.Facts, steps),
+		Automaton: p.Automaton, Updated: unix(p.Updated), Merged: unix(p.MergedAt), Created: unix(p.Created), Ready: unix(p.ReadyAt),
+		Lines: [2]int{p.Additions, p.Deletions}, FilesKind: mergecheck.KindOf(p.KindFiles()), Band: bandOf(js)}
+	if e.Base == "main" {
+		e.Base = ""
+	}
+	if e.Ready == e.Created && !p.Facts.Draft {
+		e.Ready = 0 // ready when created
+	}
+	if p.Facts.Draft {
+		e.Draft = 1
+	}
+	if v := e.Automaton; v != nil {
+		e.Automaton = &Verdict{Verdict: v.Verdict, Head: at(v.Head)}
+	}
 	if a := p.Arch; a != nil {
-		v := &Verdict{Verdict: a.Verdict, Head: short(a.Sha), At: a.At}
+		v := &Verdict{Verdict: a.Verdict, Head: at(a.Sha), At: unix(a.At)}
 		if a.Hold {
-			v.Verdict, v.At = "hold", a.HoldAt
+			v.Verdict, v.At = "hold", unix(a.HoldAt)
 		}
 		e.Architect = v
 	}
 	for _, r := range p.Facts.Reviews {
 		if strings.EqualFold(r.Login, mergecheck.Lukas) {
-			e.Lukas = &Verdict{Verdict: r.State, Head: short(r.Oid)}
+			e.Lukas = &Verdict{Verdict: r.State, Head: at(r.Oid)}
 		}
 	}
 	return e
@@ -643,13 +797,14 @@ func outbox(n int, rec json.RawMessage) plugin.FormWrite {
 }
 
 // record is the ledger record of a merged or closed PR, its final entry, and
-// its hash (sha256 of the record without the hash, hex).
-func record(repo string, e PREntry) (json.RawMessage, string) {
-	r := map[string]any{"kind": "pr-final", "repo": repo, "pr": e.N, "entry": e}
+// its hash (sha256 of the record without the hash, hex; the state keeps 16
+// hex of it and an ack matches on that prefix).
+func record(repo string, n int, e PREntry) (json.RawMessage, string) {
+	r := map[string]any{"kind": "pr-final", "repo": repo, "pr": n, "entry": e}
 	b := model.MustJSON(r)
 	h := sha256.Sum256(b)
 	r["hash"] = hex.EncodeToString(h[:])
-	return model.MustJSON(r), r["hash"].(string)
+	return model.MustJSON(r), r["hash"].(string)[:16]
 }
 
 type ack struct {
@@ -672,23 +827,28 @@ func ledgerAcks(inputs map[string]json.RawMessage) map[int]ack {
 }
 
 // later says whether RFC 3339 time a is after b (false when either is unreadable).
-func later(a, b string) bool {
-	ta, err1 := time.Parse(time.RFC3339, a)
-	tb, err2 := time.Parse(time.RFC3339, b)
-	return err1 == nil && err2 == nil && ta.After(tb)
+func unix(rfc3339 string) int64 {
+	t, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return 0
+	}
+	return t.Unix()
 }
 
-// older says whether RFC 3339 time at is more than d before now (false when unreadable).
-func older(at string, now time.Time, d time.Duration) bool {
-	t, err := time.Parse(time.RFC3339, at)
-	return err == nil && now.Sub(t) > d
+// retry says whether a number last tried at may be tried again (never tried, or MissingRetry ago).
+func retry(at int64, now time.Time) bool {
+	return at == 0 || now.Unix()-at >= int64(MissingRetry/time.Second)
 }
 
-// retry says whether a number last tried at may be tried again (never tried, unreadable, or MissingRetry ago).
-func retry(at string, now time.Time) bool {
-	t, err := time.Parse(time.RFC3339, at)
-	return at == "" || err != nil || now.Sub(t) >= MissingRetry
+func cut(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
+
+// entrySize is what an entry costs on the form: its key and its value.
+func entrySize(key string, raw json.RawMessage) int { return len(key) + len(raw) + 4 }
 
 func contains(list []string, s string) bool {
 	for _, x := range list {
@@ -811,10 +971,11 @@ func (m marks) of(n int) mergecheck.Marks {
 	return mergecheck.Marks{Row: pick(m.rows[n]), Item: pick(m.items[n])}
 }
 
+// digest is 8 hex of a value's sha256: enough to tell a change, small on the form.
 func digest(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:8])
+	return hex.EncodeToString(h[:4])
 }
 
 // S5: issue changes to the owners of the PRs linking them.
@@ -854,9 +1015,9 @@ func CheckOwners(rules []model.OwnerRule) error {
 }
 
 // roleOf is the owner role of a PR: the first rule matching its author (and title), or "".
-func roleOf(owners []owner, t *TrackedPR) string {
+func roleOf(owners []owner, author, title string) string {
 	for _, o := range owners {
-		if strings.EqualFold(o.author, t.Author) && (o.title == nil || o.title.MatchString(t.Title)) {
+		if strings.EqualFold(o.author, author) && (o.title == nil || o.title.MatchString(title)) {
 			return o.role
 		}
 	}
@@ -952,7 +1113,7 @@ func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman string) ([]st
 	if is.State != t.State {
 		add("state "+strings.ToLower(is.State), is.StateBy)
 	}
-	if lastHuman > t.LastHuman {
+	if unix(lastHuman) > t.LastHuman {
 		for i := len(is.Comments) - 1; i >= 0; i-- {
 			if c := is.Comments[i]; c.At == lastHuman {
 				add("comment", c.By)
@@ -964,7 +1125,7 @@ func material(t *TrackedIssue, is Issue, d IssueDigests, lastHuman string) ([]st
 }
 
 // issuePings are one line per owner role of the open tracked PRs linking the issue.
-func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []string, logf func(string, ...any)) []plugin.Ping {
+func issuePings(prs map[int]*TrackedPR, is Issue, what, by []string, logf func(string, ...any)) []plugin.Ping {
 	byRole := map[string][]string{}
 	var roles []string
 	for _, n := range sortedKeys(prs) {
@@ -972,9 +1133,9 @@ func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []str
 		if t.State != "OPEN" || !containsInt(t.Links, is.Number) {
 			continue
 		}
-		role := roleOf(owners, t)
+		role := t.Owner
 		if role == "" {
-			logf("issue #%d changed: PR #%d (%s) has no owner rule", is.Number, n, t.Author)
+			logf("issue #%d changed: PR #%d has no owner rule", is.Number, n)
 			continue
 		}
 		if _, ok := byRole[role]; !ok {
@@ -1030,4 +1191,122 @@ func oneLine(s string) string {
 		s = s[:399] + "~"
 	}
 	return s
+}
+
+// budget keeps the form under its cap (FormCapBytes). Past it, the oldest merged or closed
+// entries go first (a PR's only once its ledger record is sent: the record
+// outlives the entry); if that is not enough, entries new this pass wait
+// (Held, re-read on later passes). The warning key says so while it lasts,
+// and the warn role is pinged once when open entries alone pass the cap.
+func budget(st *State, res *Result, in Pass, logf func(string, ...any)) {
+	limit := in.Cap
+	if limit <= 0 {
+		limit = FormCapBytes
+	}
+	// The bookkeeping of a pruning pass (held flags, the warning digest) adds a little to the state: aim that much under.
+	size := func() (int, int) { t, o := FormSize(st); return t + budgetSlack, o }
+	total, open := size()
+	var pruned, held []string
+	if total > limit {
+		type cand struct {
+			key  string
+			done int64
+			drop func()
+		}
+		var cs []cand
+		for n, t := range st.PRs {
+			if t.State != "OPEN" && t.Record != "" && t.Size > 0 {
+				n := n
+				cs = append(cs, cand{PRKey(n), t.Done, func() { delete(st.PRs, n) }})
+			}
+		}
+		for n, t := range st.Issues {
+			if t.State != "OPEN" && t.Size > 0 {
+				n := n
+				cs = append(cs, cand{IssueKey(n), t.Done, func() { delete(st.Issues, n) }})
+			}
+		}
+		sort.Slice(cs, func(i, j int) bool {
+			if cs[i].done != cs[j].done {
+				return cs[i].done < cs[j].done
+			}
+			return cs[i].key < cs[j].key
+		})
+		for _, c := range cs {
+			if total, _ = size(); total <= limit {
+				break
+			}
+			c.drop()
+			delete(res.Set, c.key)
+			res.Unset = append(res.Unset, c.key)
+			pruned = append(pruned, c.key)
+		}
+	}
+	if total, _ = size(); total > limit {
+		for i := len(res.added) - 1; i >= 0 && total > limit; i-- {
+			key := res.added[i]
+			kind, num, _ := strings.Cut(key, ":")
+			n, _ := strconv.Atoi(num)
+			if kind == "pr" {
+				if t := st.PRs[n]; t != nil {
+					t.Entry, t.Size, t.Held = "", 0, true
+				}
+			} else if t := st.Issues[n]; t != nil {
+				t.Entry, t.Size, t.Held = "", 0, true
+			}
+			delete(res.Set, key)
+			held = append(held, key)
+			total, _ = size()
+		}
+	}
+	total, open = size()
+	warning := ""
+	if len(pruned) > 0 || len(held) > 0 || total > limit {
+		warning = fmt.Sprintf("form ~%d KB, cap %d KB: %d merged/closed entr(y/ies) pruned oldest first, %d new held back this pass",
+			total>>10, limit>>10, len(pruned), len(held))
+		logf("%s (pruned %v, held %v)", warning, pruned, held)
+	}
+	if d := digest(warning); d != st.Warning {
+		if warning == "" {
+			res.Unset = append(res.Unset, "warning")
+		} else {
+			res.Set["warning"] = model.MustJSON(map[string]string{"at": in.Now.UTC().Format(time.RFC3339), "text": warning})
+		}
+		st.Warning = d
+	}
+	switch {
+	case open > limit && !st.Warned && in.Watch.WarnTo != "":
+		res.Pings = append(res.Pings, plugin.Ping{To: in.Watch.WarnTo, Text: oneLine(fmt.Sprintf(
+			"scout: open entries alone are ~%d KB, past the %d KB form cap; new entries are held back (key warning)", open>>10, limit>>10))})
+		st.Warned = true
+	case open <= limit*9/10:
+		st.Warned = false
+	}
+}
+
+// present says whether a JSON value is there and truthy (not null, false, 0, "" or empty).
+func present(raw json.RawMessage) bool {
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", "false", "0", `""`, "{}", "[]":
+		return false
+	}
+	return true
+}
+
+// FormSize is what the scout puts on its form: every entry, its own state
+// and FormOverhead; and the open entries alone.
+func FormSize(st *State) (total, open int) {
+	for _, t := range st.PRs {
+		total += t.Size
+		if t.State == "OPEN" {
+			open += t.Size
+		}
+	}
+	for _, t := range st.Issues {
+		total += t.Size
+		if t.State == "OPEN" {
+			open += t.Size
+		}
+	}
+	return total + len(model.MustJSON(st)) + FormOverhead, open
 }

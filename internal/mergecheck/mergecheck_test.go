@@ -9,8 +9,9 @@ import (
 	"testing"
 )
 
-// golden.json was produced by minister-control's states.py (e65964c) over the live policy file and 21 cases: the
-// Go port must give byte-for-byte the same checklist rows and the same state for every one.
+// golden.json was produced by minister-control's states.py (846872c) over the policy file and 34 cases
+// (testdata/gen_golden.py): the Go port must give byte-for-byte the same checklist rows and the same state for every
+// one.
 type goldenCase struct {
 	Name  string           `json:"name"`
 	Facts Facts            `json:"facts"`
@@ -19,6 +20,7 @@ type goldenCase struct {
 	Item  map[string]any   `json:"item"`
 	Tests map[string]int   `json:"tests"`
 	Arch  *Arch            `json:"arch"`
+	Files []string         `json:"files"` // null: not known
 	Steps *json.RawMessage `json:"steps"`
 	State string           `json:"state"`
 }
@@ -37,7 +39,7 @@ func loadGolden(t *testing.T) (string, Check, []goldenCase) {
 	if err := json.Unmarshal(b, &g); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Cases) < 20 || len(g.Rule) < 500 {
+	if len(g.Cases) < 30 || len(g.Rule) < 500 {
 		t.Fatalf("golden too small: %d cases, rule %d B: an empty input proves nothing", len(g.Cases), len(g.Rule))
 	}
 	return g.Rule, g.SelfCheck, g.Cases
@@ -71,7 +73,7 @@ func TestParityWithStatesPy(t *testing.T) {
 		}
 		var steps []Row
 		if c.Facts.Heavy && c.Facts.State == "OPEN" {
-			steps = Checklist(p, c.Facts, c.Jobs, Marks{Row: c.Row, Item: c.Item}, tests, c.Arch)
+			steps = Checklist(p, c.Facts, c.Jobs, Marks{Row: c.Row, Item: c.Item}, tests, c.Arch, c.Files)
 		}
 		want := "null"
 		if c.Steps != nil {
@@ -86,22 +88,43 @@ func TestParityWithStatesPy(t *testing.T) {
 	}
 }
 
-// The one deliberate difference from states.py: a test-running job's PASS with an UNKNOWN test count (the hub's
-// /jobs/<id>/tests has not answered) is pending, never a pass. A known count passes; 0 tests fails.
-func TestUnknownTestCountNeverPasses(t *testing.T) {
+// The required band jobs are the policy's, parsed from the band-jobs step: today's text requires check-ni only
+// (clippy-pr is exempt for an open PR head, the gates are opt-in); the text of the morning (check-ni + clippy-pr at the
+// head) requires both, and the checklist follows whichever text it is given.
+func TestRequiredJobsFollowTheRule(t *testing.T) {
 	rule, _, _ := loadGolden(t)
-	p := Parse(rule)
+	if got := strings.Join(RequiredJobs(Parse(rule)), " "); got != "aether.check-ni" {
+		t.Fatalf("today's rule requires %q", got)
+	}
+	morning := "# M\n\nintro\n\n## band-jobs: band jobs\n1. Band runs fast pre-checks only: aether.check-ni (compile incl. tests) + " +
+		"aether.clippy-pr at the head. Read the result on every PASS. gate-ext / decision-build are opt-in, never a default merge requirement.\n"
+	p := Parse(morning)
+	if got := strings.Join(RequiredJobs(p), " "); got != "aether.check-ni aether.clippy-pr" {
+		t.Fatalf("morning rule requires %q", got)
+	}
 	f := Facts{Oid: "abc", State: "OPEN", Heavy: true}
-	jobs := []Job{{ID: 7, Queue: "aether.gate-kit", Verdict: "PASS"}}
-	row := Checklist(p, f, jobs, Marks{}, nil, nil)[0]
-	if row.ID != "band-jobs" || row.OK || row.Status != "pending" || !strings.Contains(row.Note, "tests not read yet") {
-		t.Fatalf("unknown count: %+v", row)
+	ni := []Job{{ID: 1, Queue: "aether.check-ni", Verdict: "PASS"}}
+	if row := Checklist(p, f, ni, Marks{}, nil, nil, []string{"a.rs"})[0]; row.OK || !strings.Contains(row.Note, "clippy-pr: not run on this head") {
+		t.Fatalf("morning rule without clippy-pr: %+v", row)
 	}
-	if row := Checklist(p, f, jobs, Marks{}, map[int64]int{7: 31}, nil)[0]; !row.OK || !strings.Contains(row.Note, "31 tests") {
-		t.Fatalf("known count: %+v", row)
+	if row := Checklist(Parse(rule), f, ni, Marks{}, nil, nil, []string{"a.rs"})[0]; !row.OK {
+		t.Fatalf("today's rule with check-ni PASS: %+v", row)
 	}
-	if row := Checklist(p, f, jobs, Marks{}, map[int64]int{7: 0}, nil)[0]; row.OK || row.Status != "no" {
-		t.Fatalf("zero tests: %+v", row)
+	// A queue the rule makes required is required, fast or not.
+	lints := Parse("# M\n\nintro\n\n## band-jobs: band jobs\naether.check-ni + aether.decision-build at the head.\n")
+	if got := strings.Join(RequiredJobs(lints), " "); got != "aether.check-ni aether.decision-build" {
+		t.Fatalf("decision-build required: %q", got)
+	}
+	if row := Checklist(lints, f, ni, Marks{}, nil, nil, []string{"a.rs"})[0]; row.OK || !strings.Contains(row.Note, "decision-build: not run") {
+		t.Fatalf("decision-build missing: %+v", row)
+	}
+	db := append([]Job{{ID: 2, Queue: "aether.decision-build", Verdict: "PASS"}}, ni...)
+	if row := Checklist(lints, f, db, Marks{}, nil, nil, []string{"a.rs"})[0]; !row.OK {
+		t.Fatalf("decision-build PASS: %+v", row)
+	}
+	optin := "# M\n\nintro\n\n## band-jobs: band jobs\naether.check-ni at the head; aether.decision-build lints=1 is opt-in.\n"
+	if got := strings.Join(RequiredJobs(Parse(optin)), " "); got != "aether.check-ni" {
+		t.Fatalf("opt-in named: %q", got)
 	}
 }
 
@@ -109,7 +132,7 @@ func TestUnknownTestCountNeverPasses(t *testing.T) {
 // is reported.
 func TestPolicyDrift(t *testing.T) {
 	p := Parse("# Merge\n\nintro\n\n## threads: threads\nno open threads\n\n## new-step: something new\nprose\n\n## WHEN\nwhenever\n")
-	rows := Checklist(p, Facts{Oid: "h", State: "OPEN", Heavy: true}, nil, Marks{}, nil, nil)
+	rows := Checklist(p, Facts{Oid: "h", State: "OPEN", Heavy: true}, nil, Marks{}, nil, nil, nil)
 	if len(rows) != 2 || rows[1].Status != "manual" || !rows[1].OK || rows[0].Label != "threads" || p.Steps[0].Text != "no open threads" {
 		t.Fatalf("rows %+v steps %+v", rows, p.Steps)
 	}

@@ -31,6 +31,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	var owners ownerFlags
 	fs.Var(&owners, "owner", "AUTHOR[/TITLE_REGEX]=@ROLE, repeatable, first match wins: who gets a material change on an issue\n"+
 		"its PRs link (e.g. 'John-Kelliher/(?i)ledger=@<ledger lead>' before 'John-Kelliher=@<knight>')")
+	warn := fs.String("warn", "", "the role (@form) pinged once when open entries alone pass the form cap (the Decisions Minister)")
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 2*time.Minute, "poll interval")
 	_ = fs.Parse(args)
@@ -38,7 +39,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	sw := &model.ScoutWatch{Repo: *repo, Authors: splitList(*authors), Labels: splitList(*labels), TitleMatch: *title, Paths: splitList(*paths),
-		Owners: owners}
+		Owners: owners, WarnTo: *warn}
 	if len(sw.Authors) == 0 || !strings.Contains(sw.Repo, "/") {
 		return fmt.Errorf("--authors and --repo owner/name are required")
 	}
@@ -47,6 +48,9 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	}
 	if err := scout.CheckOwners(sw.Owners); err != nil {
 		return err
+	}
+	if sw.WarnTo != "" && !strings.HasPrefix(sw.WarnTo, "@") {
+		return fmt.Errorf("--warn %q: want a role form (@id)", sw.WarnTo)
 	}
 	for flag, v := range map[string]string{"--board": *board, "--inputs": *inputs} {
 		if !strings.HasPrefix(v, "@") {

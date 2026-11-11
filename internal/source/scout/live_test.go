@@ -78,7 +78,7 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 			t.Fatalf("no %s on the role form\n%s", k, out.String())
 		}
 	}
-	if keys["pr:103"] != nil || keys["issue:302"] != nil || !strings.Contains(string(keys["pr:101"]), `"merge_state":"`) {
+	if keys["pr:103"] != nil || keys["issue:302"] != nil || !strings.Contains(string(keys["pr:101"]), `"ms":"`) {
 		t.Fatalf("entries: pr:103 %s issue:302 %s pr:101 %s", keys["pr:103"], keys["issue:302"], keys["pr:101"])
 	}
 	if !load().Runtime.LastSuccess.Equal(now) {
@@ -169,7 +169,7 @@ func TestLiveIssueChangeReachesOwner(t *testing.T) {
 		t.Fatalf("sync pass: %v\n%s", err, out.String())
 	}
 	keys, _, _ := f.FormRaw(ctx, role)
-	if len(sent) != 0 || !strings.Contains(string(keys["issue:301"]), `"digests"`) {
+	if len(sent) != 0 || !strings.Contains(string(keys["issue:301"]), `"dg":"`) {
 		t.Fatalf("sync edit: sent %v, entry %s", sent, keys["issue:301"])
 	}
 

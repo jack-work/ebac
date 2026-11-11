@@ -3,7 +3,7 @@
 // each evaluated from facts, and one state per PR (draft, "waiting: <label>" of
 // the first unmet step, ready, merged, closed, unknown).
 //
-// It is a Go port of minister-control's states.py (dashboard-steward, e65964c),
+// It is a Go port of minister-control's states.py (dashboard-steward, 846872c),
 // which it replaces: ONE implementation (board-sync stage 1, 2026-11-10). The
 // policy text is parsed on every call, so the checklist cannot drift from it:
 // a policy step with no evaluator is "not automated" (never blocks, never
@@ -26,12 +26,78 @@ const (
 	Rust    = "Aether Rust PR Pipeline"
 )
 
-// FastJobs are the band-hub queues the band-jobs step waits on; TestJobs run
-// tests, so a PASS with 0 tests is no verdict.
+// FastJobs are the band-hub queues the band-jobs step reads; which of them
+// are required is the policy's (RequiredJobs), the rest are opt-in evidence.
+// TestJobs run tests (the hub's /jobs/<id>/tests counts them).
 var (
 	FastJobs = []string{"aether.check-ni", "aether.gate-kit", "aether.gate-ext", "aether.gate-services", "aether.clippy-pr"}
 	TestJobs = []string{"aether.gate-kit", "aether.gate-ext", "aether.gate-services"}
 )
+
+var jobRE = regexp.MustCompile(`aether\.[a-z0-9-]+`)
+
+// RequiredJobs are the band jobs the policy's band-jobs step requires at an
+// open PR head, parsed from its text: every aether.<queue> named in a clause
+// (split at ";" and ". ") that does not exempt it (a clause saying "not an
+// open PR head", "never" or "opt-in" names jobs that are not required).
+func RequiredJobs(p Policy) []string {
+	var text string
+	for _, s := range p.Steps {
+		if s.ID == "band-jobs" {
+			text = s.Text
+		}
+	}
+	var out []string
+	for _, sent := range strings.Split(text, ". ") {
+		for _, clause := range strings.Split(sent, ";") {
+			l := strings.ToLower(clause)
+			if strings.Contains(l, "not an open pr head") || strings.Contains(l, "never") || strings.Contains(l, "opt-in") {
+				continue
+			}
+			for _, q := range jobRE.FindAllString(clause, -1) {
+				if !in(q, out) {
+					out = append(out, q)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// KindOf is what a PR's changed files are (states.py _kind): docs when every
+// file is a doc, tests when every file is a doc or a test, else code; ""
+// when the files are not known (nil).
+func KindOf(files []string) string {
+	if files == nil {
+		return ""
+	}
+	doc := func(p string) bool {
+		return strings.HasSuffix(p, ".md") || strings.HasSuffix(p, ".txt") || strings.HasSuffix(p, ".rst") || strings.Contains("/"+p, "/docs/")
+	}
+	test := func(p string) bool {
+		for _, s := range []string{"_tests.rs", "_test.rs", "_test.py", ".test.ts"} {
+			if strings.HasSuffix(p, s) {
+				return true
+			}
+		}
+		return strings.Contains("/"+p, "/tests/") || strings.Contains("/"+p, "/test_")
+	}
+	all := func(f func(string) bool) bool {
+		for _, p := range files {
+			if !f(p) {
+				return false
+			}
+		}
+		return len(files) > 0
+	}
+	switch {
+	case all(doc):
+		return "docs"
+	case all(func(p string) bool { return doc(p) || test(p) }):
+		return "tests"
+	}
+	return "code"
+}
 
 // Step is one policy section.
 type Step struct {
@@ -111,6 +177,7 @@ type Facts struct {
 	Heavy      bool      `json:"heavy"` // full facts (checks, threads, reviews) were read
 	Mergeable  string    `json:"mergeable,omitempty"`
 	MergeState string    `json:"merge_state,omitempty"`
+	Review     string    `json:"review,omitempty"` // GitHub's review decision
 	Unresolved int       `json:"unresolved"`
 	Contexts   []Context `json:"contexts,omitempty"`
 	Reviews    []Review  `json:"reviews,omitempty"`
@@ -222,14 +289,20 @@ type ctx struct {
 	tests map[int64]int
 	head  string
 	arch  *Arch
+	files []string // nil: not known
+	need  []string // the required band jobs (RequiredJobs)
 }
 
 func evBandJobs(c ctx) res {
+	kind := KindOf(c.files)
+	if kind == "docs" {
+		return mk(true, "docs-only PR: no band job needed", "", nil, "")
+	}
 	type key struct{ q, t string }
 	latest := map[key]Job{}
 	var order []key
 	for _, j := range c.jobs { // newest first: one verdict per (queue, tests param)
-		if !in(j.Queue, FastJobs) {
+		if !in(j.Queue, FastJobs) && !in(j.Queue, c.need) {
 			continue
 		}
 		k := key{j.Queue, j.Tests}
@@ -238,46 +311,63 @@ func evBandJobs(c ctx) res {
 			order = append(order, k)
 		}
 	}
-	ok, pending := len(latest) > 0, false
-	var ev []string
-	for _, k := range order {
-		j := latest[k]
-		n, hasN := c.tests[j.ID]
-		name := strings.SplitN(j.Queue, ".", 2)[1]
-		if j.Tests != "" {
-			name += "(" + j.Tests + ")"
+	ok, pending := true, false
+	var ev, names []string
+	for _, q := range c.need {
+		name := strings.SplitN(q, ".", 2)[1]
+		names = append(names, name)
+		var j *Job
+		for _, k := range order {
+			if k.q == q {
+				jj := latest[k]
+				j = &jj
+				break
+			}
 		}
-		// A test-running job passes only with a KNOWN, non-zero test count (the hub's /jobs/<id>/tests; until it
-		// answers, the count is unknown and the job is pending, never a pass). states.py let an unknown count pass.
-		passed := j.Verdict == "PASS" && !(in(j.Queue, TestJobs) && (!hasN || n == 0))
-		if j.Verdict == "" || (j.Verdict == "PASS" && in(j.Queue, TestJobs) && !hasN) {
+		if j == nil {
+			ok = false
+			ev = append(ev, name+": not run on this head")
+			continue
+		}
+		if j.Verdict == "" {
 			pending = true
 		}
-		if !passed {
+		if j.Verdict != "PASS" {
 			ok = false
-		}
-		cnt := ""
-		switch {
-		case hasN:
-			cnt = fmt.Sprintf(", %d tests", n)
-		case in(j.Queue, TestJobs) && j.Verdict == "PASS":
-			cnt = ", tests not read yet"
 		}
 		v := j.Verdict
 		if v == "" {
 			v = j.State
 		}
-		ev = append(ev, fmt.Sprintf("job %d %s: %s%s", j.ID, name, v, cnt))
+		ev = append(ev, fmt.Sprintf("job %d %s: %s", j.ID, name, v))
 	}
-	note := strings.Join(ev, "; ")
-	if note == "" {
-		note = "no fast job on this head"
+	for _, k := range order { // opt-in targeted runs: evidence only, never a merge requirement
+		if in(k.q, c.need) {
+			continue
+		}
+		j := latest[k]
+		t := ""
+		if k.t != "" {
+			t = "(" + k.t + ")"
+		}
+		v := j.Verdict
+		if v == "" {
+			v = j.State
+		}
+		line := fmt.Sprintf("opt-in job %d %s%s: %s", j.ID, strings.SplitN(k.q, ".", 2)[1], t, v)
+		if n, has := c.tests[j.ID]; has {
+			line += fmt.Sprintf(", %d tests", n)
+		}
+		ev = append(ev, line)
 	}
+	need := strings.Join(names, " + ")
+	head := map[string]string{"tests": "tests-only PR: " + need + " only", "code": need + " at the head (clippy verdict = ADO Rust)",
+		"": need + " at the head (files not read yet)"}[kind]
 	st := ""
 	if !ok && pending {
 		st = "pending"
 	}
-	return mk(ok, note, "", ev, st)
+	return mk(ok, head+"; "+strings.Join(ev, "; "), "", ev, st)
 }
 
 func ctxLine(x Context) string {
@@ -490,51 +580,33 @@ func evLukasCarryover(c ctx) res {
 }
 
 func evNotified(c ctx) res {
-	n := c.marks.get("chiqun_notified")
-	if m, ok := n.(map[string]any); ok {
-		at, chat, fu := m["at"], m["chat"], m["followups"]
+	ms, rd := strings.ToUpper(c.f.MergeState), strings.ToUpper(c.f.Review)
+	ok := ms == "CLEAN" && rd == "APPROVED"
+	rds := strings.ReplaceAll(strings.ToLower(rd), "_", " ")
+	if rds == "" {
+		rds = "none"
+	}
+	note := fmt.Sprintf("GitHub: merge state %s, review decision %s", lowerOr(ms), rds)
+	if ok {
+		note += ": mergeable now, the owner merges it (squash)"
+	} else {
+		note += ": not mergeable yet"
+	}
+	if m, isMap := c.marks.get("chiqun_notified").(map[string]any); isMap {
+		at, chat := m["at"], m["chat"]
 		if at == nil {
 			at = "?"
 		}
 		if chat == nil {
 			chat = "?"
 		}
-		if fu == nil {
-			fu = 0
-		}
-		head, _ := m["head"].(string)
-		return mk(true, fmt.Sprintf("sent %v in %v; follow-ups %v", at, chat, num(fu)), head, nil, "")
+		note += fmt.Sprintf("; Chiqun FYI sent %v in %v", at, chat)
 	}
-	if truthy(n) {
-		return mk(true, fmt.Sprintf("sent: %v", n), "", nil, "")
+	st := ""
+	if !ok && (ms == "" || ms == "UNKNOWN") {
+		st = "pending"
 	}
-	return mk(false, "not yet", "", nil, "")
-}
-
-// num renders a JSON number the way Python prints an int.
-func num(v any) any {
-	if f, ok := v.(float64); ok && f == float64(int64(f)) {
-		return int64(f)
-	}
-	return v
-}
-
-func truthy(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return false
-	case bool:
-		return x
-	case string:
-		return x != ""
-	case float64:
-		return x != 0
-	case []any:
-		return len(x) > 0
-	case map[string]any:
-		return len(x) > 0
-	}
-	return true
+	return mk(ok, note, "", nil, st)
 }
 
 var evaluators = map[string]func(ctx) res{
@@ -575,8 +647,9 @@ func SelfCheck(p Policy) Check {
 }
 
 // Checklist is the ordered checklist for one PR: one row per policy step.
-func Checklist(p Policy, f Facts, jobs []Job, marks Marks, tests map[int64]int, arch *Arch) []Row {
-	c := ctx{f: f, jobs: jobs, marks: marks, tests: tests, head: f.Oid, arch: arch}
+// files are the PR's changed files (nil: not known yet).
+func Checklist(p Policy, f Facts, jobs []Job, marks Marks, tests map[int64]int, arch *Arch, files []string) []Row {
+	c := ctx{f: f, jobs: jobs, marks: marks, tests: tests, head: f.Oid, arch: arch, files: files, need: RequiredJobs(p)}
 	results := map[string]res{}
 	for id, fn := range evaluators {
 		results[id] = fn(c)

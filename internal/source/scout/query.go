@@ -15,7 +15,8 @@ import (
 // and automaton verdicts are PR comments: a new one bumps the PR's updatedAt,
 // so the incremental search sees it without polling.
 const prFields = `number title url state isDraft mergeable mergeStateStatus headRefOid baseRefName
-updatedAt mergedAt closedAt author{login} body labels(first:20){nodes{name}}
+createdAt updatedAt mergedAt closedAt additions deletions reviewDecision author{login} body labels(first:20){nodes{name}}
+timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{__typename ... on ReadyForReviewEvent{createdAt}}}
 files(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{path}}
 closingIssuesReferences(first:10){nodes{number}}
 latestOpinionatedReviews(first:20){nodes{author{login} state commit{oid}}}
@@ -34,13 +35,32 @@ timelineItems(last:20, itemTypes:[LABELED_EVENT, UNLABELED_EVENT, CLOSED_EVENT, 
 ... on LabeledEvent{createdAt actor{__typename login}} ... on UnlabeledEvent{createdAt actor{__typename login}}
 ... on ClosedEvent{createdAt actor{__typename login}} ... on ReopenedEvent{createdAt actor{__typename login}}}}`
 
+// subFields are an issue's place in the issue tree (parent, sub-issues). A
+// forge without sub-issues refuses them (noSubIssues): the scout then asks
+// without them from that pass on.
+const subFields = ` parent{number} subIssues(first:50){nodes{number}}`
+
+func issueSel(subs bool) string {
+	if subs {
+		return issueFields + subFields
+	}
+	return issueFields
+}
+
+// noSubIssues says whether a GraphQL error is the forge not knowing the
+// sub-issue fields.
+func noSubIssues(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "subIssues") || strings.Contains(s, "'parent'") || strings.Contains(s, "\"parent\"")
+}
+
 // searchQuery is ONE GraphQL call: one aliased search per author (a<i>), each
 // for the author's PRs and issues in repo updated at or after the cursor
 // (every state, so merges and closes are seen), or, with no cursor, every
 // open one. after holds the page cursor of an alias still paging; a nil
 // after map is the first page of every alias, and an alias absent from a
 // non-nil map is done.
-func searchQuery(repo string, authors []string, cursor string, after map[int]string) string {
+func searchQuery(repo string, authors []string, cursor string, after map[int]string, subs bool) string {
 	var b strings.Builder
 	b.WriteString("{")
 	for i, a := range authors {
@@ -59,7 +79,7 @@ func searchQuery(repo string, authors []string, cursor string, after map[int]str
 			q += " updated:>=" + cursor
 		}
 		fmt.Fprintf(&b, `a%d: search(type:ISSUE, first:%d%s, query:%q){pageInfo{hasNextPage endCursor} nodes{__typename ... on PullRequest{%s} ... on Issue{%s}}} `,
-			i, Batch, pg, q, prFields, issueFields)
+			i, Batch, pg, q, prFields, issueSel(subs))
 	}
 	b.WriteString("}")
 	return b.String()
@@ -67,7 +87,7 @@ func searchQuery(repo string, authors []string, cursor string, after map[int]str
 
 // batchQuery reads named PRs (aliases p<n>) and issue-or-PR numbers (aliases
 // i<n>) in one query, at most Batch in all.
-func batchQuery(repo string, prs, issues []int) string {
+func batchQuery(repo string, prs, issues []int, subs bool) string {
 	owner, name, _ := strings.Cut(repo, "/")
 	var b strings.Builder
 	fmt.Fprintf(&b, "{repository(owner:%q, name:%q){", owner, name)
@@ -75,7 +95,7 @@ func batchQuery(repo string, prs, issues []int) string {
 		fmt.Fprintf(&b, "p%d: pullRequest(number:%d){%s} ", n, n, prFields)
 	}
 	for _, n := range issues {
-		fmt.Fprintf(&b, "i%d: issueOrPullRequest(number:%d){__typename ... on Issue{%s}} ", n, n, issueFields)
+		fmt.Fprintf(&b, "i%d: issueOrPullRequest(number:%d){__typename ... on Issue{%s}} ", n, n, issueSel(subs))
 	}
 	b.WriteString("}}")
 	return b.String()
@@ -127,24 +147,36 @@ type filesPage struct {
 // ghNode is the GraphQL shape of prFields and issueFields (a search node is
 // either).
 type ghNode struct {
-	Typename         string    `json:"__typename"`
-	Number           int       `json:"number"`
-	Title            string    `json:"title"`
-	URL              string    `json:"url"`
-	State            string    `json:"state"`
-	IsDraft          bool      `json:"isDraft"`
-	Mergeable        string    `json:"mergeable"`
-	MergeStateStatus string    `json:"mergeStateStatus"`
-	HeadRefOid       string    `json:"headRefOid"`
-	BaseRefName      string    `json:"baseRefName"`
-	UpdatedAt        string    `json:"updatedAt"`
-	MergedAt         string    `json:"mergedAt"`
-	ClosedAt         string    `json:"closedAt"`
-	Author           *login    `json:"author"`
-	Body             string    `json:"body"`
-	Labels           labels    `json:"labels"`
-	Files            filesPage `json:"files"`
-	Closing          struct {
+	Typename         string `json:"__typename"`
+	Number           int    `json:"number"`
+	Title            string `json:"title"`
+	URL              string `json:"url"`
+	State            string `json:"state"`
+	IsDraft          bool   `json:"isDraft"`
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	ReviewDecision   string `json:"reviewDecision"`
+	HeadRefOid       string `json:"headRefOid"`
+	BaseRefName      string `json:"baseRefName"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Parent           *struct {
+		Number int `json:"number"`
+	} `json:"parent"`
+	SubIssues struct {
+		Nodes []struct {
+			Number int `json:"number"`
+		} `json:"nodes"`
+	} `json:"subIssues"`
+	MergedAt string    `json:"mergedAt"`
+	ClosedAt string    `json:"closedAt"`
+	Author   *login    `json:"author"`
+	Body     string    `json:"body"`
+	Labels   labels    `json:"labels"`
+	Files    filesPage `json:"files"`
+	Closing  struct {
 		Nodes []struct {
 			Number int `json:"number"`
 		} `json:"nodes"`
@@ -218,7 +250,11 @@ type PR struct {
 	Author    string
 	Title     string
 	Base      string
+	Created   string
 	Updated   string
+	ReadyAt   string // the last ready-for-review, else created when it was never a draft
+	Additions int
+	Deletions int
 	MergedAt  string
 	ClosedAt  string
 	Checks    string // rollup state
@@ -241,6 +277,8 @@ type Issue struct {
 	Updated  string
 	ClosedAt string
 	Labels   []string
+	Parent   int
+	Subs     []int
 	Body     string
 	// Who made each kind of change last (S5): the body's last editor (its
 	// author when never edited), the last label and state events' actors.
@@ -298,6 +336,12 @@ func links(n ghNode) []int {
 func toIssue(g ghNode) Issue {
 	is := Issue{Number: g.Number, Author: g.author(), Title: g.Title, URL: g.URL, State: g.State, Updated: g.UpdatedAt,
 		ClosedAt: g.ClosedAt, Labels: g.Labels.names(), Body: g.Body, BodyBy: g.Author}
+	if g.Parent != nil {
+		is.Parent = g.Parent.Number
+	}
+	for _, c := range g.SubIssues.Nodes {
+		is.Subs = append(is.Subs, c.Number)
+	}
 	if g.LastEditedAt != "" && g.Editor != nil {
 		is.BodyBy = g.Editor
 	}
@@ -316,16 +360,24 @@ func toIssue(g ghNode) Issue {
 }
 
 func toPR(g ghNode) PR {
-	p := PR{Number: g.Number, Author: g.author(), Title: g.Title, Base: g.BaseRefName, Updated: g.UpdatedAt, MergedAt: g.MergedAt,
-		ClosedAt: g.ClosedAt, Labels: g.Labels.names(), Links: links(g)}
+	p := PR{Number: g.Number, Author: g.author(), Title: g.Title, Base: g.BaseRefName, Created: g.CreatedAt, Updated: g.UpdatedAt,
+		MergedAt: g.MergedAt, ClosedAt: g.ClosedAt, Labels: g.Labels.names(), Links: links(g), Additions: g.Additions, Deletions: g.Deletions}
 	for _, f := range g.Files.Nodes {
 		p.Files = append(p.Files, f.Path)
 	}
 	if g.Files.PageInfo.HasNextPage {
 		p.FilesMore = g.Files.PageInfo.EndCursor
 	}
+	if !g.IsDraft {
+		p.ReadyAt = g.CreatedAt
+	}
+	for _, e := range g.Timeline.Nodes {
+		if e.Typename == "ReadyForReviewEvent" && e.CreatedAt != "" {
+			p.ReadyAt = e.CreatedAt
+		}
+	}
 	f := mergecheck.Facts{Oid: g.HeadRefOid, State: g.State, Draft: g.IsDraft, Heavy: true, Mergeable: g.Mergeable,
-		MergeState: g.MergeStateStatus, Contexts: []mergecheck.Context{}, Reviews: []mergecheck.Review{}}
+		MergeState: g.MergeStateStatus, Review: g.ReviewDecision, Contexts: []mergecheck.Context{}, Reviews: []mergecheck.Review{}}
 	if f.Mergeable == "" {
 		f.Mergeable = "UNKNOWN"
 	}
@@ -425,10 +477,10 @@ func automatonOf(g ghNode) *Verdict {
 	var v *Verdict
 	for _, c := range g.Comments.Nodes {
 		m := automatonRE.FindStringSubmatch(c.Body)
-		if m == nil || m[1] != fmt.Sprint(g.Number) || (v != nil && c.CreatedAt <= v.At) {
+		if m == nil || m[1] != fmt.Sprint(g.Number) || (v != nil && unix(c.CreatedAt) <= v.At) {
 			continue
 		}
-		v = &Verdict{Verdict: strings.ToUpper(m[3]), Head: short(m[2]), At: c.CreatedAt}
+		v = &Verdict{Verdict: strings.ToUpper(m[3]), Head: short(m[2]), At: unix(c.CreatedAt)}
 	}
 	return v
 }
@@ -499,4 +551,20 @@ func decodeFiles(data json.RawMessage) ([]string, string, error) {
 		more = fp.PageInfo.EndCursor
 	}
 	return out, more, nil
+}
+
+// KindFiles are the changed files the band-jobs step classifies: all of them
+// when one page held them, else the first page only when it already shows
+// code (the rest cannot make it docs or tests), else nil (not known).
+func (p PR) KindFiles() []string {
+	if p.FilesMore == "" {
+		if p.Files == nil {
+			return []string{}
+		}
+		return p.Files
+	}
+	if mergecheck.KindOf(p.Files) == "code" {
+		return p.Files
+	}
+	return nil
 }

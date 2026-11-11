@@ -75,3 +75,17 @@ func TestValidAriaID(t *testing.T) {
 		}
 	}
 }
+
+// Sources that ping the roles they name (or their child forms' holders) need no seat of their own: reconcile's R5 and
+// the self-check must not flag their empty role. Every seat-waking source still needs one.
+func TestNeedsSeat(t *testing.T) {
+	for src, want := range map[string]bool{SourceScout: false, SourceKeelBranches: false, SourceBandHub: false, SourceRoster: false,
+		"github-pr": true, "github-author": true, "keel-threads": true, "teams-chat": true, SourceReleases: true} {
+		if got := (&Critic{Source: src}).NeedsSeat(); got != want {
+			t.Errorf("%s: NeedsSeat %v, want %v", src, got, want)
+		}
+	}
+	if !(&Critic{}).NeedsSeat() {
+		t.Error("a pre-source PR critic needs a seat")
+	}
+}

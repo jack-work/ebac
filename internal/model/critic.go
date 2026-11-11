@@ -601,6 +601,9 @@ type ScoutWatch struct {
 	// linking the issue: the first rule matching the PR's author (and title,
 	// when set) names the role.
 	Owners []OwnerRule `json:"owners,omitempty"`
+	// WarnTo is the role (@form) pinged once when open entries alone pass
+	// the form cap (the Decisions Minister).
+	WarnTo string `json:"warn_to,omitempty"`
 }
 
 // OwnerRule maps a PR to its owner role: author, optionally a title regex.

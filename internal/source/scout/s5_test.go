@@ -2,8 +2,8 @@ package scout
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -74,8 +74,8 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 			t.Fatalf("ping to %s: %q", to, text)
 		}
 	}
-	if fmt.Sprint(entry(t, r, "issue:301")["digests"].(map[string]any)["human_comments"]) != "1" {
-		t.Fatalf("digests %v", entry(t, r, "issue:301")["digests"])
+	if dg, _ := entry(t, r, "issue:301")["dg"].(string); !strings.HasSuffix(dg, ".1") || len(dg) != 28 {
+		t.Fatalf("digests %q", dg)
 	}
 
 	// The sync (as John-Kelliher) rewrites its block and ticks a checklist item inside it: nobody is pinged.
@@ -210,13 +210,9 @@ func TestIssueDigests(t *testing.T) {
 	if d3, _ := issueDigests(text); d3.Body == d.Body || d3.Checklist != d.Checklist {
 		t.Fatalf("text edit: %+v vs %+v", d3, d)
 	}
-	keys := []string{}
-	for k := range model.ObjectOf(model.MustJSON(d)) {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	if strings.Join(keys, " ") != "body checklist human_comments labels" {
-		t.Fatalf("digest keys %v", keys)
+	var back IssueDigests
+	if err := json.Unmarshal(model.MustJSON(d), &back); err != nil || back != d || len(d.String()) != 28 || !strings.HasSuffix(d.String(), ".2") {
+		t.Fatalf("digests %q round-trip %+v %v", d.String(), back, err)
 	}
 }
 
@@ -228,13 +224,13 @@ func TestOwnerRules(t *testing.T) {
 		t.Fatal("a bad title regex was accepted")
 	}
 	o, _ := compileOwners([]model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: knight}})
-	if r := roleOf(o, &TrackedPR{Author: "john-kelliher", Title: "[Effort][LEDGER-1] x"}); r != lead {
+	if r := roleOf(o, "john-kelliher", "[Effort][LEDGER-1] x"); r != lead {
 		t.Fatalf("ledger PR -> %q", r)
 	}
-	if r := roleOf(o, &TrackedPR{Author: ours, Title: "[Effort][cache-1] x"}); r != knight {
+	if r := roleOf(o, ours, "[Effort][cache-1] x"); r != knight {
 		t.Fatalf("other PR -> %q", r)
 	}
-	if r := roleOf(o, &TrackedPR{Author: his, Title: "ledger"}); r != "" {
+	if r := roleOf(o, his, "ledger"); r != "" {
 		t.Fatalf("Chiqun's PR with no rule -> %q", r)
 	}
 }

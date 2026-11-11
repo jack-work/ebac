@@ -38,6 +38,9 @@ type item struct {
 	closedAt   string
 	unresolved int
 	editor     map[string]any   // issue: the last body editor (author{__typename login})
+	parent     int              // issue: its parent issue
+	subs       []int            // issue: its sub-issues
+	readyAt    string           // PR: its last ready-for-review event
 	events     []map[string]any // issue: label and state events, oldest first
 }
 
@@ -48,6 +51,7 @@ func (p *item) gql() map[string]any {
 	}
 	base := map[string]any{"number": p.n, "title": p.title, "url": fmt.Sprintf("https://x/%d", p.n), "state": p.state,
 		"updatedAt": p.updated.Format(time.RFC3339), "closedAt": p.closedAt, "author": map[string]any{"login": p.author},
+		"createdAt": created.Format(time.RFC3339), "additions": 10, "deletions": 2,
 		"labels": map[string]any{"nodes": labels}}
 	if p.issue {
 		base["__typename"] = "Issue"
@@ -65,6 +69,14 @@ func (p *item) gql() map[string]any {
 		}
 		base["comments"] = map[string]any{"nodes": comments}
 		base["timelineItems"] = map[string]any{"nodes": events}
+		if p.parent != 0 {
+			base["parent"] = map[string]any{"number": p.parent}
+		}
+		subs := []any{}
+		for _, n := range p.subs {
+			subs = append(subs, map[string]any{"number": n})
+		}
+		base["subIssues"] = map[string]any{"nodes": subs}
 		return base
 	}
 	ctxs := []any{}
@@ -84,6 +96,9 @@ func (p *item) gql() map[string]any {
 		reviews = append(reviews, r)
 	}
 	files, more := filePage(p.files, 0)
+	if p.readyAt != "" {
+		base["timelineItems"] = map[string]any{"nodes": []any{map[string]any{"__typename": "ReadyForReviewEvent", "createdAt": p.readyAt}}}
+	}
 	for k, v := range map[string]any{"__typename": "PullRequest", "isDraft": p.draft, "mergeable": p.mergeable,
 		"mergeStateStatus": "BLOCKED", "headRefOid": p.head, "baseRefName": "main", "mergedAt": p.mergedAt, "body": p.body,
 		"files":         map[string]any{"totalCount": len(p.files), "pageInfo": map[string]any{"hasNextPage": more != "", "endCursor": more}, "nodes": files},
@@ -118,6 +133,7 @@ type fakeGH struct {
 	queries  []string
 	pageSize int
 	fail     error
+	noSubs   bool // a forge without sub-issues: a query naming subIssues is refused
 }
 
 var (
@@ -134,6 +150,9 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 	g.queries = append(g.queries, q)
 	if g.fail != nil {
 		return nil, g.fail
+	}
+	if g.noSubs && strings.Contains(q, "subIssues") {
+		return nil, fmt.Errorf("graphql: Field 'subIssues' doesn't exist on type 'Issue'")
 	}
 	if strings.HasPrefix(q, "{a") {
 		out := map[string]any{}
@@ -251,6 +270,7 @@ type world struct {
 	board map[string]json.RawMessage
 	in    map[string]json.RawMessage
 	watch model.ScoutWatch
+	cap   int
 }
 
 // newWorld: 101 ours (title tag), 102 ours draft (label), 201 Chiqun's (path hit), 103 ours unrelated (no hit), 301 an
@@ -287,11 +307,24 @@ func (w *world) pass(dt time.Duration) Result {
 func (w *world) try(dt time.Duration) (Result, error) {
 	w.now = w.now.Add(dt)
 	w.gh.calls = 0
-	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now})
+	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap})
 	if err == nil {
 		w.st = r.State
 	}
 	return r, err
+}
+
+// created is every fake item's creation time.
+var created = time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+
+// vs is a verdict as verdict@head@at (RFC 3339, "" when absent).
+func vs(x any) string {
+	m, _ := x.(map[string]any)
+	at := ""
+	if a, ok := m["at"].(float64); ok {
+		at = time.Unix(int64(a), 0).UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%v@%v@%s", m["v"], m["h"], at)
 }
 
 func setKeys(r Result) []string {
@@ -361,7 +394,8 @@ func TestSearchPagesPerAlias(t *testing.T) {
 	}
 }
 
-// The entry is exactly the board-sync v2 field list, nothing else (no bodies).
+// The entry is the key map in scout.go (the brief's list plus the steward's read list), short keys, nothing else (no
+// bodies), empty values left out.
 func TestEntryFieldsExactlyTheList(t *testing.T) {
 	w := newWorld(t)
 	p := w.gh.items[101]
@@ -373,9 +407,10 @@ func TestEntryFieldsExactlyTheList(t *testing.T) {
 	p.reviews = []map[string]any{{"author": map[string]any{"login": "lukas"}, "state": "APPROVED", "commit": map[string]any{"oid": headA}}}
 	p.body = "a long body that must never reach the form " + strings.Repeat("x", 3000)
 	p.unresolved = 2
+	w.hub.jobs = []HubJob{hubJob(9, "aether.check-ni", headA, "done", true)}
 	r := w.pass(0)
 	e := entry(t, r, "pr:101")
-	want := "architect author automaton base checks draft head8 kind lukas merge_state mergeable n state threads title updated_at"
+	want := "a ar au bj c cr fk h lk ln mg ms s t th u" // b (main) and rd (= cr) left out
 	var got []string
 	for k := range e {
 		got = append(got, k)
@@ -384,10 +419,11 @@ func TestEntryFieldsExactlyTheList(t *testing.T) {
 	if strings.Join(got, " ") != want {
 		t.Fatalf("pr entry keys\n got %s\nwant %s", strings.Join(got, " "), want)
 	}
-	if e["kind"] != "pr" || e["author"] != ours || e["head8"] != "aaaaaaaa" || e["threads"] != 2.0 || e["mergeable"] != "MERGEABLE" {
+	if e["a"] != ours || e["h"] != "aaaaaaaa" || e["th"] != 2.0 || e["mg"] != "MERGEABLE" || fmt.Sprint(e["ln"]) != "[10 2]" ||
+		e["fk"] != "code" || e["cr"] != float64(created.Unix()) || e["rd"] != nil || fmt.Sprint(e["bj"]) != "[[9 check-ni PASS]]" {
 		t.Fatalf("pr entry %v", e)
 	}
-	if len(r.Set["pr:101"]) > 1500 {
+	if len(r.Set["pr:101"]) > 600 {
 		t.Fatalf("entry is not slim: %d B", len(r.Set["pr:101"]))
 	}
 	is := entry(t, r, "issue:301")
@@ -396,12 +432,12 @@ func TestEntryFieldsExactlyTheList(t *testing.T) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	if strings.Join(got, " ") != "author digests kind labels n state title updated_at" || is["kind"] != "issue" {
+	if strings.Join(got, " ") != "a dg l s t u" {
 		t.Fatalf("issue entry %v", is)
 	}
-	// merged_at appears once merged.
+	// m appears once merged; d once a draft.
 	p.state, p.mergedAt, p.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
-	if e := entry(t, w.pass(2*time.Minute), "pr:101"); e["merged_at"] != p.mergedAt || e["merge_state"] != "merged" {
+	if e := entry(t, w.pass(2*time.Minute), "pr:101"); e["m"] != float64(w.now.Add(-2*time.Minute).Unix()) || e["ms"] != "merged" || e["d"] != nil {
 		t.Fatalf("merged entry %v", e)
 	}
 }
@@ -421,19 +457,19 @@ func TestVerdicts(t *testing.T) {
 	}
 	p.reviews = []map[string]any{{"author": map[string]any{"login": "lukas"}, "state": "CHANGES_REQUESTED", "commit": map[string]any{"oid": headB}}}
 	e := entry(t, w.pass(0), "pr:101")
-	if s := fmt.Sprint(e["architect"]); s != "map[at:2026-11-10T20:00:00Z head:aaaaaaaa verdict:APPROVE_WITH_NOTES]" {
+	if s := vs(e["ar"]); s != "APPROVE_WITH_NOTES@<nil>@2026-11-10T20:00:00Z" { // at the entry's head: h left out
 		t.Fatalf("architect %s", s)
 	}
-	if s := fmt.Sprint(e["automaton"]); s != "map[at:2026-11-10T19:00:00Z head:bbbbbbbb verdict:APPROVE]" {
+	if s := vs(e["au"]); s != "APPROVE@bbbbbbbb@" {
 		t.Fatalf("automaton %s", s)
 	}
-	if s := fmt.Sprint(e["lukas"]); s != "map[head:bbbbbbbb verdict:CHANGES_REQUESTED]" {
+	if s := vs(e["lk"]); s != "CHANGES_REQUESTED@bbbbbbbb@" {
 		t.Fatalf("lukas %s", s)
 	}
 	p.comments = append(p.comments, map[string]any{"author": map[string]any{"login": "architect-review[bot]"}, "createdAt": "2026-11-10T23:00:00Z",
 		"body": "<!-- architect-review-hold -->\npass in progress"})
 	p.updated = w.now.Add(time.Minute)
-	if s := fmt.Sprint(entry(t, w.pass(2*time.Minute), "pr:101")["architect"]); s != "map[at:2026-11-10T23:00:00Z head:aaaaaaaa verdict:hold]" {
+	if s := vs(entry(t, w.pass(2*time.Minute), "pr:101")["ar"]); s != "hold@<nil>@2026-11-10T23:00:00Z" {
 		t.Fatalf("held architect %s", s)
 	}
 }
@@ -445,7 +481,7 @@ func TestUpdateWritesOnlyThatEntry(t *testing.T) {
 	p := w.gh.items[101]
 	p.head, p.updated = headC, w.now.Add(time.Minute)
 	r := w.pass(2 * time.Minute)
-	if got := strings.Join(setKeys(r), " "); got != "pr:101" || entry(t, r, "pr:101")["head8"] != "cccccccc" {
+	if got := strings.Join(setKeys(r), " "); got != "pr:101" || entry(t, r, "pr:101")["h"] != "cccccccc" {
 		t.Fatalf("writes %s", got)
 	}
 	// An update that changes nothing in the entry but updated_at still writes (updated_at is a field), and an update
@@ -469,7 +505,7 @@ func TestFilterPathsOncePerHead(t *testing.T) {
 	w.gh.items[202] = &item{n: 202, author: his, title: "chore: many files", state: "OPEN", head: headA, mergeable: "MERGEABLE",
 		updated: w.now.Add(-time.Hour), files: big}
 	r := w.pass(0)
-	if r.GHCalls != 3 || r.Set["pr:202"] != nil || r.Set["pr:103"] != nil || w.st.Skip[202] != headA || w.st.Skip[103] != headB {
+	if r.GHCalls != 3 || r.Set["pr:202"] != nil || r.Set["pr:103"] != nil || w.st.Skip[202] != headA[:12] || w.st.Skip[103] != headB[:12] {
 		t.Fatalf("big miss: %d calls, set %v, skip %v", r.GHCalls, setKeys(r), w.st.Skip)
 	}
 	w.gh.items[202].updated = w.now.Add(time.Minute) // a comment: same head
@@ -505,7 +541,7 @@ func TestIssuesLinkedFromPRs(t *testing.T) {
 	}
 	p.body, p.updated = "Part of https://x/bic/aether/issues/302; needs #1030.", w.now.Add(time.Minute)
 	r = w.pass(MissingRetry)
-	if r.GHCalls != 2 || r.Set["issue:302"] == nil || w.st.Missing[1030] == "" || w.st.Missing[302] != "" {
+	if r.GHCalls != 2 || r.Set["issue:302"] == nil || w.st.Missing[1030] == 0 || w.st.Missing[302] != 0 {
 		t.Fatalf("linked issue: %d calls, set %v, missing %v", r.GHCalls, setKeys(r), w.st.Missing)
 	}
 	if r := w.pass(2 * time.Minute); r.GHCalls != 1 {
@@ -513,7 +549,7 @@ func TestIssuesLinkedFromPRs(t *testing.T) {
 	}
 	// Once tracked, an issue's own update is seen by the search.
 	w.gh.items[302].state, w.gh.items[302].updated = "CLOSED", w.now.Add(time.Minute)
-	if e := entry(t, w.pass(2*time.Minute), "issue:302"); e["state"] != "CLOSED" {
+	if e := entry(t, w.pass(2*time.Minute), "issue:302"); e["s"] != "CLOSED" {
 		t.Fatalf("issue 302 %v", e)
 	}
 }
@@ -529,7 +565,7 @@ func TestSettlingChecksAreReRead(t *testing.T) {
 	}
 	w.gh.items[101].checks = []map[string]any{{"name": "Aether Runtime PR Pipeline", "conclusion": "SUCCESS"}}
 	r := w.pass(2 * time.Minute)
-	if c := fmt.Sprint(entry(t, r, "pr:101")["checks"]); r.GHCalls != 2 || c != "map[fail:0 pass:1 pending:0 rollup:SUCCESS]" {
+	if c := fmt.Sprint(entry(t, r, "pr:101")["c"]); r.GHCalls != 2 || c != "map[p:1 r:SUCCESS]" {
 		t.Fatalf("re-read: %d calls, checks %s", r.GHCalls, c)
 	}
 	if r := w.pass(2 * time.Minute); r.GHCalls != 1 {
@@ -537,42 +573,80 @@ func TestSettlingChecksAreReRead(t *testing.T) {
 	}
 }
 
-// merge_state is the first unmet step of the rule. A band job finishing on a head moves it (re-read, rewritten);
-// an unknown test count never passes the band step; a known one does.
-func TestMergeStateAndTestCounts(t *testing.T) {
+// ms is the first unmet step of the rule on the inputs form. Today's rule requires check-ni at the head: a check-ni
+// finishing moves it (re-read, rewritten); one passed by a descendant counts; the hub's own verdict wins; a cancelled
+// job is no job; opt-in jobs (gate-kit) are evidence only (bj, with their tests_run), never a wait.
+func TestMergeStateAndBandJobs(t *testing.T) {
 	w := newWorld(t)
-	w.hub.jobs = []HubJob{hubJob(7, "aether.gate-kit", headA, "leased", false)}
+	ms := func(r Result, n string) any { return entry(t, r, "pr:"+n)["ms"] }
+	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "leased", false), hubJob(8, "aether.gate-kit", headA, "failed", false)}
 	r0 := w.pass(0)
-	if ms := entry(t, r0, "pr:101")["merge_state"]; ms != "waiting: band jobs" {
-		t.Fatalf("merge_state %v", ms)
+	if got := ms(r0, "101"); got != "waiting: band jobs" {
+		t.Fatalf("check-ni running: %v", got)
 	}
-	if ms := entry(t, r0, "pr:102")["merge_state"]; ms != "draft" {
-		t.Fatalf("draft merge_state %v", ms)
+	if got := ms(r0, "102"); got != "draft" {
+		t.Fatalf("draft: %v", got)
 	}
-	w.hub.jobs = []HubJob{hubJob(7, "aether.gate-kit", headA, "done", true)}
+	w.hub.jobs[0] = hubJob(7, "aether.check-ni", headA, "done", true)
 	r := w.pass(2 * time.Minute)
-	if r.GHCalls != 2 || r.Set["pr:101"] != nil {
-		t.Fatalf("PASS with an unknown count moved the entry: %d calls, %s", r.GHCalls, r.Set["pr:101"])
+	if got := ms(r, "101"); r.GHCalls != 2 || got == "waiting: band jobs" {
+		t.Fatalf("check-ni PASS (gate-kit FAIL is opt-in): %d calls, %v", r.GHCalls, got)
 	}
-	w.hub.tests[7] = 412
+	// Passed by a descendant (state superseded, ok false): still a pass. A cancelled newer job is no job.
+	pbd := hubJob(9, "aether.check-ni", headA, "superseded", false)
+	pbd.Result.PassByDescendant = json.RawMessage(`{"by":123,"sha":"dddd"}`)
+	cancelled := hubJob(10, "aether.check-ni", headA, "leased", false)
+	cancelled.Result.CancelledBy = json.RawMessage(`"newer"`)
+	w.hub.jobs = []HubJob{cancelled, pbd}
+	if r := w.pass(2 * time.Minute); r.Set["pr:101"] == nil || ms(r, "101") == "waiting: band jobs" ||
+		!strings.Contains(string(r.Set["pr:101"]), `"bj":[[9,"check-ni","PASS"]]`) {
+		t.Fatalf("pass by descendant: %s", r.Set["pr:101"])
+	}
+	// The hub's verdict wins over ok.
+	v := hubJob(11, "aether.check-ni", headA, "done", true)
+	v.Result.Verdict = "FAIL"
+	w.hub.jobs = []HubJob{v}
+	if r := w.pass(2 * time.Minute); ms(r, "101") != "waiting: band jobs" {
+		t.Fatalf("hub verdict FAIL: %v", ms(r, "101"))
+	}
+	// Opt-in evidence with its count.
+	w.hub.jobs = []HubJob{hubJob(12, "aether.gate-kit", headA, "done", true), hubJob(7, "aether.check-ni", headA, "done", true)}
+	w.hub.tests[12] = 412
 	r = w.pass(2 * time.Minute)
-	if ms := entry(t, r, "pr:101")["merge_state"]; ms == "waiting: band jobs" || !strings.HasPrefix(fmt.Sprint(ms), "waiting: ") {
-		t.Fatalf("known count: merge_state %v", ms)
+	if bj := string(r.Set["pr:101"]); !strings.Contains(bj, `[12,"gate-kit","PASS",412]`) || w.st.Tests[12] != 412 {
+		t.Fatalf("opt-in evidence: %s", bj)
 	}
-	if w.st.Tests[7] != 412 {
-		t.Fatalf("count not cached: %v", w.st.Tests)
-	}
-	w.hub.jobs = nil // the job left the hub's window: its count is forgotten
+	w.hub.jobs = nil // the jobs left the hub's window: the count is forgotten
 	w.pass(2 * time.Minute)
-	if _, kept := w.st.Tests[7]; kept {
+	if _, kept := w.st.Tests[12]; kept {
 		t.Fatalf("a count outlived its job: %v", w.st.Tests)
 	}
-	// No rule on the inputs form: merge_state unknown, said in the log.
+	// No rule on the inputs form: unknown, said in the log.
 	w.in = map[string]json.RawMessage{}
 	w.gh.items[101].updated = w.now.Add(time.Minute)
 	r = w.pass(2 * time.Minute)
-	if ms := entry(t, r, "pr:101")["merge_state"]; ms != "unknown" || !strings.Contains(strings.Join(r.Log, " "), "no merge policy") {
-		t.Fatalf("no rule: %v %v", ms, r.Log)
+	if ms(r, "101") != "unknown" || !strings.Contains(strings.Join(r.Log, " "), "no merge policy") {
+		t.Fatalf("no rule: %v %v", ms(r, "101"), r.Log)
+	}
+}
+
+// The PR's own diff classifies it (fk, and the band-jobs step): #108334's shape (only a *_tests.rs, check-ni PASS) is
+// past band jobs; a docs-only PR needs no job at all; a page of docs with more pages is not known.
+func TestFilesKind(t *testing.T) {
+	w := newWorld(t)
+	w.gh.items[101].files = []string{"aether_rust/crates/aether_grpc/src/effort_stamp_tests.rs"}
+	w.gh.items[201].files = []string{"README.md", "aether_rust/docs/decision_judge/x.md"}
+	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "done", true)}
+	r := w.pass(0)
+	if e := entry(t, r, "pr:101"); e["fk"] != "tests" || e["ms"] == "waiting: band jobs" {
+		t.Fatalf("tests-only: %v", e)
+	}
+	if e := entry(t, r, "pr:201"); e["fk"] != "docs" || e["ms"] == "waiting: band jobs" {
+		t.Fatalf("docs-only: %v", e)
+	}
+	more := PR{Files: []string{"a.md"}, FilesMore: "x"}
+	if more.KindFiles() != nil || (PR{Files: []string{"a.go"}, FilesMore: "x"}).KindFiles() == nil {
+		t.Fatal("a partial page decided more than it can")
 	}
 }
 
@@ -607,8 +681,8 @@ func TestBoardMarksMoveMergeState(t *testing.T) {
 }
 
 // S2: on merge the final entry goes to the inputs form's ledger outbox, once; a changed final entry is sent again;
-// an ack (newer than the send, for that record) clears the outbox member and the entry stays; Keep after the merge
-// the entry is removed.
+// an ack (newer than the send, for that record) clears the outbox member; the entry stays until its record is acked
+// and at least KeepClosed after the merge, however long the ack takes.
 func TestLedgerRecordAckAndPrune(t *testing.T) {
 	w := newWorld(t)
 	w.pass(0)
@@ -616,16 +690,16 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 	p.state, p.mergedAt, p.updated = "MERGED", w.now.Add(time.Minute).Format(time.RFC3339), w.now.Add(time.Minute)
 	r := w.pass(2 * time.Minute)
 	rec := string(outboxOf(r)["101"])
-	if !strings.Contains(rec, `"kind":"pr-final"`) || !strings.Contains(rec, `"state":"MERGED"`) || !strings.Contains(rec, `"hash"`) || entry(t, r, "pr:101")["state"] != "MERGED" {
+	if !strings.Contains(rec, `"kind":"pr-final"`) || !strings.Contains(rec, `"s":"MERGED"`) || !strings.Contains(rec, `"hash"`) || entry(t, r, "pr:101")["s"] != "MERGED" {
 		t.Fatalf("record %s", rec)
 	}
 	var h struct {
 		Hash string `json:"hash"`
 	}
 	_ = json.Unmarshal([]byte(rec), &h)
-	sent := w.st.PRs[101].Outbox
+	sent := time.Unix(w.st.PRs[101].Outbox, 0).UTC().Format(time.RFC3339)
 
-	// A comment after the merge (updatedAt moves, the entry's updated_at with it): the record changes, sent again.
+	// A comment after the merge (updatedAt moves, the entry's u with it): the record changes, sent again.
 	p.updated = w.now.Add(time.Minute)
 	r = w.pass(2 * time.Minute)
 	rec2 := string(outboxOf(r)["101"])
@@ -637,44 +711,65 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 		t.Fatalf("an unchanged record was re-sent: %v", outboxOf(r))
 	}
 
-	// Acks: older than the send, or for another record: nothing. Newer and for this record: the member is cleared.
+	// Unacked: the entry stays past KeepClosed.
+	if r := w.pass(KeepClosed + time.Hour); len(r.Unset) != 0 {
+		t.Fatalf("pruned before its ack: %v", r.Unset)
+	}
+
+	// Acks: older than the send, or for another record: nothing. Newer and for this record: the member is cleared,
+	// and the entry (KeepClosed old by now) goes.
 	ackAt := func(at, hash string) {
 		w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"sha": "k1", "path": "p", "at": at, "hash": hash}})
 	}
 	ackAt(sent, h.Hash)
-	if r := w.pass(2 * time.Minute); len(r.Forms) != 0 {
+	if r := w.pass(2 * time.Minute); len(r.Forms)+len(r.Unset) != 0 {
 		t.Fatal("cleared on an ack older than the send")
 	}
 	ackAt(w.now.Format(time.RFC3339), "0000")
-	if r := w.pass(2 * time.Minute); len(r.Forms) != 0 {
+	if r := w.pass(2 * time.Minute); len(r.Forms)+len(r.Unset) != 0 {
 		t.Fatal("cleared on an ack for another record")
 	}
 	ackAt(w.now.Format(time.RFC3339), h.Hash)
 	r = w.pass(2 * time.Minute)
-	if string(outboxOf(r)["101"]) != "null" || len(r.Unset) != 0 || w.st.PRs[101] == nil {
+	if string(outboxOf(r)["101"]) != "null" || strings.Join(r.Unset, " ") != "pr:101" || w.st.PRs[101] != nil {
 		t.Fatalf("ack: outbox %v unset %v", outboxOf(r), r.Unset)
 	}
-	if r := w.pass(2 * time.Minute); len(r.Forms) != 0 {
-		t.Fatal("an acked record was cleared twice")
+}
+
+// An ack within KeepClosed of the merge: the outbox member goes at once, the entry only KeepClosed after the merge.
+func TestAckedEntryStaysKeepClosed(t *testing.T) {
+	w := newWorld(t)
+	w.pass(0)
+	p := w.gh.items[101]
+	p.state, p.mergedAt, p.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
+	r := w.pass(2 * time.Minute)
+	var h struct {
+		Hash string `json:"hash"`
 	}
-	// Keep after the merge, the entry goes.
-	if r := w.pass(Keep - 20*time.Minute); len(r.Unset) != 0 {
+	_ = json.Unmarshal(outboxOf(r)["101"], &h)
+	w.in["ledger_ack"] = model.MustJSON(map[string]any{"101": map[string]string{"at": w.now.Add(time.Minute).Format(time.RFC3339), "hash": h.Hash}})
+	if r := w.pass(2 * time.Minute); string(outboxOf(r)["101"]) != "null" || len(r.Unset) != 0 {
+		t.Fatalf("early ack: outbox %v unset %v", outboxOf(r), r.Unset)
+	}
+	if r := w.pass(KeepClosed - 10*time.Minute); len(r.Unset) != 0 {
 		t.Fatalf("pruned early: %v", r.Unset)
 	}
-	r = w.pass(10 * time.Minute)
-	if strings.Join(r.Unset, " ") != "pr:101" || w.st.PRs[101] != nil {
+	if r := w.pass(10 * time.Minute); strings.Join(r.Unset, " ") != "pr:101" {
 		t.Fatalf("not pruned: %v", r.Unset)
 	}
 }
 
-// A closed issue's entry is removed Keep after it closed.
+// A closed issue's entry is removed KeepClosed after it closed.
 func TestClosedIssuePruned(t *testing.T) {
 	w := newWorld(t)
 	w.pass(0)
 	is := w.gh.items[301]
 	is.state, is.closedAt, is.updated = "CLOSED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
 	w.pass(2 * time.Minute)
-	if r := w.pass(Keep); strings.Join(r.Unset, " ") != "issue:301" {
+	if r := w.pass(KeepClosed - 5*time.Minute); len(r.Unset) != 0 {
+		t.Fatalf("issue pruned early: %v", r.Unset)
+	}
+	if r := w.pass(10 * time.Minute); strings.Join(r.Unset, " ") != "issue:301" {
 		t.Fatalf("issue not pruned: %v", r.Unset)
 	}
 }
@@ -720,5 +815,64 @@ func TestLinks(t *testing.T) {
 	}{95000})
 	if got := fmt.Sprint(links(n)); got != "[95000 96000 97001 97002]" {
 		t.Fatalf("links %s", got)
+	}
+}
+
+// A changed filter re-reads every open item: an old PR nobody touched since the cursor, which only the new title
+// filter takes in, is tracked on the next pass. An unchanged filter keeps the cursor.
+func TestFilterChangeReReads(t *testing.T) {
+	w := newWorld(t)
+	w.gh.items[104] = &item{n: 104, author: ours, title: "[CACHE][1-3] an old piece", state: "OPEN", head: headC, mergeable: "MERGEABLE",
+		updated: w.now.Add(-48 * time.Hour), files: []string{"x/cache.rs"}}
+	w.pass(0)
+	w.pass(2 * time.Minute)
+	if w.st.PRs[104] != nil {
+		t.Fatal("tracked before the filter took it in")
+	}
+	w.watch.TitleMatch = `^\[(Effort|MD1|CACHE)[^\]]*\]`
+	q := len(w.gh.queries)
+	r := w.pass(2 * time.Minute)
+	if r.Set["pr:104"] == nil || !strings.Contains(w.gh.queries[q], "is:open") || !strings.Contains(strings.Join(r.Log, " "), "filter changed") {
+		t.Fatalf("filter change: set %v, query %.200s", setKeys(r), w.gh.queries[q])
+	}
+	q = len(w.gh.queries)
+	if r := w.pass(2 * time.Minute); !strings.Contains(w.gh.queries[q], "updated:>=") || len(r.Set) != 0 {
+		t.Fatalf("an unchanged filter re-read again: %.200s", w.gh.queries[q])
+	}
+}
+
+// ready for review: the last ReadyForReviewEvent, else the creation of a PR that never was a draft (rd left out);
+// a draft has none.
+func TestReadyAt(t *testing.T) {
+	w := newWorld(t)
+	w.gh.items[101].readyAt = "2026-11-10T12:00:00Z"
+	r := w.pass(0)
+	if e := entry(t, r, "pr:101"); e["rd"] != float64(unix("2026-11-10T12:00:00Z")) {
+		t.Fatalf("ready event: %v", e["rd"])
+	}
+	if e := entry(t, r, "pr:102"); e["rd"] != nil || e["d"] != 1.0 {
+		t.Fatalf("draft: rd %v d %v", e["rd"], e["d"])
+	}
+	if e := entry(t, r, "pr:201"); e["rd"] != nil || e["cr"] != float64(created.Unix()) {
+		t.Fatalf("never a draft: rd %v cr %v", e["rd"], e["cr"])
+	}
+}
+
+// Issues carry their parent and sub-issues; a forge that does not know sub-issues refuses the query once, the scout
+// asks without them from then on (no failed round, no second refusal).
+func TestSubIssues(t *testing.T) {
+	w := newWorld(t)
+	w.gh.items[301].parent, w.gh.items[301].subs = 300, []int{3010, 3011}
+	if e := entry(t, w.pass(0), "issue:301"); e["p"] != 300.0 || fmt.Sprint(e["sub"]) != "[3010 3011]" {
+		t.Fatalf("tree: %v", e)
+	}
+	w2 := newWorld(t)
+	w2.gh.noSubs = true
+	r := w2.pass(0)
+	if r.Set["issue:301"] == nil || !w2.st.NoSubs || r.GHCalls != 2 || !strings.Contains(strings.Join(r.Log, " "), "no sub-issues") {
+		t.Fatalf("no sub-issues: set %v, calls %d, log %v", setKeys(r), r.GHCalls, r.Log)
+	}
+	if r := w2.pass(2 * time.Minute); r.GHCalls != 1 {
+		t.Fatalf("asked for sub-issues again: %d calls", r.GHCalls)
 	}
 }
