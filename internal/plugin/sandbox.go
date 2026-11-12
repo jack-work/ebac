@@ -54,6 +54,10 @@ func Needs(plugin string, c *model.Critic) []Grant {
 	switch plugin {
 	case "gh", "tomb":
 		return []Grant{GrantBandCred, GrantCredCache}
+	case "approve":
+		// GHE (ghe-ebac) and Teams (teams-ebac), both from band-cred; the
+		// grants file it reads is world-readable band-grants state.
+		return []Grant{GrantBandCred, GrantCredCache}
 	case "keel":
 		return []Grant{GrantKeelDoor}
 	case "bandhub":

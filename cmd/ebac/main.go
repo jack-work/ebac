@@ -31,6 +31,11 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
+  ebac add-approve --name ahmed-approve --inputs @FORM --chat 19:... --chat-alias ahmed --ask-from 8:orgid:<guid>
+              --grant ebac-approve.aether --principal sbx-cheroot-sec --ping @ROLE [--every 1m]
+                                            the approve path for a sandboxed principal: requests.<id> on the inputs
+                                            form -> APPROVE on bic/aether after grant, scope and Teams-ask checks;
+                                            writes requests.<id>.result (plugin ebac-approve); no seat
   ebac add-scout --name effort-github --authors A[,B] --repo O/R --board @FORM --inputs @FORM [--every 2m]
               [--labels L[,L]] [--title-match REGEX] [--paths GLOB[,GLOB]]
               [--owner AUTHOR[/TITLE_REGEX]=@ROLE ...]
@@ -131,6 +136,8 @@ func main() {
 		err = cmdRepoint(ctx, g, args)
 	case "add-scout":
 		err = cmdAddScout(ctx, g, args)
+	case "add-approve":
+		err = cmdAddApprove(ctx, g, args)
 	case "add-keel-branches":
 		err = cmdAddKeelBranches(ctx, g, args)
 	case "add-band-hub":

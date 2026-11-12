@@ -114,6 +114,10 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			sort.Strings(req.OwnKeys)
 		}
 	}
+	if err == nil && w.SourceName() == model.SourceApprove {
+		// approve-requests decides the requests on its inputs form.
+		req.Inputs, err = p.readInputs(ctx, w)
+	}
 	if err == nil && w.SourceName() == model.SourceScout {
 		// The scout reads its owners' inputs form (merge rule, ledger acks)
 		// and the board's owner marks, read-only, through the core.
@@ -163,6 +167,8 @@ var SourceKeys = map[string][]string{
 	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)
 	// One key per PR and per issue, on the scout's own role form.
 	model.SourceScout: {"pr:*", "issue:*", "claim:*", "warning"},
+	// approve-requests writes only results on its inputs form (Reply.Forms).
+	model.SourceApprove: nil,
 	// Keel branches write their child forms (Reply.Forms) and, on their own
 	// role form, the registry (branch -> child form) and the branches they
 	// could not follow.

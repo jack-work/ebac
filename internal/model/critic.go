@@ -190,6 +190,9 @@ type Critic struct {
 	// Branches is a keel-branches critic's configuration (source
 	// keel-branches).
 	Branches *KeelBranches `json:"keel_branches,omitempty"`
+	// Approve is an approve-requests critic's configuration (source
+	// approve-requests): who may ask, in which chat, under which grant.
+	Requests *ApproveWatch `json:"approve_requests,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).

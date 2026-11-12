@@ -37,6 +37,9 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 		return nil
 	}
 	src := w.SourceName()
+	if src == model.SourceApprove {
+		return validateApproveForms(w, rep)
+	}
 	if src != model.SourceScout && src != model.SourceKeelBranches {
 		return fmt.Errorf("source %s may not write other forms (%d form writes): reply refused", src, len(rep.Forms))
 	}
@@ -130,12 +133,14 @@ func (p *Poller) commitOutbox(ctx context.Context, id string, set map[string]jso
 // orphaned. Its error fails the round after the critic is saved.
 func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Reply) error {
 	src := w.SourceName()
-	if src != model.SourceScout && src != model.SourceKeelBranches {
+	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove {
 		return nil
 	}
 	var err error
 	for _, fw := range rep.Forms {
-		if fw.Inputs {
+		if fw.Inputs && src == model.SourceApprove {
+			err = p.commitResults(ctx, w.InputsForm, fw.Set)
+		} else if fw.Inputs {
 			err = p.commitOutbox(ctx, w.InputsForm, fw.Set)
 		} else {
 			err = p.writeChild(ctx, w, fw)
@@ -283,8 +288,16 @@ func ValidatePings(w *model.Critic, rep *plugin.Reply) error {
 	if len(rep.Pings) == 0 {
 		return nil
 	}
-	if src := w.SourceName(); src != model.SourceScout && src != model.SourceKeelBranches {
+	src := w.SourceName()
+	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove {
 		return fmt.Errorf("source %s may not ping roles: reply refused", w.SourceName())
+	}
+	if src == model.SourceApprove {
+		for i, pg := range rep.Pings {
+			if w.Requests == nil || pg.To != w.Requests.PingTo {
+				return fmt.Errorf("ping %d: approve-requests pings only its configured role: reply refused", i)
+			}
+		}
 	}
 	if len(rep.Pings) > MaxPings {
 		return fmt.Errorf("%d pings in one round (max %d): reply refused", len(rep.Pings), MaxPings)
@@ -360,4 +373,66 @@ func (p *Poller) readInputs(ctx context.Context, w *model.Critic) (map[string]js
 		}
 	}
 	return out, nil
+}
+
+// validateApproveForms: approve-requests writes one thing, the results of its
+// requests on its inputs form: one inputs write, key requests only, each
+// member exactly {"result": {...}}. Never a child form, an unset or a retire.
+func validateApproveForms(w *model.Critic, rep *plugin.Reply) error {
+	for i, fw := range rep.Forms {
+		where := fmt.Sprintf("form write %d", i)
+		switch {
+		case !fw.Inputs || fw.Key != "" || fw.Retire || len(fw.Unset) > 0:
+			return fmt.Errorf("%s: approve-requests writes only its inputs form's results: reply refused", where)
+		case w.InputsForm == "":
+			return fmt.Errorf("%s: the critic has no inputs form: reply refused", where)
+		}
+		for k, v := range fw.Set {
+			if k != "requests" {
+				return fmt.Errorf("%s may not set inputs key %q (allowed: requests): reply refused", where, k)
+			}
+			var members map[string]map[string]json.RawMessage
+			if err := json.Unmarshal(v, &members); err != nil {
+				return fmt.Errorf("%s: requests must be an object of {result}: reply refused", where)
+			}
+			for id, m := range members {
+				if len(m) != 1 || m["result"] == nil {
+					return fmt.Errorf("%s: request %q: only its result may be written: reply refused", where, id)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// commitResults writes each request's result into the inputs form's requests
+// object, member-wise, in one versioned Commit (a dotted key would be a flat
+// decoy, jack-work/figaro#43): the requester's own fields are kept as they
+// are, and a request that is gone or already has a result is left alone, so a
+// result is written once and a decided request is never re-decided.
+func (p *Poller) commitResults(ctx context.Context, id string, set map[string]json.RawMessage) error {
+	var add map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(set["requests"], &add); err != nil || len(add) == 0 {
+		return err
+	}
+	return p.Store.Commit(ctx, id, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		reqs := map[string]json.RawMessage{}
+		if json.Unmarshal(cur["requests"], &reqs) != nil || reqs == nil {
+			return nil, nil
+		}
+		changed := false
+		for rid, m := range add {
+			var r map[string]json.RawMessage
+			if raw, ok := reqs[rid]; !ok || json.Unmarshal(raw, &r) != nil || r == nil || r["result"] != nil {
+				continue // gone, not an object, or decided: left alone
+			}
+			r["result"] = m["result"]
+			reqs[rid] = model.MustJSON(r)
+			changed = true
+		}
+		if !changed {
+			return nil, nil
+		}
+		return map[string]json.RawMessage{"requests": model.MustJSON(reqs)}, nil
+	})
 }
