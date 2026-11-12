@@ -262,6 +262,9 @@ type CriticForm struct {
 	Version uint64
 	Snap    form.Snapshot
 	Keys    map[string]json.RawMessage
+	// local is the scout state kept on disk (runtime_local.go), overlaid on
+	// Runtime.Scout by ebac(); nil when there is none.
+	local json.RawMessage
 }
 
 func (s *Store) ReadForm(ctx context.Context, id string) (*CriticForm, error) {
@@ -281,7 +284,7 @@ func (s *Store) ReadForm(ctx context.Context, id string) (*CriticForm, error) {
 	if err := json.Unmarshal(b, &keys); err != nil {
 		return nil, err
 	}
-	return &CriticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys}, nil
+	return &CriticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys, local: s.readLocal(id)}, nil
 }
 
 func (f *CriticForm) ebac() EbacState {
@@ -289,6 +292,9 @@ func (f *CriticForm) ebac() EbacState {
 		Ebac EbacState `json:"ebac"`
 	}
 	_ = json.Unmarshal(f.Keys["system"], &sys)
+	if len(f.local) > 0 {
+		sys.Ebac.Runtime.Scout = f.local
+	}
 	return sys.Ebac
 }
 
@@ -617,6 +623,12 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	if err != nil {
 		return err
 	}
+	// After the form, never before: the file is never ahead of the entries
+	// the form holds. A failed write does not fail the round: the file stays
+	// behind (or absent), and the worst case is one full re-read.
+	if err := s.writeLocal(w.FormID, w.Runtime.Scout); err != nil {
+		s.warnf("ebac: critic %s: scout state not saved to %s (next round re-reads more): %v\n", w.Name, s.localPath(w.FormID), err)
+	}
 	s.remember(w.FormID, written)
 	adoptWritten(w, written)
 	if len(conflicts) > 0 {
@@ -767,6 +779,7 @@ func (s *Store) Commit(ctx context.Context, id string, build func(cur map[string
 			return err
 		}
 		set, remove := build(f.Keys, f.ebac())
+		stripScout(set) // the scout state lives on disk, never on a form
 		next, err := nextBoard(f.Snap, set, remove)
 		if err != nil {
 			return fmt.Errorf("write %s: %w", id, err)
