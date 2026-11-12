@@ -56,8 +56,9 @@ const (
 	// wait in the state's queue (at most MaxQueue).
 	MaxPingsPerPass = 8
 	MaxQueue        = 50
-	// SweepEvery: every this many passes every branch's threads are read,
-	// whatever the feed said (a backstop for a missed event).
+	// SweepEvery: a branch whose threads were last read at least this many
+	// passes ago may be read again by the sweep (a backstop for a missed
+	// event), in reads the due branches leave over.
 	SweepEvery = 10
 	// MaxPaths bounds the changed paths a branch keeps to match feed events.
 	MaxPaths = 300
@@ -72,13 +73,14 @@ const (
 type Branch struct {
 	Key       string            `json:"k"`
 	Head      string            `json:"h"`
-	Facts     map[string]string `json:"f,omitempty"` // fact key -> digest of the value last written
-	Commits   []string          `json:"c,omitempty"` // its commits since the merge base, 12 hex
-	CodeReady bool              `json:"r,omitempty"` // code_ready as last seen
-	Seen      string            `json:"s,omitempty"` // the newest comment time seen in its threads (RFC 3339 nano)
-	Threads   []string          `json:"t,omitempty"` // its threads' ids (feed events on them touch it)
-	Paths     []string          `json:"p,omitempty"` // its changed paths (a feed event on one touches it)
-	Due       int               `json:"d,omitempty"` // the pass its threads became due to be read (0: not due)
+	Facts     map[string]string `json:"f,omitempty"`  // fact key -> digest of the value last written
+	Commits   []string          `json:"c,omitempty"`  // its commits since the merge base, 12 hex
+	CodeReady bool              `json:"r,omitempty"`  // code_ready as last seen
+	Seen      string            `json:"s,omitempty"`  // the newest comment time seen in its threads (RFC 3339 nano)
+	Threads   []string          `json:"t,omitempty"`  // its threads' ids (feed events on them touch it)
+	Paths     []string          `json:"p,omitempty"`  // its changed paths (a feed event on one touches it)
+	Due       int               `json:"d,omitempty"`  // the pass its threads became due to be read (0: not due)
+	Read      int               `json:"rd,omitempty"` // the pass its threads were last read
 }
 
 // State is the plugin's opaque state (critic runtime.keel_branches).
@@ -230,25 +232,24 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 		logf("NOT FOLLOWED (%d): %s", len(overflow), strings.Join(overflow, "; "))
 	}
 
-	// Which branches' threads to read this pass: those a feed event touches (a thread of theirs, or a path they
-	// change), those whose head moved, new ones, and every one on a sweep, a first pass or a feed that failed.
+	// Which branches' threads to read this pass. Due: those a feed event touches (a thread of theirs, or a path they
+	// change), those whose head moved, new ones; due ones are read first, longest due first. The sweep (a backstop
+	// for a missed event) never makes a branch due: it only fills the reads left over, oldest read first, with a
+	// branch last read at least SweepEvery passes ago, so it cannot grow a backlog the cap never drains.
 	st.Passes++
-	all := st.Passes%SweepEvery == 0
 	touchT, touchP := map[string]bool{}, map[string]bool{}
 	switch {
 	case !st.FeedStarted:
 		head, err := feedHead(ctx, k, repo, &res)
 		if err != nil {
-			logf("feed: %v (every branch's threads read this pass)", err)
+			logf("feed: %v (started next pass)", err)
 		} else {
 			st.Feed, st.FeedStarted = head, true
 		}
-		all = true
 	default:
 		evs, next, err := feedRead(ctx, k, repo, st.Feed, &res)
 		if err != nil {
-			logf("feed: %v (every branch's threads read this pass)", err)
-			all = true
+			logf("feed: %v (its cursor kept: the events are read next pass)", err)
 			break
 		}
 		st.Feed = next
@@ -273,7 +274,7 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 	dueNow := map[string]bool{}
 	for _, name := range names {
 		b := st.Branches[name]
-		now := b == nil || all || live[name].SHA != b.Head || in.Children[b.Key] == "" || touched(b, touchT, touchP)
+		now := b == nil || live[name].SHA != b.Head || in.Children[b.Key] == "" || touched(b, touchT, touchP)
 		dueNow[name] = now
 		switch {
 		case b != nil && b.Due > 0:
@@ -295,6 +296,19 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 			break
 		}
 		readNow[q.name] = true
+	}
+	var sweep []string
+	for _, name := range names {
+		if b := st.Branches[name]; b != nil && !readNow[name] && b.Due == 0 && !dueNow[name] && st.Passes-b.Read >= SweepEvery {
+			sweep = append(sweep, name)
+		}
+	}
+	sort.SliceStable(sweep, func(i, j int) bool { return st.Branches[sweep[i]].Read < st.Branches[sweep[j]].Read })
+	for _, name := range sweep {
+		if len(readNow) == MaxThreadReads {
+			break
+		}
+		readNow[name] = true
 	}
 
 	for _, name := range names {
@@ -354,7 +368,7 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 				threads = nil
 			}
 			if err == nil {
-				b.Due = 0
+				b.Due, b.Read = 0, st.Passes
 				mine = branchThreads(threads, name, b.Commits)
 				facts["threads"] = threadsOf(mine)
 				facts["reviewers"] = reviewersOf(mine)

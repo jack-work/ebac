@@ -25,6 +25,7 @@ func sha(c byte, i int) string { return fmt.Sprintf("%c%011d%028d", c, i, 0) }
 
 type fbranch struct {
 	letter  byte
+	idx     int
 	commits []keel.Commit // newest first, since the merge base
 	files   []keel.Change
 	time    int64
@@ -54,9 +55,9 @@ func (f *fakeKeel) push(name string, n int, files ...string) string {
 		f.branches[name] = b
 	}
 	if b.letter == 0 {
-		b.letter = byte('a' + len(f.branches)%20)
+		b.letter, b.idx = byte('a'+len(f.branches)%20), len(f.branches)
 	}
-	c := keel.Commit{SHA: sha(b.letter, len(b.commits)+100*n), Subject: fmt.Sprintf("%s commit %d", name, len(b.commits)+1)}
+	c := keel.Commit{SHA: sha(b.letter, b.idx*100000+len(b.commits)+100*n), Subject: fmt.Sprintf("%s commit %d", name, len(b.commits)+1)}
 	b.commits = append([]keel.Commit{c}, b.commits...)
 	b.files = nil
 	for _, p := range files {
@@ -590,12 +591,78 @@ func TestThreadsPerBranchAtItsHead(t *testing.T) {
 	if r := w.pass(); len(w.k.revs) != 1 || w.k.revs[0] != h2 || len(r.Pings) != 1 {
 		t.Fatalf("touched by thread id: revs %v pings %v", w.k.revs, r.Pings)
 	}
-	// The feed fails: every branch is read, and the round still succeeds.
+	// The feed fails: the round still succeeds and its cursor stays, so the reply made meanwhile is read next pass.
 	w.k.revs = nil
 	w.k.fail["events"] = errors.New("door 403")
+	w.k.threads["elsewhere.go"][0].Comments = append(w.k.threads["elsewhere.go"][0].Comments, comment("c7", "rev-b", "again", w.now.Add(4*time.Minute)))
 	r = w.pass()
-	if len(w.k.revs) != 2 || !strings.Contains(strings.Join(r.Log, " "), "feed: door 403") {
-		t.Fatalf("feed down: revs %v log %v", w.k.revs, r.Log)
+	if !strings.Contains(strings.Join(r.Log, " "), "feed: door 403") {
+		t.Fatalf("feed down: log %v", r.Log)
+	}
+	delete(w.k.fail, "events")
+	w.k.revs = nil
+	if r := w.pass(); !containsStr(w.k.revs, h2) || len(r.Pings) != 1 {
+		t.Fatalf("after the feed came back: revs %v pings %v", w.k.revs, r.Pings)
+	}
+}
+
+func containsStr(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// 86 branches at 2 reads a pass (the live aether-work shape): every branch is read within 43 passes, and from then on
+// nothing is deferred: the sweep reads only in leftover slots, never re-queues, and a new head is read the next pass.
+func TestBacklogDrainsAndSweepNeverQueues(t *testing.T) {
+	w := newWorld(t)
+	for i := 0; i < 84; i++ {
+		w.k.push(fmt.Sprintf("work/o%02d/t", i), 1, fmt.Sprintf("f%02d.go", i))
+	}
+	read := map[string]bool{}
+	deferredAt := 0
+	for pass := 1; pass <= 120; pass++ {
+		w.k.revs = nil
+		r := w.pass()
+		if len(w.k.revs) > MaxThreadReads {
+			t.Fatalf("pass %d: %d reads", pass, len(w.k.revs))
+		}
+		for _, rv := range w.k.revs {
+			read[rv] = true
+		}
+		if strings.Contains(strings.Join(r.Log, " "), "deferred") {
+			deferredAt = pass
+		}
+		if pass == 43 && len(read) != 86 {
+			t.Fatalf("after 43 passes %d of 86 branches read", len(read))
+		}
+	}
+	if deferredAt > 43 {
+		t.Fatalf("still deferring at pass %d", deferredAt)
+	}
+	// Steady state: the sweep keeps reading (oldest first, two a pass), and every branch comes round.
+	swept := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		w.k.revs = nil
+		r := w.pass()
+		if strings.Contains(strings.Join(r.Log, " "), "deferred") {
+			t.Fatalf("steady state deferred: %v", r.Log)
+		}
+		for _, rv := range w.k.revs {
+			swept[rv] = true
+		}
+	}
+	if len(swept) < 86 {
+		t.Fatalf("the sweep came round %d of 86 branches in 50 passes", len(swept))
+	}
+	// A new head goes before the sweep, read the next pass.
+	h := w.k.push("work/o07/t", 2, "f07.go")
+	w.k.revs = nil
+	if r := w.pass(); !containsStr(w.k.revs, h) || strings.Contains(strings.Join(r.Log, " "), "deferred") {
+		t.Fatalf("new head: revs %v log %v", w.k.revs, r.Log)
 	}
 }
 
