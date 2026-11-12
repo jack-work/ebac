@@ -512,7 +512,7 @@ func TestEntryFieldsExactlyTheList(t *testing.T) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	if strings.Join(got, " ") != "a dg l s t u" {
+	if strings.Join(got, " ") != "a l s t u" {
 		t.Fatalf("issue entry %v", is)
 	}
 	// m appears once merged; d once a draft.
@@ -1155,5 +1155,40 @@ func TestUntrackedEntriesRemoved(t *testing.T) {
 	w.own = []string{"issue:301", "pr:101", "pr:102", "pr:201"}
 	if r := w.pass(2 * time.Minute); len(r.Unset) != 0 {
 		t.Fatalf("tracked entries removed: %v", r.Unset)
+	}
+}
+
+// Titles are cut at MaxTitle characters (runes, a cut one ending "~") on PR, issue and claim entries; a failing check's
+// name loses its parenthesised suffix and is cut at MaxCheckName.
+func TestTitlesAndCheckNamesClipped(t *testing.T) {
+	long := "[Effort ledger][12-29] feat(llm-handler): " + strings.Repeat("é", 70)
+	if got := clip(long, MaxTitle); len([]rune(got)) != MaxTitle || !strings.HasSuffix(got, "~") || !strings.HasPrefix(long, strings.TrimSuffix(got, "~")) {
+		t.Fatalf("clip %q", got)
+	}
+	if clip("short", MaxTitle) != "short" {
+		t.Fatal("a short title clipped")
+	}
+	for in, want := range map[string]string{
+		"Aether Runtime PR Pipeline (Checks Trailer, frozen-path, registry, dashboard, CSC and supply-chain gates)": "Aether Runtime PR Pipeline",
+		"Aether Rust PR Pipeline": "Aether Rust PR Pipeline",
+		"build (linux)":           "build",
+		"(only a suffix)":         "(only a suffix)",
+		strings.Repeat("x", 50):   strings.Repeat("x", 39) + "~",
+	} {
+		if got := checkName(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	w := newWorld(t)
+	w.gh.items[101].title = "[Effort router][1-2] " + strings.Repeat("a", 100)
+	w.gh.items[101].checks = []map[string]any{{"name": "Aether Runtime PR Pipeline (Checks Trailer, frozen-path)", "conclusion": "FAILURE"}}
+	w.gh.items[301].title = strings.Repeat("b", 90)
+	r := w.pass(0)
+	e := entry(t, r, "pr:101")
+	if len([]rune(e["t"].(string))) != MaxTitle || fmt.Sprint(e["c"]) != "map[f:1 r:SUCCESS x:[Aether Runtime PR Pipeline]]" {
+		t.Fatalf("pr entry t %q c %v", e["t"], e["c"])
+	}
+	if len(entry(t, r, "issue:301")["t"].(string)) != MaxTitle {
+		t.Fatal("issue title not clipped")
 	}
 }

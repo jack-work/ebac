@@ -74,8 +74,8 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 			t.Fatalf("ping to %s: %q", to, text)
 		}
 	}
-	if dg, _ := entry(t, r, "issue:301")["dg"].(string); !strings.HasSuffix(dg, ".1") || len(dg) != 28 {
-		t.Fatalf("digests %q", dg)
+	if d := w.st.Issues[301].D; d.HumanComments != 1 || entry(t, r, "issue:301")["dg"] != nil {
+		t.Fatalf("digests %+v (state only, not on the entry)", d)
 	}
 
 	// The sync (as John-Kelliher) rewrites its block and ticks a checklist item inside it: nobody is pinged.

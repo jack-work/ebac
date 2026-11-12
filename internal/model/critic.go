@@ -613,6 +613,9 @@ type ScoutWatch struct {
 	// FilesTitle: an open PR whose title matches it carries its changed
 	// files on its entry (fs).
 	FilesTitle string `json:"files_title,omitempty"`
+	// FilesAuthor are the authors whose matching PRs carry fs (empty: the
+	// first of Authors, ours).
+	FilesAuthor []string `json:"files_author,omitempty"`
 }
 
 // OwnerRule maps a PR to its owner role: author, optionally a title regex.

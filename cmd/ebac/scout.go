@@ -37,6 +37,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	claimPhrase := fs.String("claim-phrase", "Praxis claimed", "claims: the phrase of a claim comment")
 	claimLabel := fs.String("claim-label", "", "claims: an issue carrying this label is a claim (e.g. praxis:pr-open)")
 	filesTitle := fs.String("files-title", "", "open PRs whose title matches this regex carry their changed files (fs)")
+	filesAuthor := fs.String("files-author", "", "fs only on PRs by these authors, comma-separated (default: the first of --authors)")
 	host := fs.String("host", "microsoft.ghe.com", "forge host")
 	every := fs.Duration("every", 2*time.Minute, "poll interval")
 	_ = fs.Parse(args)
@@ -44,7 +45,8 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	sw := &model.ScoutWatch{Repo: *repo, Authors: splitList(*authors), Labels: splitList(*labels), TitleMatch: *title, Paths: splitList(*paths),
-		Owners: owners, WarnTo: *warn, ClaimBy: *claimBy, ClaimLabel: *claimLabel, FilesTitle: *filesTitle}
+		Owners: owners, WarnTo: *warn, ClaimBy: *claimBy, ClaimLabel: *claimLabel, FilesTitle: *filesTitle,
+		FilesAuthor: splitList(*filesAuthor)}
 	if sw.ClaimBy != "" {
 		sw.ClaimPhrase = *claimPhrase
 	}

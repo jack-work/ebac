@@ -53,7 +53,7 @@ const JobsWindow = 72 * time.Hour
 // under another one (a code upgrade that changed the entries) re-reads every
 // tracked PR and issue once and rewrites every entry, as a filter change does.
 // Bump it with any change to PREntry or IssueEntry.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // KeepClosed is the least an entry stays after its PR merged or closed (and,
 // for a PR, until its ledger record is acked), or its issue closed (S2).
@@ -62,6 +62,47 @@ const KeepClosed = 24 * time.Hour
 // KeepClaimClosed is how long a merged or closed claim stays (its last
 // status seen by the steward for a few passes).
 const KeepClaimClosed = 2 * time.Hour
+
+// MaxTitle caps an entry's title, MaxCheckName a failing check's name (the
+// form's budget: live, 2026-11-12, titles past 70 characters were 9.8 KB).
+const (
+	MaxTitle     = 70
+	MaxCheckName = 40
+)
+
+var checkSuffixRE = regexp.MustCompile(`\s*\([^()]*\)\s*$`)
+
+// checkName is a failing check's name without its parenthesised suffix, at most MaxCheckName characters.
+func checkName(n string) string {
+	if s := checkSuffixRE.ReplaceAllString(n, ""); s != "" {
+		n = s
+	}
+	return clip(n, MaxCheckName)
+}
+
+// filesBy says whether a PR by author may carry fs: one of FilesAuthor, else
+// the first of Authors (ours: a Chiqun PR under one of our tags is not ours).
+func filesBy(w model.ScoutWatch, author string) bool {
+	by := w.FilesAuthor
+	if len(by) == 0 && len(w.Authors) > 0 {
+		by = w.Authors[:1]
+	}
+	for _, a := range by {
+		if strings.EqualFold(a, author) {
+			return true
+		}
+	}
+	return false
+}
+
+// clip cuts s to at most max characters, a cut one ending "~".
+func clip(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "~"
+}
 
 // MaxFiles caps the changed files an entry carries (fs, a claim's files).
 const MaxFiles = 50
@@ -149,7 +190,9 @@ type Hub interface {
 //	          [[job id, queue, verdict, tests_run?, crates_checked?], ...]
 //	          (tests_run null when unknown before a known crates_checked)
 //	issue:<n> a author, t title, s state (OPEN CLOSED), l labels, u updated, cl closed,
-//	          p parent issue, sub sub-issues, dg digests "body.checklist.labels.humans"
+//	          p parent issue, sub sub-issues
+//	(every title at most MaxTitle characters, a cut one ending "~"; failing check
+//	names without a parenthesised suffix, at most MaxCheckName)
 
 // Verdict is one reviewer's latest verdict and the head it read.
 type Verdict struct {
@@ -255,7 +298,6 @@ type IssueEntry struct {
 	Closed  int64    `json:"cl,omitempty"`
 	Parent  int      `json:"p,omitempty"`
 	Subs    []int    `json:"sub,omitempty"`
-	Digests string   `json:"dg"`
 }
 
 // IssueDigests are what a material change is measured on (S5): the body
@@ -465,7 +507,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// filter takes in would never come back through updated>=cursor. Its path verdicts were the old filter's.
 	cursor := prev.Cursor
 	if fd := digest([]any{in.Watch.Repo, in.Watch.Authors, in.Watch.Labels, in.Watch.TitleMatch, in.Watch.Paths,
-		in.Watch.ClaimBy, in.Watch.ClaimPhrase, in.Watch.ClaimLabel, in.Watch.FilesTitle}); fd != st.Filter {
+		in.Watch.ClaimBy, in.Watch.ClaimPhrase, in.Watch.ClaimLabel, in.Watch.FilesTitle, in.Watch.FilesAuthor}); fd != st.Filter {
 		if st.Filter != "" {
 			logf("filter changed: full re-read of every open PR and issue")
 		}
@@ -665,7 +707,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		js := jobsFor(jobs, st.Tests, head)
 		mk := marks.of(n)
 		e := prEntry(p, pol, js, mk)
-		if filesRE != nil && p.Facts.State == "OPEN" && filesRE.MatchString(p.Title) {
+		if filesRE != nil && p.Facts.State == "OPEN" && filesRE.MatchString(p.Title) && filesBy(in.Watch, p.Author) {
 			e.Files = Grouped(p.Files, MaxFiles)
 		}
 		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, ownerOf(owners, p.Author, p.Title)
@@ -770,8 +812,8 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			st.Issues[n] = t
 		}
 		d, lastHuman := issueDigests(is)
-		e := IssueEntry{Author: is.Author, Title: is.Title, State: is.State, Labels: is.Labels, Updated: unix(is.Updated),
-			Parent: is.Parent, Subs: is.Subs, Digests: d.String()}
+		e := IssueEntry{Author: is.Author, Title: clip(is.Title, MaxTitle), State: is.State, Labels: is.Labels, Updated: unix(is.Updated),
+			Parent: is.Parent, Subs: is.Subs}
 		if e.Labels == nil {
 			e.Labels = []string{}
 		}
@@ -823,7 +865,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			t = &TrackedClaim{}
 			st.Claims[num] = t
 		}
-		e := ClaimEntry{Issue: num, PR: c.PR, Title: c.Title, Files: Grouped(c.Files, MaxFiles), At: unix(c.At), Status: c.Status()}
+		e := ClaimEntry{Issue: num, PR: c.PR, Title: clip(c.Title, MaxTitle), Files: Grouped(c.Files, MaxFiles), At: unix(c.At), Status: c.Status()}
 		switch e.Status {
 		case "merged", "closed":
 			done := unix(c.PRDone)
@@ -959,7 +1001,7 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 		}
 		return ""
 	}
-	e := PREntry{Author: p.Author, Title: p.Title, State: p.Facts.State, Head8: head8, Base: p.Base,
+	e := PREntry{Author: p.Author, Title: clip(p.Title, MaxTitle), State: p.Facts.State, Head8: head8, Base: p.Base,
 		Checks: checksOf(p), Threads: p.Facts.Unresolved, Mergeable: p.Facts.Mergeable, MergeState: mergecheck.StateOf(&p.Facts, steps),
 		Automaton: p.Automaton, Updated: unix(p.Updated), Merged: unix(p.MergedAt), Created: unix(p.Created), Ready: unix(p.ReadyAt),
 		Lines: [2]int{p.Additions, p.Deletions}, FilesKind: mergecheck.KindOf(p.KindFiles()), Band: bandOf(js)}
@@ -1010,7 +1052,7 @@ func checksOf(p PR) Checks {
 		default:
 			c.Fail++
 			if len(c.Failing) < 3 {
-				c.Failing = append(c.Failing, x.Name)
+				c.Failing = append(c.Failing, checkName(x.Name))
 			}
 		}
 	}

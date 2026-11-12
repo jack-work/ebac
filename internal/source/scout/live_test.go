@@ -176,7 +176,7 @@ func TestLiveIssueChangeReachesOwner(t *testing.T) {
 		t.Fatalf("sync pass: %v\n%s", err, out.String())
 	}
 	keys, _, _ := f.FormRaw(ctx, role)
-	if len(sent) != 0 || !strings.Contains(string(keys["issue:301"]), `"dg":"`) {
+	if len(sent) != 0 || !strings.Contains(string(keys["issue:301"]), `"t":"`) {
 		t.Fatalf("sync edit: sent %v, entry %s", sent, keys["issue:301"])
 	}
 

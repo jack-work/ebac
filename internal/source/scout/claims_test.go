@@ -111,6 +111,18 @@ func TestFilesOnTaggedPRs(t *testing.T) {
 	if r := w.pass(2 * time.Minute); entry(t, r, "pr:101")["fs"] != nil {
 		t.Fatal("an untagged PR with files carries fs")
 	}
+	// A tagged PR by Chiqun is not ours: no fs, unless files_author names him.
+	w.gh.items[205] = &item{n: 205, author: his, title: "[Effort retire][9-12][3-3] refactor: delete", state: "OPEN", head: headA, mergeable: "MERGEABLE",
+		updated: w.now.Add(time.Minute), files: []string{"aether_rust/crates/aether_services/src/decision_judge/x.rs"}}
+	if r := w.pass(2 * time.Minute); r.Set["pr:205"] == nil || entry(t, r, "pr:205")["fs"] != nil {
+		t.Fatalf("Chiqun's tagged PR: %s", r.Set["pr:205"])
+	}
+	w.pass(2 * time.Minute)
+	w.pass(2 * time.Minute)                   // #205 now older than the cursor
+	w.watch.FilesAuthor = []string{ours, his} // a config change re-reads: the untouched PR gets its fs
+	if r := w.pass(2 * time.Minute); entry(t, r, "pr:205")["fs"] == nil {
+		t.Fatalf("files_author naming him: %s", r.Set["pr:205"])
+	}
 	if g := Grouped(make([]string, 80), MaxFiles); len(g[""]) != MaxFiles {
 		t.Fatalf("cap: %d", len(g[""]))
 	}
@@ -122,8 +134,13 @@ func TestClosedClaimsPrunedFirst(t *testing.T) {
 	w.pass(0)
 	p := w.gh.items[101]
 	p.state, p.mergedAt, p.updated = "MERGED", w.now.Add(-5*time.Hour).Format(time.RFC3339), w.now.Add(time.Minute)
-	w.gh.items[5001] = &item{n: 5001, issue: true, author: "someone", title: "a claim " + strings.Repeat("x", 600), state: "CLOSED", closedAt: w.now.Format(time.RFC3339),
+	w.gh.items[5001] = &item{n: 5001, issue: true, author: "someone", title: "a claim", closedBy: []int{6009}, state: "CLOSED", closedAt: w.now.Format(time.RFC3339),
 		updated: w.now.Add(time.Minute), comments: []map[string]any{claimed(w.now.Add(-time.Hour))}}
+	big := []string{}
+	for i := 0; i < 40; i++ {
+		big = append(big, fmt.Sprintf("aether_rust/crates/c%02d/src/lib.rs", i))
+	}
+	w.gh.items[6009] = &item{n: 6009, author: "praxis", title: "fix", state: "MERGED", head: headB, updated: w.now.Add(-time.Hour), files: big}
 	w.pass(2 * time.Minute)
 	if w.st.Claims[5001] == nil || w.st.PRs[101].State != "MERGED" {
 		t.Fatalf("setup: claim %v pr %v", w.st.Claims[5001], w.st.PRs[101])
@@ -200,5 +217,15 @@ func TestUntrackedClaimRemoved(t *testing.T) {
 	w.own = []string{"claim:5001", "claim:4242", "issue:301", "pr:101", "pr:102", "pr:201"}
 	if r := w.pass(2 * time.Minute); strings.Join(r.Unset, " ") != "claim:4242" {
 		t.Fatalf("unset %v", r.Unset)
+	}
+}
+
+// A claim's title is clipped like every entry's.
+func TestClaimTitleClipped(t *testing.T) {
+	w := claimWorld(t)
+	w.gh.items[5001] = &item{n: 5001, issue: true, author: "someone", title: strings.Repeat("c", 120), state: "OPEN", updated: w.now.Add(-time.Minute),
+		comments: []map[string]any{claimed(w.now.Add(-time.Hour))}}
+	if title, _ := claimOf(t, w.pass(0), 5001)["title"].(string); len(title) != MaxTitle || !strings.HasSuffix(title, "~") {
+		t.Fatalf("claim title %q", title)
 	}
 }
