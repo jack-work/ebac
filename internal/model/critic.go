@@ -640,6 +640,11 @@ type KeelBranches struct {
 	// URL and TokenCmd read keel over HTTPS; unset reads ebac's keel door.
 	URL      string   `json:"url,omitempty"`
 	TokenCmd []string `json:"token_cmd,omitempty"`
+	// MaxThreadReads caps a pass's threads reads of DUE branches (0: 8);
+	// SweepReads caps the sweep's reads in the slots they leave (0: 2), so a
+	// quiet pass costs refs, the feed and at most SweepReads reads.
+	MaxThreadReads int `json:"max_thread_reads,omitempty"`
+	SweepReads     int `json:"sweep_reads,omitempty"`
 }
 
 // ChildLease is a child form's lifetime (its system.ttl), renewed each pass:

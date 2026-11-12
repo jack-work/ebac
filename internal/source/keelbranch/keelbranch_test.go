@@ -182,6 +182,7 @@ type world struct {
 	max      int
 	forms    map[string]map[string]json.RawMessage // child key -> its keys as written
 	critic   map[string]json.RawMessage
+	reads    [2]int // the critic's max_thread_reads and sweep_reads (0: defaults)
 }
 
 func newWorld(t *testing.T) *world {
@@ -206,7 +207,7 @@ func (w *world) try() (Result, error) {
 	for k := range w.k.calls {
 		delete(w.k.calls, k)
 	}
-	r, err := Run(context.Background(), w.k, w.st, Pass{Watch: model.KeelBranches{Repo: "aether/aether", Reviewer: reviewer},
+	r, err := Run(context.Background(), w.k, w.st, Pass{Watch: model.KeelBranches{Repo: "aether/aether", Reviewer: reviewer, MaxThreadReads: w.reads[0], SweepReads: w.reads[1]},
 		Children: w.children, Owned: w.owned, Max: w.max, Now: w.now})
 	if err != nil {
 		return r, err
@@ -619,6 +620,7 @@ func containsStr(list []string, s string) bool {
 // nothing is deferred: the sweep reads only in leftover slots, never re-queues, and a new head is read the next pass.
 func TestBacklogDrainsAndSweepNeverQueues(t *testing.T) {
 	w := newWorld(t)
+	w.reads = [2]int{2, 2}
 	for i := 0; i < 84; i++ {
 		w.k.push(fmt.Sprintf("work/o%02d/t", i), 1, fmt.Sprintf("f%02d.go", i))
 	}
@@ -627,7 +629,7 @@ func TestBacklogDrainsAndSweepNeverQueues(t *testing.T) {
 	for pass := 1; pass <= 120; pass++ {
 		w.k.revs = nil
 		r := w.pass()
-		if len(w.k.revs) > MaxThreadReads {
+		if len(w.k.revs) > 2 {
 			t.Fatalf("pass %d: %d reads", pass, len(w.k.revs))
 		}
 		for _, rv := range w.k.revs {
@@ -667,16 +669,17 @@ func TestBacklogDrainsAndSweepNeverQueues(t *testing.T) {
 }
 
 // A threads read that fails (a cold keel past the timeout) fails nothing else: the pass completes, the other branches
-// are read, that branch's last known threads stand and it stays due, read on a later pass. At most MaxThreadReads
+// are read, that branch's last known threads stand and it stays due, read on a later pass. At most max_thread_reads
 // reads a pass, the longest due first; the rest wait.
 func TestThreadReadsNonFatalAndCapped(t *testing.T) {
 	w := newWorld(t)
+	w.reads = [2]int{2, 2}
 	for _, b := range []string{"work/a/one", "work/b/two", "work/c/three"} {
 		w.k.push(b, 1, b+".go")
 	}
 	// Five branches due on the first pass: two read now, the rest on the next passes, oldest due first.
 	r := w.pass()
-	if len(w.k.revs) != MaxThreadReads || !strings.Contains(strings.Join(r.Log, " "), "threads of 3 branch(es) deferred") {
+	if len(w.k.revs) != 2 || !strings.Contains(strings.Join(r.Log, " "), "threads of 3 branch(es) deferred") {
 		t.Fatalf("first pass: %d reads, log %v", len(w.k.revs), r.Log)
 	}
 	// The two read move on (due again now): the three waiting since the first pass go before them.
@@ -691,7 +694,7 @@ func TestThreadReadsNonFatalAndCapped(t *testing.T) {
 	for i := 0; i < 4 && len(read) < 5; i++ {
 		w.k.revs = nil
 		w.pass()
-		if len(w.k.revs) > MaxThreadReads {
+		if len(w.k.revs) > 2 {
 			t.Fatalf("pass %d: %d reads", i+2, len(w.k.revs))
 		}
 		for _, rv := range w.k.revs {
@@ -721,5 +724,52 @@ func TestThreadReadsNonFatalAndCapped(t *testing.T) {
 	w.pass()
 	if len(w.k.revs) != 1 || w.k.revs[0] != hj || w.st.Branches["work/John-Kelliher/effort-x"].Due != 0 {
 		t.Fatalf("retry: revs %v due %d", w.k.revs, w.st.Branches["work/John-Kelliher/effort-x"].Due)
+	}
+}
+
+// The two caps from the critic: max_thread_reads (default 8) for due branches, sweep_reads (default 2) for the sweep
+// in the slots they leave. A burst of new heads drains 8 a pass; a quiet pass is refs, the feed and 2 sweep reads.
+func TestReadCaps(t *testing.T) {
+	w := newWorld(t)
+	for i := 0; i < 18; i++ {
+		w.k.push(fmt.Sprintf("work/o%02d/t", i), 1, fmt.Sprintf("f%02d.go", i))
+	}
+	r := w.pass() // 20 new branches: 8 read, 12 deferred
+	if len(w.k.revs) != 8 || !strings.Contains(strings.Join(r.Log, " "), "threads of 12 branch(es) deferred") {
+		t.Fatalf("burst: %d reads, log %v", len(w.k.revs), r.Log)
+	}
+	for i := 0; i < 2; i++ {
+		w.k.revs = nil
+		w.pass()
+	}
+	// All read (8+8+4: the last pass's 4 spare slots take no sweep: nothing is SweepEvery old yet).
+	for i := 0; i < SweepEvery; i++ {
+		w.k.revs = nil
+		w.pass()
+		if n := len(w.k.revs); n > SweepReads {
+			t.Fatalf("quiet pass %d: %d reads", i, n)
+		}
+	}
+	w.k.revs = nil
+	for k := range w.k.calls {
+		delete(w.k.calls, k)
+	}
+	w.pass()
+	if len(w.k.revs) != 2 || w.k.total() != 4 { // the defaults: a quiet pass is 4 calls
+		t.Fatalf("quiet pass with the sweep due: %d reads, calls %v", len(w.k.revs), w.k.calls)
+	}
+	// Configured: 3 due reads, 1 sweep read.
+	w.reads = [2]int{3, 1}
+	for i := 0; i < 5; i++ {
+		w.k.push(fmt.Sprintf("work/o%02d/t", i), 2, fmt.Sprintf("f%02d.go", i))
+	}
+	w.k.revs = nil
+	if r := w.pass(); len(w.k.revs) != 3 || !strings.Contains(strings.Join(r.Log, " "), "threads of 2 branch(es) deferred to later passes (at most 3 reads a pass)") {
+		t.Fatalf("configured caps: %d reads, log %v", len(w.k.revs), r.Log)
+	}
+	w.k.revs = nil
+	w.pass() // the last 2 due, then 1 slot left for the sweep, capped at 1
+	if len(w.k.revs) != 3 {
+		t.Fatalf("2 due + 1 sweep: %d reads", len(w.k.revs))
 	}
 }

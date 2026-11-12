@@ -62,11 +62,13 @@ const (
 	SweepEvery = 10
 	// MaxPaths bounds the changed paths a branch keeps to match feed events.
 	MaxPaths = 300
-	// MaxThreadReads bounds the threads?rev reads of one pass: a cold keel
-	// blames each threaded file at a new sha, and the reads must not stack
-	// past the plugin's timeout. Branches due beyond it wait (Due), oldest
-	// first, for later passes.
-	MaxThreadReads = 2
+	// MaxThreadReads bounds a pass's threads?rev reads of due branches (the
+	// default of the critic's keel_branches.max_thread_reads): reads must not
+	// stack past the plugin's timeout. Branches due beyond it wait (Due),
+	// oldest first, for later passes. SweepReads bounds the sweep's reads in
+	// the slots the due ones leave (keel_branches.sweep_reads).
+	MaxThreadReads = 8
+	SweepReads     = 2
 )
 
 // Branch is what the state keeps per followed branch.
@@ -265,7 +267,14 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 	}
 	sort.Strings(names)
 
-	// Due: what was due and not read yet, plus what this pass makes due. Read: the MaxThreadReads longest due.
+	// Due: what was due and not read yet, plus what this pass makes due. Read: the maxReads longest due.
+	maxReads, sweepReads := in.Watch.MaxThreadReads, in.Watch.SweepReads
+	if maxReads <= 0 {
+		maxReads = MaxThreadReads
+	}
+	if sweepReads <= 0 {
+		sweepReads = SweepReads
+	}
 	type due struct {
 		name  string
 		since int
@@ -291,8 +300,8 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 	})
 	readNow := map[string]bool{}
 	for i, q := range queue {
-		if i == MaxThreadReads {
-			logf("threads of %d branch(es) deferred to later passes (at most %d reads a pass)", len(queue)-i, MaxThreadReads)
+		if i == maxReads {
+			logf("threads of %d branch(es) deferred to later passes (at most %d reads a pass)", len(queue)-i, maxReads)
 			break
 		}
 		readNow[q.name] = true
@@ -304,11 +313,13 @@ func Run(ctx context.Context, k Keel, prev State, in Pass) (Result, error) {
 		}
 	}
 	sort.SliceStable(sweep, func(i, j int) bool { return st.Branches[sweep[i]].Read < st.Branches[sweep[j]].Read })
+	swept := 0
 	for _, name := range sweep {
-		if len(readNow) == MaxThreadReads {
+		if len(readNow) == maxReads || swept == sweepReads {
 			break
 		}
 		readNow[name] = true
+		swept++
 	}
 
 	for _, name := range names {
