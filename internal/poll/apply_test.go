@@ -293,8 +293,13 @@ func TestLiveRosterRoundReadsTheStore(t *testing.T) {
 			roles++
 		}
 	}
-	if roles == 0 || fm["forks"] == nil || fm["updated"] == nil {
-		t.Fatalf("roster keys missing: %d role keys, forks %v, updated %v", roles, fm["forks"] != nil, fm["updated"] != nil)
+	if roles == 0 || fm["forks"] == nil {
+		t.Fatalf("roster keys missing: %d role keys, forks %v", roles, fm["forks"] != nil)
+	}
+	// updated was dropped (118ac63): the roster writes only on change, so a
+	// timestamp would rewrite the form every round. It must stay gone.
+	if fm["updated"] != nil {
+		t.Fatalf("roster wrote the dropped key updated: %s", fm["updated"])
 	}
 	t.Logf("store: %d arias, %d roles on the form", seen, roles)
 
