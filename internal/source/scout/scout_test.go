@@ -43,6 +43,8 @@ type item struct {
 	readyAt    string           // PR: its last ready-for-review event
 	closedBy   []int            // issue: the PRs that close it
 	events     []map[string]any // issue: label and state events, oldest first
+	base       string           // PR: its base branch ("" main)
+	mergeState string           // PR: its mergeStateStatus ("" BLOCKED)
 }
 
 func (p *item) gql() map[string]any {
@@ -100,8 +102,15 @@ func (p *item) gql() map[string]any {
 	if p.readyAt != "" {
 		base["timelineItems"] = map[string]any{"nodes": []any{map[string]any{"__typename": "ReadyForReviewEvent", "createdAt": p.readyAt}}}
 	}
+	baseRef, mergeState := p.base, p.mergeState
+	if baseRef == "" {
+		baseRef = "main"
+	}
+	if mergeState == "" {
+		mergeState = "BLOCKED"
+	}
 	for k, v := range map[string]any{"__typename": "PullRequest", "isDraft": p.draft, "mergeable": p.mergeable,
-		"mergeStateStatus": "BLOCKED", "headRefOid": p.head, "baseRefName": "main", "mergedAt": p.mergedAt, "body": p.body,
+		"mergeStateStatus": mergeState, "headRefOid": p.head, "baseRefName": baseRef, "mergedAt": p.mergedAt, "body": p.body,
 		"files":         map[string]any{"totalCount": len(p.files), "pageInfo": map[string]any{"hasNextPage": more != "", "endCursor": more}, "nodes": files},
 		"reviewThreads": map[string]any{"nodes": threads}, "comments": map[string]any{"nodes": comments},
 		"latestOpinionatedReviews": map[string]any{"nodes": reviews},
@@ -134,11 +143,15 @@ type fakeGH struct {
 	queries  []string
 	pageSize int
 	fail     error
-	noSubs   bool  // a forge without sub-issues: a query naming subIssues is refused
-	noIssues bool  // issue reads by number fail
-	heavy    int   // when set: a search page or PR batch over this many is refused as too heavy
-	pages    []int // the page size of each search call
+	noSubs   bool              // a forge without sub-issues: a query naming subIssues is refused
+	noIssues bool              // issue reads by number fail
+	heavy    int               // when set: a search page or PR batch over this many is refused as too heavy
+	pages    []int             // the page size of each search call
+	heads    map[string]string // branch -> head commit: answers the search's bh alias (nil: no bh)
+	light    []string          // the mergeability-only queries
 }
+
+var refRE = regexp.MustCompile(`r(\d+): ref\(qualifiedName:"refs/heads/([^"]+)"\)`)
 
 var (
 	searchRE  = regexp.MustCompile(`([ac]\d+): search\(type:ISSUE, first:\d+(?:, after:"([^"]*)")?, query:"((?:[^"\\]|\\.)*)"\)`)
@@ -253,6 +266,17 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 			}
 			out[m[1]] = map[string]any{"pageInfo": map[string]any{"hasNextPage": end < len(match), "endCursor": strconv.Itoa(end)}, "nodes": nodes}
 		}
+		if g.heads != nil && strings.Contains(q, "bh: repository") {
+			bh := map[string]any{}
+			for _, m := range refRE.FindAllStringSubmatch(q, -1) {
+				if h, ok := g.heads[m[2]]; ok {
+					bh["r"+m[1]] = map[string]any{"target": map[string]any{"oid": h}}
+				} else {
+					bh["r"+m[1]] = nil
+				}
+			}
+			out["bh"] = bh
+		}
 		return model.MustJSON(out), nil
 	}
 	if m := filesRE.FindStringSubmatch(q); m != nil {
@@ -261,6 +285,9 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 		files, more := filePage(g.items[n].files, from)
 		return model.MustJSON(map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"files": map[string]any{
 			"pageInfo": map[string]any{"hasNextPage": more != "", "endCursor": more}, "nodes": files}}}}), nil
+	}
+	if strings.Contains(q, "{number mergeable mergeStateStatus}") {
+		g.light = append(g.light, q)
 	}
 	repo := map[string]any{}
 	for _, m := range prRE.FindAllStringSubmatch(q, -1) {

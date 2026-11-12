@@ -712,8 +712,17 @@ func StateOf(f *Facts, steps []Row) string {
 		return "closed"
 	case f.Draft:
 		return "draft"
+	case strings.ToUpper(f.Mergeable) == "CONFLICTING" || strings.ToUpper(f.MergeState) == "DIRTY":
+		return "waiting: conflict" // light facts carry mergeability too (states.py state_of)
 	case !f.Heavy || steps == nil:
 		return "unknown"
+	}
+	// A conflict invalidates the head, so it overrides step order (board-sync 1e12bbbb 11-12): "waiting: conflict"
+	// even while an earlier step (band jobs, CI) is unmet. UNKNOWN never counts (evConflict: recomputing).
+	for _, s := range steps {
+		if s.ID == "conflict" && !s.OK {
+			return "waiting: " + s.Label
+		}
 	}
 	for _, s := range steps {
 		if !s.OK {

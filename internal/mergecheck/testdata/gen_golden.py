@@ -85,6 +85,10 @@ for nm, mg, ms, last in [("mergeable recomputing, none known", "UNKNOWN", "UNKNO
                          ("behind is no conflict", "MERGEABLE", "BEHIND", None), ("dirty", "MERGEABLE", "DIRTY", None),
                          ("conflicting", "CONFLICTING", "BLOCKED", None)]:
     case(nm, files=["a.rs"], jobs=[ni()], mergeable=mg, merge_state=ms, **({"last_mergeable": last} if last else {}))
+# A conflict overrides step order (board-sync 1e12bbbb 11-12, states.py 137b110): an earlier unmet step does not hide it.
+case("conflict over failed check-ni", files=["a.rs"], jobs=[ni("FAIL", "failed", 42)], mergeable="CONFLICTING", merge_state="DIRTY")
+case("last conflicting over running check-ni", files=["a.rs"], jobs=[ni(None, "leased")], mergeable="UNKNOWN",
+     merge_state="UNKNOWN", last_mergeable="CONFLICTING")
 nf = copy.deepcopy(base)
 nf["name"], nf["files"], nf["row"] = "+fyi evidence", ["a.rs"], nf["row"] | {"chiqun_notified": {"at": "2026-11-11T03:00Z", "chat": "dm"}}
 cases.append(nf)

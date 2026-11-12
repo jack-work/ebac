@@ -69,7 +69,7 @@ const JobsWindow = 72 * time.Hour
 // under another one (a code upgrade that changed the entries) re-reads every
 // tracked PR and issue once and rewrites every entry, as a filter change does.
 // Bump it with any change to PREntry or IssueEntry.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // KeepClosed is the least an entry stays after its PR merged or closed (and,
 // for a PR, until its ledger record is acked), or its issue closed (S2).
@@ -383,6 +383,7 @@ type TrackedPR struct {
 	Settling  bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
 	Owner     int    `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
 	Mergeable string `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
+	Base      string `json:"bs,omitempty"`   // its base branch, "" is main (the base-head watch)
 	Links     []int  `json:"l,omitempty"`    // issue numbers its body links
 	Size      int    `json:"b,omitempty"`    // bytes of its entry on the form
 	Held      bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
@@ -418,6 +419,8 @@ type State struct {
 	NoSubs  bool                  `json:"nosubs,omitempty"`  // the forge has no sub-issues: they are not asked for
 	Filter  string                `json:"filter,omitempty"`
 	Schema  int                   `json:"schema,omitempty"`
+	Bases   map[string]string     `json:"bh,omitempty"`     // base branch of a tracked open PR -> its head (8 hex) when last read
+	Recheck []int                 `json:"rc,omitempty"`     // PRs whose mergeability was UNKNOWN after a base move: asked again
 	Claims  map[int]*TrackedClaim `json:"claims,omitempty"` // the entry shape (SchemaVersion) every entry on the form was written in  // digest of the repo, authors and relevance filter the cursor was read under
 }
 
@@ -545,13 +548,21 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	as := searches(in.Watch, cursor)
 	var after map[string]string
 	first := SearchPage
+	refs := openBases(&st) // the base-head watch rides the first page (conflict.go)
+	var baseHeads map[string]string
 	for page := 0; page < 40; page++ {
-		data, err := call(searchQuery(as, after, !st.NoSubs, first))
+		q := func(subs bool) string {
+			if after == nil { // the first page, also when it is asked again smaller
+				return withRefs(searchQuery(as, after, subs, first), in.Watch.Repo, refs)
+			}
+			return searchQuery(as, after, subs, first)
+		}
+		data, err := call(q(!st.NoSubs))
 		if err != nil && !st.NoSubs && noSubIssues(err) {
 			// A forge without sub-issues: say so once, ask without them from now on.
 			st.NoSubs = true
 			logf("the forge has no sub-issues (%v): issue entries carry no p/sub", err)
-			data, err = call(searchQuery(as, after, false, first))
+			data, err = call(q(false))
 		}
 		if err != nil && tooHeavy(err) && first/2 >= MinPage {
 			first /= 2
@@ -561,10 +572,16 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if err != nil {
 			return res, fmt.Errorf("search: %w", err)
 		}
+		if after == nil {
+			if baseHeads, err = decodeRefs(data, refs); err != nil {
+				logf("base heads: %v", err)
+			}
+		}
 		sp, err := decodeSearch(data)
 		if err != nil {
 			return res, err
 		}
+		delete(sp, "bh")
 		next := map[string]string{}
 		for alias, a := range sp {
 			for _, n := range a.Nodes {
@@ -690,6 +707,19 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			reread = append(reread, n)
 		}
 	}
+	// 2b. the base-head watch: a base that moved re-asks its PRs' mergeability (conflict.go).
+	inFull := map[int]bool{}
+	for n := range fresh {
+		inFull[n] = true
+	}
+	for _, n := range reread {
+		inFull[n] = true
+	}
+	if changed, err := watchBases(&st, in.Watch.Repo, refs, baseHeads, inFull, call, logf); err != nil {
+		logf("base-head watch: %v (asked again next pass)", err)
+	} else {
+		reread = append(reread, changed...)
+	}
 	sort.Ints(reread)
 	chunk := SearchPage
 	for i := 0; i < len(reread); {
@@ -715,6 +745,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 
 	// PR entries.
 	sentNow := map[int]bool{} // ledger records sent this pass: an ack can only be of an older one
+	var conflictPings []plugin.Ping
 	for _, n := range sortedKeys(fresh) {
 		p := fresh[n]
 		t := st.PRs[n]
@@ -727,6 +758,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 		// GitHub recomputing mergeability (UNKNOWN) is no news: the last settled value stands, in the entry and for
 		// the conflict step.
+		wasMergeable := t.Mergeable == "MERGEABLE"
 		switch p.Facts.Mergeable {
 		case "MERGEABLE", "CONFLICTING":
 			t.Mergeable = p.Facts.Mergeable
@@ -741,6 +773,18 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			e.Files = Grouped(p.Files, MaxFiles)
 		}
 		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, ownerOf(owners, p.Author, p.Title)
+		t.Base = p.Base
+		if t.Base == "main" {
+			t.Base = ""
+		}
+		// A turn into conflict (settled, from mergeable) pings the PR's owner role at once, as S5 routes.
+		if p.Facts.State == "OPEN" && wasMergeable && settledConflict(p.Facts.Mergeable, p.Facts.MergeState) {
+			if role := roleOf(owners, p.Author, p.Title); role != "" {
+				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
+					"scout: PR #%d %q is now CONFLICTING with %s (head %s): rebase it", n, clip(p.Title, MaxTitle), baseOf(t), cut(head, 8)))})
+			}
+			logf("PR #%d turned conflicting", n)
+		}
 		if p.Facts.State != "OPEN" {
 			t.Mergeable = "" // only an open PR's mergeability is asked again
 		}
@@ -926,7 +970,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 
-	res.Pings = queuePings(&st, pings, logf)
+	res.Pings = append(queuePings(&st, pings, logf), conflictPings...)
 
 	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member.
 	// The steward (board-inputs ledger_committer.py) commits an outbox member as prs/<n>.json and acks it with the
