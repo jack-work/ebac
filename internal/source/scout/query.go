@@ -97,7 +97,7 @@ func searches(w model.ScoutWatch, cursor string) []alias {
 // searchQuery is ONE GraphQL call: every alias, each its own search. after
 // holds the page cursor of an alias still paging; a nil after map is the
 // first page of every alias, and an alias absent from a non-nil map is done.
-func searchQuery(as []alias, after map[string]string, subs bool) string {
+func searchQuery(as []alias, after map[string]string, subs bool, first int) string {
 	var b strings.Builder
 	b.WriteString("{")
 	for _, a := range as {
@@ -114,14 +114,14 @@ func searchQuery(as []alias, after map[string]string, subs bool) string {
 			sel = fmt.Sprintf(`... on Issue{%s}`, claimFields)
 		}
 		fmt.Fprintf(&b, `%s: search(type:ISSUE, first:%d%s, query:%q){pageInfo{hasNextPage endCursor} nodes{__typename %s}} `,
-			a.name, Batch, pg, a.query, sel)
+			a.name, first, pg, a.query, sel)
 	}
 	b.WriteString("}")
 	return b.String()
 }
 
 // batchQuery reads named PRs (aliases p<n>) and issue-or-PR numbers (aliases
-// i<n>) in one query, at most Batch in all.
+// i<n>) in one query (callers bound the count: SearchPage PRs, Batch issues).
 func batchQuery(repo string, prs, issues []int, subs bool) string {
 	owner, name, _ := strings.Cut(repo, "/")
 	var b strings.Builder

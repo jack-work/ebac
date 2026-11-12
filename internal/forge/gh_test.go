@@ -321,3 +321,12 @@ func TestDescends(t *testing.T) {
 		t.Fatalf("a failed call: %v, %v; want an error naming it", got, err)
 	}
 }
+
+// A failing gh call's error names a GraphQL query (and any long -f value) by its size, never its text.
+func TestShownArgsHideTheQuery(t *testing.T) {
+	q := "query={" + strings.Repeat("x", 5000) + "}"
+	got := strings.Join(shownArgs([]string{"api", "graphql", "-f", q, "-f", "owner=bic"}), " ")
+	if got != "api graphql -f query=<5002 B> -f owner=bic" {
+		t.Fatalf("shown %q", got)
+	}
+}

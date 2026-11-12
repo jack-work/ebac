@@ -560,6 +560,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		}
 		set["critic"], written, conflicts = merged, merged, c
 		sys.Runtime = w.Runtime
+		sys.Runtime.LastError = model.ClipError(w.Runtime.LastError)
 		view := snap
 		if snap != nil {
 			set["prs"] = model.MustJSON(prsTree(snap))

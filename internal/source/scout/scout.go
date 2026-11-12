@@ -40,8 +40,24 @@ import (
 	"github.com/gluck/ebac/internal/relevance"
 )
 
-// Batch is how many nodes one GraphQL query reads (search page or alias batch).
+// Batch is how many nodes one light GraphQL query reads (an issue batch).
 const Batch = 50
+
+// SearchPage is how many PRs or issues one alias of the search, or one PR
+// re-read batch, asks at most: each carries files, threads, checks and
+// comments, and a full re-read at 50 a page ran into GitHub's "Resource
+// limits for this query exceeded" (2026-11-12). A query refused for its
+// weight is asked again at half the page, down to MinPage.
+const (
+	SearchPage = 25
+	MinPage    = 3
+)
+
+// tooHeavy says whether GitHub refused a query for its weight (resource limits, a timeout).
+func tooHeavy(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "resource limits") || strings.Contains(s, "timeout") || strings.Contains(s, "timed out")
+}
 
 // CursorSkew re-reads this much before the last pass: the search index lags.
 const CursorSkew = 2 * time.Minute
@@ -528,13 +544,19 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	freshClaims := map[int]ghNode{}
 	as := searches(in.Watch, cursor)
 	var after map[string]string
-	for page := 0; page < 20; page++ {
-		data, err := call(searchQuery(as, after, !st.NoSubs))
+	first := SearchPage
+	for page := 0; page < 40; page++ {
+		data, err := call(searchQuery(as, after, !st.NoSubs, first))
 		if err != nil && !st.NoSubs && noSubIssues(err) {
 			// A forge without sub-issues: say so once, ask without them from now on.
 			st.NoSubs = true
 			logf("the forge has no sub-issues (%v): issue entries carry no p/sub", err)
-			data, err = call(searchQuery(as, after, false))
+			data, err = call(searchQuery(as, after, false, first))
+		}
+		if err != nil && tooHeavy(err) && first/2 >= MinPage {
+			first /= 2
+			logf("search page too heavy for GitHub: asking %d a page", first)
+			continue // the same page again, smaller
 		}
 		if err != nil {
 			return res, fmt.Errorf("search: %w", err)
@@ -669,11 +691,19 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 	sort.Ints(reread)
-	for i := 0; i < len(reread); i += Batch {
-		data, err := call(batchQuery(in.Watch.Repo, reread[i:min(i+Batch, len(reread))], nil, false))
+	chunk := SearchPage
+	for i := 0; i < len(reread); {
+		part := reread[i:min(i+chunk, len(reread))]
+		data, err := call(batchQuery(in.Watch.Repo, part, nil, false))
+		if err != nil && tooHeavy(err) && chunk/2 >= MinPage {
+			chunk /= 2
+			logf("re-read batch too heavy for GitHub: %d PRs a batch", chunk)
+			continue
+		}
 		if err != nil {
 			return res, fmt.Errorf("re-read: %w", err)
 		}
+		i += len(part)
 		prs, _, err := decodeBatch(data)
 		if err != nil {
 			return res, err

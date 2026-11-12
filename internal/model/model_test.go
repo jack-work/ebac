@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestParsePRRef(t *testing.T) {
@@ -87,5 +88,20 @@ func TestNeedsSeat(t *testing.T) {
 	}
 	if !(&Critic{}).NeedsSeat() {
 		t.Error("a pre-source PR critic needs a seat")
+	}
+}
+
+// last_error on a form is the first line (at most MaxLastError bytes, cut on a rune boundary) and a count of the
+// rest: a 42.5 KB GraphQL failure (query text, every error line) can no longer bloat a critic's form.
+func TestClipError(t *testing.T) {
+	if ClipError("") != "" || ClipError("one line") != "one line" {
+		t.Fatal("short errors changed")
+	}
+	long := "search: gh api graphql -f query={" + strings.Repeat("é", 30000) + "}: Resource limits for this query exceeded."
+	many := long + strings.Repeat("\nResource limits for this query exceeded.", 40) + "\n" + long
+	got := ClipError(many)
+	if len(got) > MaxLastError || !strings.HasSuffix(got, " [+41 more line(s), 1 repeating this one]") || !utf8.ValidString(got) ||
+		!strings.Contains(got, "…") {
+		t.Fatalf("clipped %d B: %q", len(got), got[max(0, len(got)-120):])
 	}
 }

@@ -134,8 +134,10 @@ type fakeGH struct {
 	queries  []string
 	pageSize int
 	fail     error
-	noSubs   bool // a forge without sub-issues: a query naming subIssues is refused
-	noIssues bool // issue reads by number fail
+	noSubs   bool  // a forge without sub-issues: a query naming subIssues is refused
+	noIssues bool  // issue reads by number fail
+	heavy    int   // when set: a search page or PR batch over this many is refused as too heavy
+	pages    []int // the page size of each search call
 }
 
 var (
@@ -160,6 +162,20 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 	}
 	if g.noSubs && strings.Contains(q, "subIssues") {
 		return nil, fmt.Errorf("graphql: Field 'subIssues' doesn't exist on type 'Issue'")
+	}
+	if g.heavy > 0 {
+		for _, m := range regexp.MustCompile(`search\(type:ISSUE, first:(\d+)`).FindAllStringSubmatch(q, -1) {
+			if n, _ := strconv.Atoi(m[1]); n > g.heavy {
+				return nil, fmt.Errorf("gh api graphql -f query=<%d B>: Resource limits for this query exceeded.\nResource limits for this query exceeded.", len(q))
+			}
+		}
+		if n := len(prRE.FindAllString(q, -1)); n > g.heavy {
+			return nil, fmt.Errorf("gh api graphql -f query=<%d B>: Resource limits for this query exceeded.", len(q))
+		}
+	}
+	if m := regexp.MustCompile(`search\(type:ISSUE, first:(\d+)`).FindStringSubmatch(q); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		g.pages = append(g.pages, n)
 	}
 	if strings.HasPrefix(q, "{a") {
 		out := map[string]any{}
@@ -210,8 +226,14 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 			sort.Slice(match, func(i, j int) bool { return match[i].n < match[j].n })
 			from, _ := strconv.Atoi(m[2])
 			end := len(match)
-			if g.pageSize > 0 {
-				end = min(from+g.pageSize, len(match))
+			size := g.pageSize
+			if f := regexp.MustCompile(`first:(\d+)`).FindStringSubmatch(m[0]); f != nil {
+				if n, _ := strconv.Atoi(f[1]); size == 0 || n < size {
+					size = n // the query's own page size
+				}
+			}
+			if size > 0 {
+				end = min(from+size, len(match))
 			}
 			nodes := []any{}
 			for _, it := range match[from:end] {
@@ -1190,5 +1212,45 @@ func TestTitlesAndCheckNamesClipped(t *testing.T) {
 	}
 	if len(entry(t, r, "issue:301")["t"].(string)) != MaxTitle {
 		t.Fatal("issue title not clipped")
+	}
+}
+
+// A query GitHub refuses for its weight ("Resource limits for this query exceeded") is asked again at half the page,
+// down to MinPage: a full re-read of 70 tagged PRs with their files, and a reshape re-reading every one of them by
+// number, complete where a GitHub limited to 10 a query would have failed every pass.
+func TestHeavyQueriesHalve(t *testing.T) {
+	w := newWorld(t)
+	w.watch.FilesTitle = `^\[(Effort ledger|Effort router gate|System1 functions)`
+	for i := 0; i < 70; i++ {
+		n := 120000 + i
+		var files []string
+		for f := 0; f < 50; f++ {
+			files = append(files, fmt.Sprintf("aether_rust/crates/c%02d/src/f%02d.rs", i%7, f))
+		}
+		w.gh.items[n] = &item{n: n, author: ours, title: fmt.Sprintf("[Effort router gate][%d-70] piece", i+1), state: "OPEN",
+			head: fmt.Sprintf("%040x", n), mergeable: "MERGEABLE", updated: w.now.Add(-time.Hour), files: files}
+	}
+	w.gh.heavy = 10
+	r := w.pass(0)
+	fs := 0
+	for k, v := range r.Set {
+		if strings.HasPrefix(k, "pr:12") && strings.Contains(string(v), `"fs":`) {
+			fs++
+		}
+	}
+	if fs != 70 || !strings.Contains(strings.Join(r.Log, " "), "search page too heavy for GitHub: asking 6 a page") || w.gh.pages[len(w.gh.pages)-1] != 6 {
+		t.Fatalf("full read: %d fs, pages %v, log %v", fs, w.gh.pages, r.Log)
+	}
+	// A reshape re-reads all of them by number, in batches GitHub takes.
+	w.st.Schema = SchemaVersion - 1
+	r = w.pass(2 * time.Minute)
+	if w.st.Schema != SchemaVersion || !strings.Contains(strings.Join(r.Log, " "), "re-read batch too heavy for GitHub: 6 PRs a batch") {
+		t.Fatalf("reshape: schema %d log %v", w.st.Schema, r.Log)
+	}
+	// A GitHub that refuses even MinPage: the round fails, said.
+	w.gh.heavy = 1
+	w.gh.items[120000].updated = w.now.Add(time.Minute)
+	if _, err := w.try(2 * time.Minute); err == nil || !strings.Contains(err.Error(), "Resource limits") {
+		t.Fatalf("refused at MinPage: %v", err)
 	}
 }

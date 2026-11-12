@@ -142,9 +142,22 @@ func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, erro
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("gh timed out after %s: %s", g.Timeout, msg)
 		}
-		return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+		return nil, fmt.Errorf("gh %s: %s", strings.Join(shownArgs(args), " "), msg)
 	}
 	return out.Bytes(), nil
+}
+
+// shownArgs are gh's arguments as an error shows them: a GraphQL query (or any
+// -f/-F value past 120 bytes) by its size, never its text.
+func shownArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if k, v, ok := strings.Cut(a, "="); ok && (k == "query" || len(v) > 120) {
+			a = fmt.Sprintf("%s=<%d B>", k, len(v))
+		}
+		out[i] = a
+	}
+	return out
 }
 
 func (g *GH) Whoami(ctx context.Context) (string, error) {

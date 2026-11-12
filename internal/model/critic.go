@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Mode string
@@ -554,6 +555,45 @@ type ReleasesState struct {
 
 // PingEvery is the collect-mode ping cadence; 0 is ordinary delivery.
 func (w *Critic) PingEvery() time.Duration { return time.Duration(w.PingEverySec) * time.Second }
+
+// MaxLastError bounds runtime.last_error on the form: a GraphQL failure that
+// carried its whole query and every error line was 42.5 KB of one critic's
+// form (2026-11-12, scout @6f376a71 at 184 KB of a 192 KB budget).
+const MaxLastError = 1024
+
+// ClipError is an error as the form keeps it: its first line (at most
+// MaxLastError bytes, cut on a rune boundary) and how many more lines it had,
+// and how many of them repeat the first.
+func ClipError(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	first := strings.TrimSpace(lines[0])
+	more, same := 0, 0
+	for _, l := range lines[1:] {
+		if l = strings.TrimSpace(l); l == "" {
+			continue
+		}
+		more++
+		if l == first {
+			same++
+		}
+	}
+	tail := ""
+	if more > 0 {
+		tail = fmt.Sprintf(" [+%d more line(s), %d repeating this one]", more, same)
+	}
+	if room := MaxLastError - len(tail); len(first) > room {
+		cut := room - len("…")
+		for cut > 0 && !utf8.RuneStart(first[cut]) {
+			cut--
+		}
+		first = first[:cut] + "…"
+	}
+	return first + tail
+}
 
 // CriticKey is the role-form key a critic's configuration lives in, and
 // CriticErrorKey the key that says why a form's critic key is unusable.

@@ -2,6 +2,7 @@ package scout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -106,12 +107,25 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 
 	good := now
 	now = now.Add(2 * time.Minute)
-	wd.gh.fail = errors.New("HTTP 502")
+	// A failure as big as the 2026-11-12 one (42.5 KB: the query and every error line) reaches the form clipped.
+	wd.gh.fail = errors.New("HTTP 502 " + strings.Repeat("q", 40000) + strings.Repeat("\nResource limits for this query exceeded.", 50))
 	if err := p.Poll(ctx, name); err == nil || !strings.Contains(err.Error(), "502") {
 		t.Fatalf("a failed read passed: %v", err)
 	}
 	if c := load(); !c.Runtime.LastSuccess.Equal(good) || c.Runtime.ConsecutiveFailures != 1 {
 		t.Fatalf("failed read: last_success %v (want %v), failures %d", c.Runtime.LastSuccess, good, c.Runtime.ConsecutiveFailures)
+	}
+	sysKeys, _, _ := f.FormRaw(ctx, role)
+	var sys struct {
+		Ebac struct {
+			Runtime struct {
+				LastError string `json:"last_error"`
+			} `json:"runtime"`
+		} `json:"ebac"`
+	}
+	_ = json.Unmarshal(sysKeys["system"], &sys)
+	if le := sys.Ebac.Runtime.LastError; len(le) > model.MaxLastError || !strings.Contains(le, "HTTP 502") || !strings.Contains(le, "[+50 more line(s)") {
+		t.Fatalf("last_error on the form: %d B %.120q", len(le), le)
 	}
 	wd.gh.fail = nil
 
