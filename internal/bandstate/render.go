@@ -19,7 +19,7 @@ type View struct {
 }
 
 // Keys are the form keys the mirror owns, in View order.
-var Keys = []string{"queues", "nodes", "dupes"}
+var Keys = []string{"queues", "nodes", "node_load", "dupes"}
 
 // Dropped are keys earlier versions wrote; a round unsets them once.
 var Dropped = []string{"live"}

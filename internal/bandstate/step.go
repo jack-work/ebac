@@ -13,6 +13,8 @@ type Config struct {
 	Socket  string   `json:"socket"`
 	Utility []string `json:"utility,omitempty"`
 	Repo    string   `json:"repo,omitempty"`
+	// LoadEvery is the heartbeat cadence; 0 is UpdatedEvery.
+	LoadEvery time.Duration `json:"-"`
 }
 
 // DefaultRepo is where the hub's branch-carrying jobs (aether.*) build from.
@@ -73,42 +75,87 @@ func Step(ctx context.Context, prev State, h *Hub, cfg Config, now time.Time, ti
 	next.View = &view
 
 	r := Result{State: next, Set: map[string]json.RawMessage{}}
-	cur, old := view.Map(), map[string][]string{}
+	var was View
 	if prev.View != nil {
-		old = prev.View.Map()
+		was = *prev.View
 	}
-	for _, k := range Keys {
-		if prev.View != nil && prev.Rows && same(old[k], cur[k]) {
-			continue
-		}
-		var b []byte
-		if RowKeys[k] {
-			b, _ = json.Marshal(Rows(cur[k]))
-		} else {
-			b, _ = json.Marshal(cur[k])
-		}
+	put := func(k string, v any) {
+		b, _ := json.Marshal(v)
 		r.Set[k] = b
 		r.Changed = append(r.Changed, k)
+	}
+	fresh := !prev.Rows // first round of this shape: every key once
+	// On change: what a node IS (class, disk tier, drained, stale) and the dupes.
+	if nodes := NodeRows(view.Nodes); fresh || !sameMap(NodeRows(was.Nodes), nodes) {
+		put("nodes", nodes)
+	}
+	if fresh || !same(was.Dupes, view.Dupes) {
+		put("dupes", view.Dupes)
+	}
+	// At most every UpdatedEvery: what moves with every job (queue depths, the
+	// oldest ready job, free slots, running jobs, free disk, draining), and
+	// updated. A quiet hub still gets updated, so a reader sees it is watched.
+	every := cfg.LoadEvery
+	if every <= 0 {
+		every = UpdatedEvery
+	}
+	if fresh || h.Stats.Hub.Now-prev.UpdatedAt >= every.Milliseconds() {
+		put("queues", Rows(view.Queues))
+		put("node_load", LoadRows(view.Nodes))
+		b, _ := json.Marshal(time.UnixMilli(h.Stats.Hub.Now).UTC().Format(time.RFC3339))
+		r.Set["updated"] = b
+		r.State.UpdatedAt = h.Stats.Hub.Now
 	}
 	r.State.Rows = true
 	if !prev.Slim {
 		r.Unset, r.State.Slim = append([]string(nil), Dropped...), true
 	}
-	// updated is a heartbeat, not a change marker: written at most every
-	// UpdatedEvery (a quiet hub still shows it is watched), never per change.
-	if h.Stats.Hub.Now-prev.UpdatedAt >= UpdatedEvery.Milliseconds() {
-		b, _ := json.Marshal(time.UnixMilli(h.Stats.Hub.Now).UTC().Format(time.RFC3339))
-		r.Set["updated"] = b
-		r.State.UpdatedAt = h.Stats.Hub.Now
-	}
 	return r
 }
 
-// UpdatedEvery bounds the updated heartbeat: the one volatile key.
+// UpdatedEvery bounds the heartbeat keys (queues, node_load, updated).
 const UpdatedEvery = 10 * time.Minute
 
-// RowKeys are the keys written as objects, one row a member.
-var RowKeys = map[string]bool{"queues": true, "nodes": true}
+// volatile are the node fields that move with every job: they go to
+// node_load at the heartbeat cadence, never to the nodes row.
+var volatile = map[string]bool{"free_slots": true, "running": true, "disk_free": true, "draining": true}
+
+// NodeRows is the nodes key: per node, its name and what it IS.
+func NodeRows(lines []string) map[string]string { return splitRows(lines, false) }
+
+// LoadRows is the node_load key: per node, its name and what moves.
+func LoadRows(lines []string) map[string]string { return splitRows(lines, true) }
+
+func splitRows(lines []string, load bool) map[string]string {
+	out := make(map[string]string, len(lines))
+	for _, l := range lines {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			continue
+		}
+		keep := []string{f[0]}
+		for _, t := range f[1:] {
+			k, _, _ := strings.Cut(t, "=")
+			if volatile[k] == load {
+				keep = append(keep, t)
+			}
+		}
+		out[RowKey(f[0])] = strings.Join(keep, " ")
+	}
+	return out
+}
+
+func sameMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || w != v {
+			return false
+		}
+	}
+	return true
+}
 
 // Rows keys each line by its first field (the queue or node name), so a change
 // to one queue or node patches one leaf. The value is the whole line, as the

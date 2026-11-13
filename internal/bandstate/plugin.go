@@ -31,7 +31,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	if w.Band == nil {
 		return nil, fmt.Errorf("%s: band-hub mirror without its configuration", w.Name)
 	}
-	cfg := Config{Socket: w.Band.Socket, Utility: w.Band.Utility, Repo: w.Band.Repo}
+	cfg := Config{Socket: w.Band.Socket, Utility: w.Band.Utility, Repo: w.Band.Repo, LoadEvery: time.Duration(w.Band.LoadEverySec) * time.Second}
 	if cfg.Socket == "" {
 		cfg.Socket = DefaultSocket
 	}

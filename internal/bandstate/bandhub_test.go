@@ -326,7 +326,7 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	h := fixture(t)
 	now := time.UnixMilli(h.Stats.Hub.Now)
 	r := Step(ctx, State{}, h, Config{}, now, nil, nil)
-	if strings.Join(r.Changed, ",") != "queues,nodes,dupes" || len(r.Set) != 4 || r.Set["updated"] == nil || strings.Join(r.Unset, ",") != "live" {
+	if strings.Join(r.Changed, ",") != "nodes,dupes,queues,node_load" || len(r.Set) != 5 || r.Set["updated"] == nil || strings.Join(r.Unset, ",") != "live" {
 		t.Fatalf("first round: changed %v, %d keys, unset %v", r.Changed, len(r.Set), r.Unset)
 	}
 	t.Logf("first round: %d bytes", setBytes(r.Set))
@@ -335,20 +335,17 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	if len(r2.Set) != 0 || len(r2.Unset) != 0 {
 		t.Fatalf("a quiet re-poll wrote %v, unset %v", r2.Changed, r2.Unset)
 	}
-	// A new ready job that is not the oldest: counts move (the hub's stats), nothing else.
+	// A new ready job, then a claim (ready -> leased, a node runs it): load moves, what a node IS does not, so
+	// nothing is written between heartbeats.
 	j := clone(readyJob(t, h), 9200, map[string]string{"sha": "0000000000000000000000000000000000000007"})
 	j.Created = h.Stats.Hub.Now
 	h.Live = append(h.Live, j)
 	bump(h, j.Queue)
+	h.Stats.Hub.Now += 60_000
 	r3 := Step(ctx, r2.State, h, Config{}, now.Add(2*time.Minute), nil, nil)
-	if strings.Join(r3.Changed, ",") != "queues" || r3.Set["updated"] != nil || len(r3.Set) != 1 {
-		t.Fatalf("a new job: changed %v (%d keys); want queues only (updated is a 10-min heartbeat)", r3.Changed, len(r3.Set))
+	if len(r3.Set) != 0 {
+		t.Fatalf("a new job between heartbeats wrote %v", r3.Changed)
 	}
-	// The warden's budget: a typical change (a job queued, a job claimed) is under 1 KB.
-	if n := setBytes(r3.Set); n >= 1024 {
-		t.Fatalf("a new job wrote %d bytes; budget 1 KB", n)
-	}
-	// A claim: ready -> leased, and the claiming node reports it running.
 	h.Live = h.Live[:len(h.Live)-1]
 	h.Nodes[0].Snapshot.Running = append(h.Nodes[0].Snapshot.Running, struct {
 		HubJob int64 `json:"hub_job"`
@@ -359,14 +356,21 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 			h.Stats.Queues[i].Counts.Leased++
 		}
 	}
+	h.Stats.Hub.Now += 60_000
 	r4 := Step(ctx, r3.State, h, Config{}, now.Add(3*time.Minute), nil, nil)
-	if strings.Join(r4.Changed, ",") != "queues,nodes" {
-		t.Fatalf("a claim: changed %v; want queues,nodes", r4.Changed)
+	if len(r4.Set) != 0 {
+		t.Fatalf("a claim between heartbeats wrote %v", r4.Changed)
 	}
-	if n := setBytes(r4.Set); n >= 1024 {
-		t.Fatalf("a claim wrote %d bytes; budget 1 KB", n)
+	// The heartbeat carries both: queues, node_load and updated, within the warden's 1 KB budget per change.
+	h.Stats.Hub.Now += int64(UpdatedEvery / time.Millisecond)
+	r5 := Step(ctx, r4.State, h, Config{}, now.Add(13*time.Minute), nil, nil)
+	if strings.Join(r5.Changed, ",") != "queues,node_load" || r5.Set["updated"] == nil {
+		t.Fatalf("heartbeat: changed %v; want queues,node_load + updated", r5.Changed)
+	}
+	if n := setBytes(r5.Set); n >= 2048 {
+		t.Fatalf("a heartbeat wrote %d bytes", n)
 	} else {
-		t.Logf("a claim wrote %d bytes", n)
+		t.Logf("a heartbeat wrote %d bytes (whole keys; the core's diff sends only the changed rows)", n)
 	}
 }
 

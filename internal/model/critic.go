@@ -529,6 +529,9 @@ type BandRef struct {
 	Utility []string `json:"utility,omitempty"`
 	// Repo is where the jobs' branch params live, for the superseded check.
 	Repo string `json:"repo,omitempty"`
+	// LoadEverySec is the heartbeat cadence of the load keys (queues,
+	// node_load, updated); 0 is bandstate.UpdatedEvery (10 min).
+	LoadEverySec int `json:"load_every_sec,omitempty"`
 }
 
 // SourceReleases watches one GitHub repo's releases (served by ebac-gh).
