@@ -417,17 +417,21 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	fig := st.Fig
-	// Flat scalar keys ONLY: an aria writing ack.round into a form whose
-	// subtrees were written as literals would create a decoy key.
-	if err := fig.SetJSON(ctx, w.FormID, "ack_round", *round); err != nil {
+	// ONE write: read.<critic> = {round, at, note}. Three flat keys were three
+	// form versions, three deltas to every studier, per ack (context audit
+	// 2026-11-13). The whole read key is set as one value (never a dotted
+	// path into it), so no decoy key can form.
+	if err := fig.SetJSON(ctx, w.FormID, model.ReadKey, model.ReadMark(w.Name, *round, time.Now().UTC(), *note)); err != nil {
 		return err
 	}
-	if err := fig.SetJSON(ctx, w.FormID, "ack_at", time.Now().UTC().Format(time.RFC3339)); err != nil {
-		return err
-	}
-	if *note != "" {
-		if err := fig.SetJSON(ctx, w.FormID, "ack_note", model.FirstLine(*note)); err != nil {
-			return err
+	// The flat keys an older ack (or a seat following the old rule) left: once.
+	if f, err := st.ReadForm(ctx, w.FormID); err == nil {
+		for _, k := range model.LegacyAckKeys {
+			if _, ok := f.Keys[k]; ok {
+				if err := fig.Unset(ctx, w.FormID, k); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	fmt.Printf("%s: acked round %d\n", w.Name, *round)
