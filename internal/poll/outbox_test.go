@@ -61,7 +61,7 @@ func TestAuthorizeKeepsPostsInsideTheGrant(t *testing.T) {
 		{"reply and resolve", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", ReplyTo: "PRRT_1", Resolve: true}, ""},
 		{"resolve alone", w, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, ""},
 		{"resolve without a thread", w, "jack", model.Post{PR: "acme/widget#1", Body: "x", Resolve: true}, "needs reply_to"},
-		{"reviewer resolves", &rev, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "never resolves"},
+		{"reviewer resolves", &rev, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, ""},
 		{"read-only resolves", &ro, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", Resolve: true}, "read-only"},
 		{"react alone", w, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},
 		{"reviewer reacts", &rev, "jack", model.Post{PR: "acme/widget#1", ReplyTo: "PRRT_1", React: "+1"}, ""},

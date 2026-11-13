@@ -49,9 +49,6 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 		if p.ReplyTo == "" {
 			return "resolve needs reply_to: the thread to resolve"
 		}
-		if w.Mode == model.ModeReviewer {
-			return "a reviewer seat never resolves threads: the author does"
-		}
 	}
 	if !p.Resolve && p.React == "" && !p.HasBody() {
 		return "empty body"
