@@ -742,7 +742,7 @@ func StateOf(f *Facts, steps []Row) string {
 // submitted after it. Else a hold (a pass in progress, newer than the verdict) naming the PR's own head is
 // "waiting: architect review". "" leaves the state as StateOf gave it.
 func ArchState(f *Facts, a *Arch) (state string, rc bool) {
-	if f == nil || a == nil || f.State != "OPEN" {
+	if f == nil || a == nil || f.State != "OPEN" || f.Draft { // a draft stays "draft"
 		return "", false
 	}
 	if a.Verdict == "REQUEST_CHANGES" && !approvedAfter(f.Reviews, a.At) {

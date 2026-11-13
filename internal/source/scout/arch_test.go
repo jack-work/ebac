@@ -105,6 +105,9 @@ func TestArchState(t *testing.T) {
 	if s, b := mergecheck.ArchState(open, rc); s != "blocked: architect RC at bbbbbbbb" || !b {
 		t.Fatalf("rc: %q %v", s, b)
 	}
+	if s, b := mergecheck.ArchState(&mergecheck.Facts{State: "OPEN", Draft: true, Oid: headA}, rc); s != "" || b {
+		t.Fatalf("draft: %q %v", s, b)
+	}
 	for _, st := range []string{"MERGED", "CLOSED"} {
 		if s, b := mergecheck.ArchState(&mergecheck.Facts{State: st}, rc); s != "" || b {
 			t.Fatalf("%s: %q %v", st, s, b)
@@ -130,5 +133,35 @@ func TestArchState(t *testing.T) {
 	ilya := &mergecheck.Facts{State: "OPEN", Oid: headA, Reviews: []mergecheck.Review{{Login: "Ilya-Grebnov", State: "APPROVED", At: "2026-11-12T12:00:00Z"}}}
 	if _, b := mergecheck.ArchState(ilya, bad); !b {
 		t.Fatal("an RC with an unparseable time was superseded")
+	}
+}
+
+// Seeding (Warden 11-13): the first pass that knows RC pings records the RCs already standing as pinged, so a deploy
+// pings nobody; only an RC arriving after that pass pings.
+func TestArchitectRCSeed(t *testing.T) {
+	w := newWorld(t)
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}, {Author: his, Role: secretary}}
+	w.gh.items[102].draft = false
+	for _, n := range []int{101, 102, 201} {
+		w.gh.items[n].comments = []map[string]any{archComment("2026-11-10T20:00:00Z", headB, "REQUEST_CHANGES")}
+	}
+	r := w.pass(0)
+	if len(r.Pings) != 0 {
+		t.Fatalf("standing RCs pinged on the first pass: %v", r.Pings)
+	}
+	for _, k := range []string{"pr:101", "pr:102", "pr:201"} {
+		if e := entry(t, r, k); e["ms"] != "blocked: architect RC at bbbbbbbb" {
+			t.Fatalf("%s ms %v", k, e["ms"])
+		}
+	}
+	if w.st.RCSince == "" {
+		t.Fatal("no seed time recorded")
+	}
+	p := w.gh.items[101]
+	p.comments = append(p.comments, archComment(w.now.Add(5*time.Minute).Format(time.RFC3339), headA, "REQUEST_CHANGES"))
+	p.updated = w.now.Add(5 * time.Minute)
+	r = w.pass(10 * time.Minute)
+	if len(r.Pings) != 1 || r.Pings[0].To != knight || !strings.Contains(r.Pings[0].Text, "#101") {
+		t.Fatalf("a new RC after the seed: pings %v", r.Pings)
 	}
 }

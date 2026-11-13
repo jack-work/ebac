@@ -422,6 +422,7 @@ type State struct {
 	Schema  int                   `json:"schema,omitempty"`
 	Bases   map[string]string     `json:"bh,omitempty"`     // base branch of a tracked open PR -> its head (8 hex) when last read
 	Recheck []int                 `json:"rc,omitempty"`     // PRs whose mergeability was UNKNOWN after a base move: asked again
+	RCSince string                `json:"rcs,omitempty"`    // the first pass that knew RC pings (RFC 3339): an older RC is recorded, never pinged
 	Claims  map[int]*TrackedClaim `json:"claims,omitempty"` // the entry shape (SchemaVersion) every entry on the form was written in  // digest of the repo, authors and relevance filter the cursor was read under
 }
 
@@ -747,6 +748,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// PR entries.
 	sentNow := map[int]bool{} // ledger records sent this pass: an ack can only be of an older one
 	var conflictPings []plugin.Ping
+	if st.RCSince == "" { // the first pass with RC pings: RCs standing before it are old news (Warden 11-13)
+		st.RCSince = start.Format(time.RFC3339)
+	}
 	for _, n := range sortedKeys(fresh) {
 		p := fresh[n]
 		t := st.PRs[n]
@@ -788,7 +792,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Warden 11-13).
 		if _, rc := mergecheck.ArchState(&p.Facts, p.Arch); rc && p.Arch.At != t.RC {
-			if role := roleOf(owners, p.Author, p.Title); role != "" {
+			if role := roleOf(owners, p.Author, p.Title); role != "" && rcAfter(p.Arch.At, st.RCSince) {
 				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
 					"scout: PR #%d %q is BLOCKED: architect REQUEST_CHANGES at %s (%s): fix and push for a fresh pass",
 					n, clip(p.Title, MaxTitle), cut(p.Arch.Sha, 8), p.Arch.At))})
@@ -1726,4 +1730,11 @@ func FormSize(st *State) (total, open int) {
 		}
 	}
 	return total + len(model.MustJSON(st)) + FormOverhead, open
+}
+
+// rcAfter says whether RFC 3339 time a is after b; an unreadable a is not (no ping on a time it cannot place).
+func rcAfter(a, b string) bool {
+	ta, err := time.Parse(time.RFC3339, a)
+	tb, err2 := time.Parse(time.RFC3339, b)
+	return err == nil && err2 == nil && ta.After(tb)
 }
