@@ -266,7 +266,8 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 		}
 	}
 	return fmt.Sprintf("ebac %s round %d: %s in %q (from %s). The messages are in your studied form %s, key inbox "+
-		"(text cut at %d B; the full text and images: the tomb commands in key inbox_fetch, with the item's message id). "+
+		"(text cut at %d B; the full text and images: the tomb commands in key inbox_fetch, with the item's message id; "+
+		"an edit updates body and edited_at in place, or arrives as a new teams_edited item if the original has left the inbox). "+
 		"Not studying %s is a bug: `figaro study %s`. When finished: ebac ack --critic %s --round %d\n",
 		w.Name, w.Runtime.Round, strings.Join(parts, ", "), w.Chat.Topic, strings.Join(from, ", "),
 		w.FormID, teamsBodyBytes, w.FormID, w.FormID, w.Name, w.Runtime.Round)

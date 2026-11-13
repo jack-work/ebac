@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -645,5 +646,99 @@ func TestTeamsRoundSetsInboxFetch(t *testing.T) {
 	rep, _ = round(context.Background(), fakeTomb(t, "down"), &model.Critic{Name: "c", Chat: testChat()})
 	if rep == nil || rep.Set["inbox_fetch"] != nil {
 		t.Fatalf("control: a failed read set inbox_fetch: %+v", rep)
+	}
+}
+
+// leaves flattens a form into path -> JSON value, skipping system (it never
+// reaches a studier).
+func leaves(prefix string, v any, out map[string]string) {
+	if m, ok := v.(map[string]any); ok && len(m) > 0 {
+		for k, x := range m {
+			if prefix == "" && k == "system" {
+				continue
+			}
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			leaves(p, x, out)
+		}
+		return
+	}
+	b, _ := json.Marshal(v)
+	out[prefix] = string(b)
+}
+
+// Live, on the daemon: a Teams round writes only what is new. An unchanged
+// round changes no studier-visible leaf (inbox_fetch included); a round with
+// one new message changes only that message's leaves (control).
+func TestLiveTeamsRoundWritesOnlyNewLeaves(t *testing.T) {
+	f := liveOrSkip(t)
+	ctx := context.Background()
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-teams-leaves")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	w := &model.Critic{Name: "livetest-leaves-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
+		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
+	if err := st.SaveCritic(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	round := func(scenario string) {
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"tomb": Plugin{Tomb: fakeTomb(t, scenario)}.Handle}}
+		if err := p.Poll(ctx, w.Name); err != nil {
+			t.Fatalf("round %s: %v", scenario, err)
+		}
+	}
+	snap := func() map[string]string {
+		form, err := f.Form(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]string{}
+		leaves("", map[string]any(form), m)
+		return m
+	}
+	changed := func(a, b map[string]string) []string {
+		var c []string
+		for k, v := range b {
+			if a[k] != v {
+				c = append(c, k)
+			}
+		}
+		for k := range a {
+			if _, ok := b[k]; !ok {
+				c = append(c, "-"+k)
+			}
+		}
+		sort.Strings(c)
+		return c
+	}
+	round("ok")
+	round("ok2")
+	before := snap()
+	round("ok2") // nothing new
+	same := snap()
+	if c := changed(before, same); len(c) != 0 {
+		t.Fatalf("an unchanged round changed studier leaves: %v", c)
+	}
+	round("ok3") // message 3 is new
+	after := snap()
+	c := changed(same, after)
+	t.Logf("leaves written by a round with one new message: %v", c)
+	if len(c) == 0 {
+		t.Fatal("control: a new message wrote nothing")
+	}
+	for _, p := range c {
+		if !strings.HasPrefix(p, "inbox.teams-3.") {
+			t.Fatalf("a round with one new message touched %q (all: %v)", p, c)
+		}
 	}
 }
