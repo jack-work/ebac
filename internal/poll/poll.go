@@ -159,7 +159,7 @@ var SourceKeys = map[string][]string{
 	"github-pr":         nil,
 	"github-author":     {"authored", model.AuthorFilterErr},
 	"keel-threads":      {"threads", "blind"},
-	"teams-chat":        {"blind"},
+	"teams-chat":        {"blind", "inbox_fetch"},
 	model.SourceBandHub: {"queues", "nodes", "dupes", "updated", "live"}, // live: unset only (dropped key)
 	"github-releases":   {"releases"},
 	// role:<name> is one key per role ("*" is a prefix pattern: one more

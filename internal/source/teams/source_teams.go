@@ -2,6 +2,7 @@ package teams
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -56,6 +57,8 @@ const (
 	teamsSeenMax   = 300
 	teamsNamesMax  = 200
 	teamsBodyBytes = 1500
+	// teamsSelfBytes caps the first line kept of a message by chat.self.
+	teamsSelfBytes = 120
 	teamsGoneAfter = 3 // consecutive "gone" answers before the chat is declared gone
 )
 
@@ -117,6 +120,10 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		case d == "deleted":
 			continue // created and deleted between two rounds
 		}
+		self := chat.Self != "" && m.SenderID() == chat.Self
+		if self && kind != "teams_new" {
+			continue // the seat wrote it: its edits and deletes are not news
+		}
 		// The source only translates: who wakes is the core's trigger rules.
 		tier := model.TierWake
 		if kind == "teams_deleted" {
@@ -125,12 +132,25 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		who := m.Sender(st.Names)
 		text := teamsText(m.Content)
 		body, cut := model.CutBody(text, teamsBodyBytes)
+		if self {
+			if line := model.FirstLine(text); len(line) < len(body) || cut {
+				body, cut = line, true
+			}
+			if len(body) > teamsSelfBytes {
+				body, cut = model.CutBody(body, teamsSelfBytes)
+				cut = true
+			}
+		}
 		events = append(events, model.Event{Kind: model.EventKind(kind), Tier: tier, PR: model.PRKey(chat.Topic), Comment: m.ID, Author: who,
 			AuthorID: m.SenderID(), Detail: model.FirstLine(body), Text: text})
-		it := form.InboxItem{Chat: chat.ID, Kind: kind, By: who, FromID: m.SenderID(), Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(),
-			Fetch: fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"%s\")'", chat.ID, teamsLimit, m.ID)}
-		if it.HasImage {
-			it.Fetch += fmt.Sprintf("; images: tomb --log '' --download-images <dir> messages '%s' --limit %d", chat.ID, teamsLimit)
+		// One item per message, written once. chat and the fetch command
+		// live once in the role form's inbox_fetch, not on every item.
+		it := form.InboxItem{Kind: kind, By: who, Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(), Self: self}
+		if !self {
+			it.FromID = m.SenderID()
+		}
+		if kind == "teams_deleted" {
+			it.Body, it.Cut, it.HasImage = "", false, false
 		}
 		items["teams-"+m.ID] = it
 	}
@@ -203,6 +223,7 @@ func round(ctx context.Context, tb *tomb.Tomb, w *model.Critic) (*plugin.Reply, 
 		items[k] = it
 	}
 	rep.Inbox = items
+	rep.Set = map[string]json.RawMessage{"inbox_fetch": model.MustJSON(InboxFetch(w.Chat.ID))}
 	rep.Events = plugin.Wire(events)
 	for i, e := range events {
 		if _, ok := items["teams-"+e.Comment]; ok {
@@ -210,6 +231,18 @@ func round(ctx context.Context, tb *tomb.Tomb, w *model.Critic) (*plugin.Reply, 
 		}
 	}
 	return rep, nil
+}
+
+// InboxFetch is the role form's inbox_fetch: how to read the full text and
+// images of an inbox item teams-<id>. One key per form, constant per chat,
+// so it is written once.
+func InboxFetch(chatID string) map[string]string {
+	return map[string]string{
+		"chat":   chatID,
+		"text":   fmt.Sprintf("tomb --log '' --json --raw messages '%s' --limit %d | jq '.messages[] | select(.id==\"<id>\")'", chatID, teamsLimit),
+		"images": fmt.Sprintf("tomb --log '' --download-images <dir> messages '%s' --limit %d", chatID, teamsLimit),
+		"id":     "an inbox key teams-<id>: <id> is the Teams message id",
+	}
 }
 
 func teamsBrief(w *model.Critic, events []model.Event) string {
@@ -230,7 +263,7 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 		}
 	}
 	return fmt.Sprintf("ebac %s round %d: %s in %q (from %s). The messages are in your studied form %s, key inbox "+
-		"(text cut at %d B; each entry has the exact tomb command for the rest and any image). "+
+		"(text cut at %d B; the full text and images: the tomb commands in key inbox_fetch, with the item's message id). "+
 		"Not studying %s is a bug: `figaro study %s`. When finished: ebac ack --critic %s --round %d\n",
 		w.Name, w.Runtime.Round, strings.Join(parts, ", "), w.Chat.Topic, strings.Join(from, ", "),
 		w.FormID, teamsBodyBytes, w.FormID, w.FormID, w.Name, w.Runtime.Round)

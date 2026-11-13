@@ -170,7 +170,7 @@ func TestSourceKeysOnly(t *testing.T) {
 		{model.SourceRoster, "role:a.target-aria", `plugin roster may not set form key "role:a.target-aria"`},
 		{model.SourceRoster, "role:*", `plugin roster may not set form key "role:*"`},
 		{model.SourceRoster, "queues", `plugin roster may not set form key "queues"`},
-		{"teams-chat", "threads", `plugin tomb may not set form key "threads" (teams-chat keys: blind)`},
+		{"teams-chat", "threads", `plugin tomb may not set form key "threads" (teams-chat keys: blind, inbox_fetch)`},
 		{"", "authored", `plugin gh may not set form key "authored" (github-pr keys: none)`},
 		{model.SourceBandHub, "blind", `plugin bandhub may not set form key "blind"`},
 		{"github-author", "queues", `plugin gh may not set form key "queues"`},

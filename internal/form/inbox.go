@@ -35,6 +35,13 @@ type InboxItem struct {
 	Quote    string `json:"quote,omitempty"` // keel: the selected text, cut
 	Body     string `json:"body"`
 	Cut      bool   `json:"cut,omitempty"` // the full text is at URL
+	// EditedAt is when an edit of a Teams message was seen; the item keeps
+	// its first At, Kind and every other field (an item is written once).
+	EditedAt string `json:"edited_at,omitempty"`
+	// Self marks a Teams message by the critic's own account (chat.self):
+	// written once, compact (first line), never updated; the full text is
+	// at the critic's inbox_fetch with this item's message id.
+	Self bool `json:"self,omitempty"`
 }
 
 // inboxItems turns a round's events into inbox entries, keyed by comment or
@@ -88,6 +95,12 @@ func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.
 
 // mergeInbox adds fresh items to the current inbox and evicts the oldest
 // until it fits inboxBytes.
+//
+// A Teams item is written once and then immutable (the form-churn order,
+// 2026-11-13): a later teams_edited only replaces body and cut and stamps
+// edited_at, and only when the body changed; a teams_deleted removes the
+// item; a re-sent teams_new for an id already held changes nothing. Every
+// unchanged leaf is then left out of the write by the form diff.
 func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]InboxItem {
 	box := map[string]InboxItem{}
 	_ = json.Unmarshal(cur, &box)
@@ -97,7 +110,20 @@ func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]Inbo
 		}
 	}
 	for id, it := range fresh {
-		box[id] = it
+		old, held := box[id]
+		if !strings.HasPrefix(it.Kind, "teams_") {
+			box[id] = it
+			continue
+		}
+		switch {
+		case it.Kind == "teams_deleted":
+			delete(box, id)
+		case !held:
+			box[id] = it
+		case it.Kind == "teams_edited" && !old.Self && (old.Body != it.Body || old.Cut != it.Cut):
+			old.Body, old.Cut, old.EditedAt = it.Body, it.Cut, it.At
+			box[id] = old
+		}
 	}
 	for len(model.MustJSON(box)) > inboxBytes {
 		oldest := ""

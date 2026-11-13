@@ -414,6 +414,10 @@ type AuthorSeen struct {
 type ChatRef struct {
 	ID    string `json:"id"`
 	Topic string `json:"topic,omitempty"`
+	// Self is the Teams sender id our seats post as (8:orgid:...). Its new
+	// messages are written compact and its edits and deletes not at all:
+	// the seat wrote them. Empty: every sender is treated alike.
+	Self string `json:"self,omitempty"`
 }
 
 const ModeAuthor Mode = "author"

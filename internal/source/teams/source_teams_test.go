@@ -64,11 +64,13 @@ func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
 	if it.Body != "Ship it & tell Jack\nline two" {
 		t.Fatalf("body = %q", it.Body)
 	}
-	if !it.HasImage || !strings.Contains(it.Fetch, "--download-images") || !strings.Contains(it.Fetch, `select(.id=="200")`) {
-		t.Fatalf("image/fetch wrong: %+v", it)
-	}
-	if it.Chat != "19:abc@thread.v2" || it.By != "Liang Shi" {
+	// chat and fetch live once in inbox_fetch, not on the item.
+	if !it.HasImage || it.Fetch != "" || it.Chat != "" || it.By != "Liang Shi" {
 		t.Fatalf("item = %+v", it)
+	}
+	f := InboxFetch("19:abc@thread.v2")
+	if f["chat"] != "19:abc@thread.v2" || !strings.Contains(f["images"], "--download-images") || !strings.Contains(f["text"], `select(.id=="<id>")`) {
+		t.Fatalf("inbox_fetch = %v", f)
 	}
 }
 
@@ -574,5 +576,56 @@ func TestLiveTeamsCollectModeCollectsWithoutPinging(t *testing.T) {
 		if attempted != c.attempt || len(got.Runtime.PendingEvents) != 1 {
 			t.Fatalf("%s: delivery attempted %v (want %v), pending %d, error %q", c.name, attempted, c.attempt, len(got.Runtime.PendingEvents), got.Runtime.LastError)
 		}
+	}
+}
+
+func fromMsg(id, from, fromID, content string) tomb.TeamsMsg {
+	m := tmsg(id, from, content)
+	m.FromURL = "https://x/v1/users/ME/contacts/" + fromID
+	return m
+}
+
+// Self messages (chat.self): a new one is one compact item with its id kept
+// (inbox_fetch reads the full text); its edits and deletes write nothing.
+// The control is the same sequence from another sender.
+func TestTeamsSelfMessagesCompactAndNeverUpdated(t *testing.T) {
+	const self, other = "8:orgid:self", "8:orgid:other"
+	chat := &model.ChatRef{ID: "19:abc@thread.v2", Topic: "DM", Self: self}
+	long := "status: everything that needs Chiqun now<br>" + strings.Repeat("a line of detail<br>", 40)
+	st := &model.TeamsState{}
+	teamsDiff(st, []tomb.TeamsMsg{fromMsg("1", "Jack", self, "old")}, chat) // first round records
+
+	ev, items := teamsDiff(st, []tomb.TeamsMsg{fromMsg("1", "Jack", self, "old"), fromMsg("2", "Jack", self, long), fromMsg("3", "Akshay", other, long)}, chat)
+	s, o := items["teams-2"], items["teams-3"]
+	if !s.Self || s.Body != "status: everything that needs Chiqun now" || !s.Cut || s.FromID != "" || len(ev) != 2 {
+		t.Fatalf("self new: %+v (events %d)", s, len(ev))
+	}
+	if o.Self || len(o.Body) < 500 || o.FromID != other {
+		t.Fatalf("control, other new: %+v", o)
+	}
+
+	edited := strings.Replace(long, "everything", "all", 1)
+	ev, items = teamsDiff(st, []tomb.TeamsMsg{fromMsg("2", "Jack", self, edited), fromMsg("3", "Akshay", other, edited)}, chat)
+	if _, ok := items["teams-2"]; ok || len(ev) != 1 || ev[0].Comment != "3" || items["teams-3"].Kind != "teams_edited" {
+		t.Fatalf("edit: self must write nothing, other must: items %v events %+v", items, ev)
+	}
+
+	del := func(m tomb.TeamsMsg) tomb.TeamsMsg {
+		m.Properties = map[string]any{"deletetime": "1794500000000"}
+		return m
+	}
+	ev, items = teamsDiff(st, []tomb.TeamsMsg{del(fromMsg("2", "Jack", self, "")), del(fromMsg("3", "Akshay", other, ""))}, chat)
+	if _, ok := items["teams-2"]; ok || items["teams-3"].Kind != "teams_deleted" || items["teams-3"].Body != "" {
+		t.Fatalf("delete: self nothing, other one teams_deleted: %v", items)
+	}
+	_ = ev
+
+	// control: without chat.self, Jack's messages are full items like anyone's.
+	plain := &model.ChatRef{ID: chat.ID}
+	st2 := &model.TeamsState{}
+	teamsDiff(st2, nil, plain)
+	_, items = teamsDiff(st2, []tomb.TeamsMsg{fromMsg("5", "Jack", self, long)}, plain)
+	if it := items["teams-5"]; it.Self || len(it.Body) < 500 {
+		t.Fatalf("control, no chat.self: %+v", it)
 	}
 }
