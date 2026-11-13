@@ -384,6 +384,7 @@ type TrackedPR struct {
 	Owner     int    `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
 	Mergeable string `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
 	Base      string `json:"bs,omitempty"`   // its base branch, "" is main (the base-head watch)
+	RC        string `json:"rc,omitempty"`   // the architect RC comment last pinged (its createdAt): one ping per RC
 	Links     []int  `json:"l,omitempty"`    // issue numbers its body links
 	Size      int    `json:"b,omitempty"`    // bytes of its entry on the form
 	Held      bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
@@ -785,6 +786,16 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			}
 			logf("PR #%d turned conflicting", n)
 		}
+		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Warden 11-13).
+		if _, rc := mergecheck.ArchState(&p.Facts, p.Arch); rc && p.Arch.At != t.RC {
+			if role := roleOf(owners, p.Author, p.Title); role != "" {
+				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
+					"scout: PR #%d %q is BLOCKED: architect REQUEST_CHANGES at %s (%s): fix and push for a fresh pass",
+					n, clip(p.Title, MaxTitle), cut(p.Arch.Sha, 8), p.Arch.At))})
+			}
+			t.RC = p.Arch.At
+			logf("PR #%d blocked by architect RC at %s", n, cut(p.Arch.Sha, 8))
+		}
 		if p.Facts.State != "OPEN" {
 			t.Mergeable = "" // only an open PR's mergeability is asked again
 		}
@@ -1051,7 +1062,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// A merged or closed PR keeps only what its retention and ledger need.
 	for _, t := range st.PRs {
 		if t.State != "OPEN" {
-			t.Head, t.Inputs, t.Settling, t.Owner, t.Links, t.Mergeable = "", "", false, 0, nil, ""
+			t.Head, t.Inputs, t.Settling, t.Owner, t.Links, t.Mergeable, t.RC = "", "", false, 0, nil, "", ""
 		}
 	}
 	st.Cursor = start.Add(-CursorSkew).Format(time.RFC3339)
@@ -1088,6 +1099,10 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 	if e.Base == "main" {
 		e.Base = ""
 	}
+	// The architect's verdict overrides the step order (Warden 11-13); a conflict still comes first.
+	if ms, _ := mergecheck.ArchState(&p.Facts, p.Arch); ms != "" && e.MergeState != "waiting: conflict" {
+		e.MergeState = ms
+	}
 	if e.Ready == e.Created && !p.Facts.Draft {
 		e.Ready = 0 // ready when created
 	}
@@ -1100,7 +1115,7 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 	if a := p.Arch; a != nil {
 		v := &Verdict{Verdict: a.Verdict, Head: at(a.Sha), At: unix(a.At)}
 		if a.Hold {
-			v.Verdict, v.At = "hold", unix(a.HoldAt)
+			v.Verdict, v.Head, v.At = "hold", at(a.HoldSha), unix(a.HoldAt) // h: the head the hold names
 		}
 		e.Architect = v
 	}

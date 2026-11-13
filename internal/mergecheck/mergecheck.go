@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Job ids are band-hub job ids.
@@ -167,6 +168,7 @@ type Review struct {
 	Login string `json:"login"`
 	State string `json:"state"`
 	Oid   string `json:"oid,omitempty"`
+	At    string `json:"at,omitempty"` // submittedAt (RFC 3339, UTC)
 }
 
 // Facts are a PR's GitHub facts.
@@ -205,6 +207,7 @@ type Arch struct {
 	At      string `json:"at,omitempty"`
 	Hold    bool   `json:"hold,omitempty"`
 	HoldAt  string `json:"hold_at,omitempty"`
+	HoldSha string `json:"hold_sha,omitempty"` // the head the newest hold names (its Head: line)
 }
 
 // Marks are the owner-written marks the steps read (majors_handled,
@@ -730,4 +733,38 @@ func StateOf(f *Facts, steps []Row) string {
 		}
 	}
 	return "ready"
+}
+
+// ArchState is the architect's override of a PR's state (Warden 11-13, outside the states.py port, which the golden
+// pins): the latest architect verdict REQUEST_CHANGES, not superseded by a later approving one, blocks the PR at once
+// ("blocked: architect RC at <h8>", rc true). archOf keeps only the latest verdict comment, so a later APPROVE comment
+// already replaces the RC; the bot's APPROVE can also land as an Ilya-Grebnov review, which supersedes the RC when
+// submitted after it. Else a hold (a pass in progress, newer than the verdict) naming the PR's own head is
+// "waiting: architect review". "" leaves the state as StateOf gave it.
+func ArchState(f *Facts, a *Arch) (state string, rc bool) {
+	if f == nil || a == nil || f.State != "OPEN" {
+		return "", false
+	}
+	if a.Verdict == "REQUEST_CHANGES" && !approvedAfter(f.Reviews, a.At) {
+		return "blocked: architect RC at " + short(a.Sha), true
+	}
+	if a.Hold && a.HoldSha != "" && short(a.HoldSha) == short(f.Oid) {
+		return "waiting: architect review", false
+	}
+	return "", false
+}
+
+// approvedAfter says whether an Ilya-Grebnov APPROVED review was submitted after at.
+func approvedAfter(rs []Review, at string) bool {
+	t, err := time.Parse(time.RFC3339, at)
+	for _, r := range rs {
+		if !strings.EqualFold(r.Login, Ilya) || r.State != "APPROVED" {
+			continue
+		}
+		rt, rerr := time.Parse(time.RFC3339, r.At)
+		if err == nil && rerr == nil && rt.After(t) {
+			return true
+		}
+	}
+	return false
 }

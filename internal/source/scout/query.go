@@ -20,7 +20,7 @@ createdAt updatedAt mergedAt closedAt additions deletions reviewDecision author{
 timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{__typename ... on ReadyForReviewEvent{createdAt}}}
 files(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{path}}
 closingIssuesReferences(first:10){nodes{number}}
-latestOpinionatedReviews(first:20){nodes{author{login} state commit{oid}}}
+latestOpinionatedReviews(first:20){nodes{author{login} state submittedAt commit{oid}}}
 reviewThreads(first:100){nodes{isResolved}}
 comments(last:30){nodes{author{login} createdAt body}}
 commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:60){nodes{
@@ -218,9 +218,10 @@ type ghNode struct {
 	} `json:"closingIssuesReferences"`
 	Reviews struct {
 		Nodes []struct {
-			Author *login `json:"author"`
-			State  string `json:"state"`
-			Commit *struct {
+			Author      *login `json:"author"`
+			State       string `json:"state"`
+			SubmittedAt string `json:"submittedAt"`
+			Commit      *struct {
 				Oid string `json:"oid"`
 			} `json:"commit"`
 		} `json:"nodes"`
@@ -344,6 +345,7 @@ var buildRE = regexp.MustCompile(`buildId=(\d+)`)
 var (
 	archHeadRE    = regexp.MustCompile("Architect review\\s*[\u2014-]+\\s*PR #(\\d+)\\s*@\\s*`([0-9a-f]{7,40})`")
 	archVerdictRE = regexp.MustCompile(`(?m)^\*\*([A-Z_]+)\*\*\s*$`)
+	archHoldRE    = regexp.MustCompile("Head:\\s*`?([0-9a-f]{7,40})")
 	automatonRE   = regexp.MustCompile(`<!-- automaton:(\d+):([0-9a-f]{7,40}) verdict:([A-Za-z_]+) -->`)
 )
 
@@ -438,7 +440,7 @@ func toPR(g ghNode) PR {
 		if r.Author != nil {
 			who = r.Author.Login
 		}
-		f.Reviews = append(f.Reviews, mergecheck.Review{Login: who, State: r.State, Oid: oid})
+		f.Reviews = append(f.Reviews, mergecheck.Review{Login: who, State: r.State, Oid: oid, At: r.SubmittedAt})
 	}
 	if len(g.Commits.Nodes) > 0 && g.Commits.Nodes[0].Commit.Rollup != nil {
 		roll := g.Commits.Nodes[0].Commit.Rollup
@@ -483,7 +485,7 @@ func toPR(g ghNode) PR {
 // hold (a pass in progress) is newer than it.
 func archOf(g ghNode) *mergecheck.Arch {
 	var a *mergecheck.Arch
-	holdAt := ""
+	holdAt, holdSha := "", ""
 	for _, c := range g.Comments.Nodes {
 		if c.Author == nil || c.Author.Login != archBot && c.Author.Login != strings.TrimSuffix(archBot, "[bot]") {
 			continue
@@ -491,7 +493,10 @@ func archOf(g ghNode) *mergecheck.Arch {
 		switch {
 		case strings.HasPrefix(c.Body, "<!-- architect-review-hold -->"):
 			if c.CreatedAt > holdAt {
-				holdAt = c.CreatedAt
+				holdAt, holdSha = c.CreatedAt, ""
+				if m := archHoldRE.FindStringSubmatch(c.Body); m != nil {
+					holdSha = m[1]
+				}
 			}
 		case strings.HasPrefix(c.Body, "<!-- architect-review -->"):
 			h := archHeadRE.FindStringSubmatch(c.Body)
@@ -511,7 +516,7 @@ func archOf(g ghNode) *mergecheck.Arch {
 	if a == nil {
 		a = &mergecheck.Arch{}
 	}
-	a.HoldAt = holdAt
+	a.HoldAt, a.HoldSha = holdAt, holdSha
 	a.Hold = holdAt != "" && (a.At == "" || holdAt > a.At)
 	return a
 }
