@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -23,11 +24,16 @@ const TipEvery = 5 * time.Minute
 // State is what the mirror carries from one round to the next (the plugin's
 // opaque state): the view it last wrote, and the cached branch tips.
 type State struct {
-	View   *View             `json:"view,omitempty"`
-	Slim   bool              `json:"slim,omitempty"` // the Dropped keys have been unset
-	Tips   map[string]string `json:"tips,omitempty"` // branch -> tip sha ("" = absent upstream: unknown)
-	TipsAt time.Time         `json:"tips_at,omitempty"`
-	TipErr string            `json:"tip_err,omitempty"`
+	View *View `json:"view,omitempty"`
+	Slim bool  `json:"slim,omitempty"` // the Dropped keys have been unset
+	// Rows: queues and nodes are on the form as objects keyed by queue/node
+	// (one row a leaf), not as arrays, which a diff can only replace whole.
+	Rows bool `json:"rows,omitempty"`
+	// UpdatedAt is when the updated key was last written (the hub's clock).
+	UpdatedAt int64             `json:"updated_at,omitempty"`
+	Tips      map[string]string `json:"tips,omitempty"` // branch -> tip sha ("" = absent upstream: unknown)
+	TipsAt    time.Time         `json:"tips_at,omitempty"`
+	TipErr    string            `json:"tip_err,omitempty"`
 	// Desc caches descent verdicts, Pair(job sha, tip) -> tip strictly
 	// descends from sha: one forge call per new pair. An error is not a
 	// verdict: it is retried, no sooner than TipEvery after it.
@@ -72,22 +78,53 @@ func Step(ctx context.Context, prev State, h *Hub, cfg Config, now time.Time, ti
 		old = prev.View.Map()
 	}
 	for _, k := range Keys {
-		if prev.View != nil && same(old[k], cur[k]) {
+		if prev.View != nil && prev.Rows && same(old[k], cur[k]) {
 			continue
 		}
-		b, _ := json.Marshal(cur[k])
+		var b []byte
+		if RowKeys[k] {
+			b, _ = json.Marshal(Rows(cur[k]))
+		} else {
+			b, _ = json.Marshal(cur[k])
+		}
 		r.Set[k] = b
 		r.Changed = append(r.Changed, k)
 	}
+	r.State.Rows = true
 	if !prev.Slim {
 		r.Unset, r.State.Slim = append([]string(nil), Dropped...), true
 	}
-	if len(r.Set) > 0 {
+	// updated is a heartbeat, not a change marker: written at most every
+	// UpdatedEvery (a quiet hub still shows it is watched), never per change.
+	if h.Stats.Hub.Now-prev.UpdatedAt >= UpdatedEvery.Milliseconds() {
 		b, _ := json.Marshal(time.UnixMilli(h.Stats.Hub.Now).UTC().Format(time.RFC3339))
 		r.Set["updated"] = b
+		r.State.UpdatedAt = h.Stats.Hub.Now
 	}
 	return r
 }
+
+// UpdatedEvery bounds the updated heartbeat: the one volatile key.
+const UpdatedEvery = 10 * time.Minute
+
+// RowKeys are the keys written as objects, one row a member.
+var RowKeys = map[string]bool{"queues": true, "nodes": true}
+
+// Rows keys each line by its first field (the queue or node name), so a change
+// to one queue or node patches one leaf. The value is the whole line, as the
+// array carried it. A dot in the name becomes "_": a dotted member key is a
+// path to the form (figaro#43), and queue names carry dots (gate.change).
+func Rows(lines []string) map[string]string {
+	out := make(map[string]string, len(lines))
+	for _, l := range lines {
+		name, _, _ := strings.Cut(l, " ")
+		out[RowKey(name)] = l
+	}
+	return out
+}
+
+// RowKey is a queue or node name as a member key: dots become "_".
+func RowKey(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
 // refreshTips asks for each live branch's tip at most every TipEvery. A
 // failure keeps the old tips and records the error; no live branch empties

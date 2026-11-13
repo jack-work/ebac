@@ -341,8 +341,8 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	h.Live = append(h.Live, j)
 	bump(h, j.Queue)
 	r3 := Step(ctx, r2.State, h, Config{}, now.Add(2*time.Minute), nil, nil)
-	if strings.Join(r3.Changed, ",") != "queues" || r3.Set["updated"] == nil || len(r3.Set) != 2 {
-		t.Fatalf("a new job: changed %v (%d keys); want queues + updated", r3.Changed, len(r3.Set))
+	if strings.Join(r3.Changed, ",") != "queues" || r3.Set["updated"] != nil || len(r3.Set) != 1 {
+		t.Fatalf("a new job: changed %v (%d keys); want queues only (updated is a 10-min heartbeat)", r3.Changed, len(r3.Set))
 	}
 	// The warden's budget: a typical change (a job queued, a job claimed) is under 1 KB.
 	if n := setBytes(r3.Set); n >= 1024 {
