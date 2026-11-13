@@ -146,7 +146,10 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		// One item per message, written once. chat and the fetch command
 		// live once in the role form's inbox_fetch, not on every item.
 		it := form.InboxItem{Kind: kind, By: who, Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(), Self: self}
-		if !self {
+		if self {
+			// Fewest leaves: self says who, and the id is the compose time (ms).
+			it.By, it.Time = "", ""
+		} else {
 			it.FromID = m.SenderID()
 		}
 		if kind == "teams_deleted" {

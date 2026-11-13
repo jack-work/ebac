@@ -597,7 +597,7 @@ func TestTeamsSelfMessagesCompactAndNeverUpdated(t *testing.T) {
 
 	ev, items := teamsDiff(st, []tomb.TeamsMsg{fromMsg("1", "Jack", self, "old"), fromMsg("2", "Jack", self, long), fromMsg("3", "Akshay", other, long)}, chat)
 	s, o := items["teams-2"], items["teams-3"]
-	if !s.Self || s.Body != "status: everything that needs Chiqun now" || !s.Cut || s.FromID != "" || len(ev) != 2 {
+	if !s.Self || s.Body != "status: everything that needs Chiqun now" || !s.Cut || s.FromID != "" || s.By != "" || s.Time != "" || len(ev) != 2 {
 		t.Fatalf("self new: %+v (events %d)", s, len(ev))
 	}
 	if o.Self || len(o.Body) < 500 || o.FromID != other {
