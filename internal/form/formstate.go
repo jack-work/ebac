@@ -780,6 +780,10 @@ func (s *Store) Commit(ctx context.Context, id string, build func(cur map[string
 		}
 		set, remove := build(f.Keys, f.ebac())
 		stripScout(set) // the scout state lives on disk, never on a form
+		if n, paths := guardItems(f.Keys, set); n > 0 {
+			s.warnf("write %s: item guard kept %d field(s) of existing items as they were: %v (total %d)\n",
+				id, n, paths, GuardRefused.Load())
+		}
 		next, err := nextBoard(f.Snap, set, remove)
 		if err != nil {
 			return fmt.Errorf("write %s: %w", id, err)

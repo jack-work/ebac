@@ -195,7 +195,7 @@ func TestLiveAuthorPushesWriteNothingStudied(t *testing.T) {
 	if after := studied(); after != before {
 		t.Fatalf("pushes changed studied keys:\n before %s\n after  %s", before, after)
 	}
-	l.rows[0].State, l.rows[0].MergedAt = "MERGED", "2026-11-10T02:00:00Z"
+	l.rows[0].State, l.rows[0].MergedAt = "MERGED", time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Format(time.RFC3339) // within ClosedKeep
 	l.write()
 	if err := p.Poll(ctx, w.Name); err != nil {
 		t.Fatalf("merge round: %v\n%s", err, out.String())
