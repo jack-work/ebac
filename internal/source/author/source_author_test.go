@@ -79,18 +79,28 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 	t.Setenv("EBAC_FAKE_LOG", t.TempDir()+"/calls")
 	g := forgetest.FakeGH(t, "author")
 	since := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-	prs, err := g.ListAuthoredPRs(context.Background(), "bic/aether", "Chiqun-Zhang", since, 50)
+	closedSince := time.Date(2026, 11, 12, 6, 0, 0, 0, time.UTC)
+	prs, err := g.ListAuthoredPRs(context.Background(), "bic/aether", "Chiqun-Zhang", since, closedSince)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fake answers both calls with the same two PRs: deduplicated, once each.
 	if len(prs) != 2 || prs[0].Head != "ffff8f68aaaa" || prs[1].State != "MERGED" || prs[1].Merged == "" || prs[0].Merged != "" {
 		t.Fatalf("parsed %+v", prs)
 	}
 	b, _ := os.ReadFile(os.Getenv("EBAC_FAKE_LOG"))
-	args := string(b)
-	for _, want := range []string{"--author Chiqun-Zhang", "--state all", "updated:>=2026-10-15T00:00:00Z sort:updated-desc", "--limit 50", "--repo bic/aether"} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("gh args lack %q: %s", want, args)
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(calls) != 2 {
+		t.Fatalf("want 2 gh calls (open, recently closed), got %d:\n%s", len(calls), b)
+	}
+	for i, wants := range [][]string{
+		{"--author Chiqun-Zhang", "--state open", "updated:>=2026-10-15T00:00:00Z sort:updated-desc", "--limit 200", "--repo bic/aether"},
+		{"--author Chiqun-Zhang", "--state all", "is:closed closed:>=2026-11-12T06:00:00Z updated:>=2026-10-15T00:00:00Z", "--limit 200"},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(calls[i], want) {
+				t.Fatalf("call %d lacks %q: %s", i, want, calls[i])
+			}
 		}
 	}
 }
@@ -207,14 +217,14 @@ func authoredLen(t *testing.T, raw json.RawMessage) int {
 	return len(m)
 }
 
-// author-chiqun: 200 PRs is a window of 50 and no failure; the fetch asks for the newest 50; an unchanged window
-// writes no key. A form written before the window existed (200 seen, no digest) is pruned on its first round.
-func TestAuthorRecentWindow(t *testing.T) {
+// author-chiqun: 200 PRs (133 open, 67 merged long ago) is a set of 50 and no failure: the 50 most recently updated
+// OPEN PRs (over the cap, closed/merged go first), no long-merged PR; the fetch is two calls by state; an unchanged
+// set writes no key. A form written before (200 seen) is pruned on its first round.
+func TestAuthorSetByStateCapped(t *testing.T) {
 	log := t.TempDir() + "/calls"
 	t.Setenv("EBAC_FAKE_LOG", log)
 	w := &model.Critic{Name: "author-x", FormID: "@x", Source: "github-author", Host: "microsoft.ghe.com",
 		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Repos: []string{"bic/aether"}}}
-	// Before rollout: every PR seen, the old 200-entry form.
 	w.Runtime.Author = &model.AuthorState{Seen: map[string]model.AuthorSeen{}}
 	for i := 0; i < 200; i++ {
 		state := "OPEN"
@@ -229,33 +239,82 @@ func TestAuthorRecentWindow(t *testing.T) {
 	if rep.Error != "" {
 		t.Fatalf("a 200-PR author failed the round: %s", rep.Error)
 	}
-	if n := authoredLen(t, rep.Set["authored"]); n != model.DefaultAuthorRecent {
-		t.Fatalf("authored holds %d PRs; want the newest %d", n, model.DefaultAuthorRecent)
+	var view map[string]map[string]any
+	if err := json.Unmarshal(rep.Set["authored"], &view); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(rep.Set["authored"]), `"bic/aether#70000"`) || strings.Contains(string(rep.Set["authored"]), `"bic/aether#70050"`) {
-		t.Fatal("the window is not the 50 most recently updated")
+	if len(view) != model.DefaultAuthorRecent {
+		t.Fatalf("authored holds %d PRs; want the cap %d", len(view), model.DefaultAuthorRecent)
+	}
+	for k, v := range view {
+		if v["state"] != "OPEN" {
+			t.Fatalf("%s (%v) kept over the cap while open PRs were evicted", k, v["state"])
+		}
+	}
+	// 70001 is the newest open PR, 70000 is merged long ago (outside ClosedKeep): in, out.
+	if view["bic/aether#70001"] == nil || view["bic/aether#70000"] != nil {
+		t.Fatal("not the newest open PRs, or a long-merged PR kept")
 	}
 	if n := len(rep.Critic.Runtime.Author.Seen); n != model.DefaultAuthorRecent {
-		t.Fatalf("seen-state not pruned to the window: %d", n)
+		t.Fatalf("seen-state not pruned to the set: %d", n)
 	}
 	if len(rep.Events) != 0 {
 		t.Fatalf("long-known PRs announced as news: %d events", len(rep.Events))
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "--limit 50") || !strings.Contains(string(calls), "sort:updated-desc") {
-		t.Fatalf("the fetch is not the newest 50: %s", calls)
+	if !strings.Contains(string(calls), "--state open") || !strings.Contains(string(calls), "is:closed closed:>=") {
+		t.Fatalf("the fetch is not by state: %s", calls)
 	}
-
-	// Control: the same window next round writes no key.
 	again := authorRound(t, rep.Critic, "author200")
 	if _, ok := again.Set["authored"]; ok || again.Error != "" {
-		t.Fatalf("an unchanged window wrote authored again (error %q)", again.Error)
+		t.Fatalf("an unchanged set wrote authored again (error %q)", again.Error)
 	}
-	// A configured window is honoured.
 	w2 := *rep.Critic
 	w2.Author = &model.AuthorRef{Login: "Chiqun-Zhang", Since: w.Author.Since, Repos: []string{"bic/aether"}, Recent: 7}
 	if n := authoredLen(t, authorRound(t, &w2, "author200").Set["authored"]); n != 7 {
 		t.Fatalf("--recent 7 gave %d", n)
+	}
+}
+
+// The flap: a quiet open PR stays on the key while 60 newer PRs move (the recency window dropped it and re-added it
+// on its next update: author-chiqun 299 removals for 15 live entries a day). Positive control: the same PR merged
+// past ClosedKeep does leave, so the check can see a removal.
+func TestByStateKeepsQuietOpenPR(t *testing.T) {
+	now := time.Date(2026, 11, 13, 6, 0, 0, 0, time.UTC)
+	quiet := forge.AuthoredPR{Repo: "bic/aether", Number: 1, State: "OPEN", Updated: "2026-11-02T00:00:00Z"}
+	var prs []forge.AuthoredPR
+	for i := 0; i < 60; i++ {
+		prs = append(prs, forge.AuthoredPR{Repo: "bic/aether", Number: 100 + i, State: "MERGED",
+			Updated: now.Add(-time.Duration(i) * time.Minute).Format(time.RFC3339), Merged: now.Add(-48 * time.Hour).Format(time.RFC3339)})
+	}
+	got := byState(append(prs, quiet), now, 50)
+	if len(got) != 1 || got[0].Number != 1 {
+		t.Fatalf("want only the quiet open PR (60 newer PRs merged 2 d ago leave), got %d: %+v", len(got), got)
+	}
+	// Control: merged 2 d ago, it leaves; merged 1 h ago, it stays.
+	quiet.State, quiet.Merged = "MERGED", now.Add(-48*time.Hour).Format(time.RFC3339)
+	if got := byState([]forge.AuthoredPR{quiet}, now, 50); len(got) != 0 {
+		t.Fatalf("control: a PR merged 2 d ago stayed: %+v", got)
+	}
+	quiet.Merged = now.Add(-time.Hour).Format(time.RFC3339)
+	if got := byState([]forge.AuthoredPR{quiet}, now, 50); len(got) != 1 {
+		t.Fatalf("a PR merged 1 h ago left: %+v", got)
+	}
+	// Over the cap: closed/merged leave before any open PR.
+	var mix []forge.AuthoredPR
+	for i := 0; i < 5; i++ {
+		mix = append(mix, forge.AuthoredPR{Repo: "r", Number: i, State: "OPEN", Updated: "2026-11-01T00:00:00Z"})
+		mix = append(mix, forge.AuthoredPR{Repo: "r", Number: 10 + i, State: "CLOSED", Closed: now.Add(-time.Hour).Format(time.RFC3339)})
+	}
+	got = byState(mix, now, 7)
+	open := 0
+	for _, pr := range got {
+		if pr.State == "OPEN" {
+			open++
+		}
+	}
+	if len(got) != 7 || open != 5 {
+		t.Fatalf("cap 7 over 5 open + 5 closed kept %d (open %d); want all 5 open + 2 closed", len(got), open)
 	}
 }
 

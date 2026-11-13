@@ -29,13 +29,39 @@ type AuthoredPR struct {
 
 func (a AuthoredPR) Key() string { return fmt.Sprintf("%s#%d", a.Repo, a.Number) }
 
-// ListAuthoredPRs lists one author's most recently updated PRs in a repo,
-// at most limit, updated since a time, every state. A busy author's older PRs
-// are simply not fetched: the window is the newest limit, never a failure
-// (author-chiqun passed 200 PRs on 2026-11-09).
-func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since time.Time, limit int) ([]AuthoredPR, error) {
-	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", "all",
-		"--search", "updated:>=" + since.UTC().Format(time.RFC3339) + " sort:updated-desc", "--limit", fmt.Sprint(limit),
+// AuthorListLimit bounds each of the two lists an author watch reads per repo.
+const AuthorListLimit = 200
+
+// ListAuthoredPRs lists one author's PRs in a repo by STATE, not by recency:
+// every OPEN PR updated since a time, plus every PR closed or merged since
+// closedSince. Membership then changes only on a real transition; a window of
+// the N most recently updated PRs dropped a quiet open PR whenever N others
+// moved and re-added it on its next update (author-chiqun: 299 entries removed
+// for 15 live in a day, 2026-11-13). Two calls, deduplicated by PR.
+func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since, closedSince time.Time) ([]AuthoredPR, error) {
+	upd := "updated:>=" + since.UTC().Format(time.RFC3339)
+	open, err := g.listAuthored(ctx, repo, login, "open", upd+" sort:updated-desc")
+	if err != nil {
+		return nil, err
+	}
+	closed, err := g.listAuthored(ctx, repo, login, "all", "is:closed closed:>="+closedSince.UTC().Format(time.RFC3339)+" "+upd+" sort:updated-desc")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []AuthoredPR
+	for _, pr := range append(open, closed...) {
+		if !seen[pr.Key()] {
+			seen[pr.Key()] = true
+			out = append(out, pr)
+		}
+	}
+	return out, nil
+}
+
+func (g *GH) listAuthored(ctx context.Context, repo, login, state, search string) ([]AuthoredPR, error) {
+	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", state,
+		"--search", search, "--limit", fmt.Sprint(AuthorListLimit),
 		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt,closedAt"}
 	out, err := g.run(ctx, args, nil)
 	if err != nil {

@@ -105,7 +105,9 @@ func TestAuthoredKeyMovesOnlyOnTransitions(t *testing.T) {
 	}
 
 	// Merge: one write, that PR's line, and the wake event the PEZ trigger reads.
-	l.rows[0].State, l.rows[0].MergedAt, l.rows[0].ClosedAt = "MERGED", "2026-11-10T02:00:00Z", "2026-11-10T02:00:00Z"
+	// Stamped relative to now: a merged PR stays on the key for ClosedKeep after its merge.
+	mergedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	l.rows[0].State, l.rows[0].MergedAt, l.rows[0].ClosedAt = "MERGED", mergedAt, mergedAt
 	l.write()
 	r = call()
 	var view map[string]map[string]any
@@ -113,7 +115,7 @@ func TestAuthoredKeyMovesOnlyOnTransitions(t *testing.T) {
 		t.Fatalf("merge did not write authored: %v (%s)", err, r.Set["authored"])
 	}
 	m := view["bic/aether#101"]
-	if m["state"] != "MERGED" || m["merged"] != "2026-11-10T02:00:00Z" || m["n"] != float64(101) || m["url"] != "https://x/pull/101" || m["title"] != "feat: one" {
+	if m["state"] != "MERGED" || m["merged"] != mergedAt || m["n"] != float64(101) || m["url"] != "https://x/pull/101" || m["title"] != "feat: one" {
 		t.Fatalf("merged line: %v", m)
 	}
 	if _, ok := m["closed"]; ok {
@@ -132,10 +134,11 @@ func TestAuthoredKeyMovesOnlyOnTransitions(t *testing.T) {
 	if r := call(); r.Set["authored"] == nil || authorKinds(plugin.Unwire(r.Events))["bic/aether#102 author_pr_new"] != model.TierWake {
 		t.Fatalf("draft -> ready: set %v events %v", r.Set, authorKinds(plugin.Unwire(r.Events)))
 	}
-	l.rows[1].State, l.rows[1].ClosedAt = "CLOSED", "2026-11-10T03:00:00Z"
+	closedAt := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Second).Format(time.RFC3339)
+	l.rows[1].State, l.rows[1].ClosedAt = "CLOSED", closedAt
 	l.write()
 	r = call()
-	if !strings.Contains(string(r.Set["authored"]), `"closed":"2026-11-10T03:00:00Z"`) {
+	if !strings.Contains(string(r.Set["authored"]), `"closed":"`+closedAt+`"`) {
 		t.Fatalf("close: %s", r.Set["authored"])
 	}
 }

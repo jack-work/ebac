@@ -140,9 +140,10 @@ func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, 
 	}
 
 	n := a.Window()
+	now := time.Now().UTC()
 	var prs []forge.AuthoredPR
 	for _, repo := range a.Repos {
-		got, err := gh.ListAuthoredPRs(ctx, repo, a.Login, a.Since, n)
+		got, err := gh.ListAuthoredPRs(ctx, repo, a.Login, a.Since, now.Add(-ClosedKeep))
 		if err != nil {
 			w.Runtime.ConsecutiveFailures++
 			w.Runtime.LastError = err.Error()
@@ -151,7 +152,6 @@ func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, 
 		}
 		prs = append(prs, got...)
 	}
-	prs = recentWindow(prs, n)
 
 	st := w.Runtime.Author
 	f, spec, ferr := resolveFilter(st, keys)
@@ -171,6 +171,7 @@ func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, 
 		rep.Error = err.Error()
 		return rep, nil
 	}
+	prs = byState(prs, now, n)
 	prevGood := w.Runtime.LastSuccess
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = time.Now().UTC()
@@ -200,19 +201,42 @@ func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, 
 	return rep, nil
 }
 
-// recentWindow is the n most recently updated PRs across every repo, sorted by key.
-func recentWindow(prs []forge.AuthoredPR, n int) []forge.AuthoredPR {
-	sort.SliceStable(prs, func(i, j int) bool {
-		if prs[i].Updated != prs[j].Updated {
-			return prs[i].Updated > prs[j].Updated // RFC 3339 UTC sorts as text
+// ClosedKeep is how long a closed or merged PR stays on the authored key.
+const ClosedKeep = 24 * time.Hour
+
+// byState is the authored set: every OPEN PR, and every PR closed or merged
+// within ClosedKeep, filtered already, sorted by key. Over the cap n it evicts
+// closed/merged PRs first (oldest close first), then the open PRs updated
+// longest ago, so an open PR leaves only when n open PRs are newer.
+func byState(prs []forge.AuthoredPR, now time.Time, n int) []forge.AuthoredPR {
+	var open, done []forge.AuthoredPR
+	for _, pr := range prs {
+		switch {
+		case pr.State == "OPEN":
+			open = append(open, pr)
+		case after(doneAt(pr), now.Add(-ClosedKeep)):
+			done = append(done, pr)
 		}
-		return prs[i].Key() < prs[j].Key()
-	})
-	if len(prs) > n {
-		prs = prs[:n]
 	}
-	sort.Slice(prs, func(i, j int) bool { return prs[i].Key() < prs[j].Key() })
-	return prs
+	sort.SliceStable(done, func(i, j int) bool { return doneAt(done[i]) > doneAt(done[j]) }) // newest close first
+	sort.SliceStable(open, func(i, j int) bool { return open[i].Updated > open[j].Updated })
+	if len(open) > n {
+		open = open[:n]
+	}
+	if room := n - len(open); len(done) > room {
+		done = done[:room]
+	}
+	out := append(open, done...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
+	return out
+}
+
+// doneAt is when a PR merged or closed ("" when it is open).
+func doneAt(pr forge.AuthoredPR) string {
+	if pr.Merged != "" {
+		return pr.Merged
+	}
+	return pr.Closed
 }
 
 // after says whether ts is at or after t. With no cutoff, or a time that
