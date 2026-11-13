@@ -629,3 +629,21 @@ func TestTeamsSelfMessagesCompactAndNeverUpdated(t *testing.T) {
 		t.Fatalf("control, no chat.self: %+v", it)
 	}
 }
+
+// A successful round names inbox_fetch for the chat (the one place the
+// fetch commands live); a failed read writes no inbox_fetch (control).
+func TestTeamsRoundSetsInboxFetch(t *testing.T) {
+	w := &model.Critic{Name: "c", Chat: testChat()}
+	rep, err := round(context.Background(), fakeTomb(t, "ok"), w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f map[string]string
+	if json.Unmarshal(rep.Set["inbox_fetch"], &f) != nil || f["chat"] != "19:abc@thread.v2" || !strings.Contains(f["text"], "<id>") {
+		t.Fatalf("inbox_fetch = %s", rep.Set["inbox_fetch"])
+	}
+	rep, _ = round(context.Background(), fakeTomb(t, "down"), &model.Critic{Name: "c", Chat: testChat()})
+	if rep == nil || rep.Set["inbox_fetch"] != nil {
+		t.Fatalf("control: a failed read set inbox_fetch: %+v", rep)
+	}
+}
