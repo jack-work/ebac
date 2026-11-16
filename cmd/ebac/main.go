@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/form"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta
@@ -192,6 +195,37 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 		os.Exit(1)
+	}
+	if changesRoster(cmd, args) {
+		syncRosterNow(ctx, g)
+	}
+}
+
+// changesRoster: a command that adds, removes, stops or resumes a critic. Its
+// roster row is written at once (the live board follows the roster form),
+// not at the next 30-min reconcile. A help or dry run changes nothing.
+func changesRoster(cmd string, args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "-help" || strings.HasPrefix(a, "--dry-run") || strings.HasPrefix(a, "-dry-run") {
+			return false
+		}
+	}
+	switch cmd {
+	case "add", "rm", "remove", "stop", "resume":
+		return true
+	}
+	return strings.HasPrefix(cmd, "add-") && cmd != "add-roster"
+}
+
+// syncRosterNow rewrites the roster form; the command itself already
+// succeeded, so a failure here is a warning, and reconcile repairs it later.
+func syncRosterNow(ctx context.Context, g globals) {
+	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
+	if err == nil {
+		_, _, err = fleet.SyncRoster(ctx, st, st.Fig, "")
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ebac: roster not refreshed (reconcile will): %v\n", err)
 	}
 }
 
