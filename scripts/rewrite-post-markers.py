@@ -55,12 +55,12 @@ def main():
     prs, day, end = {}, datetime.date.fromisoformat(a.since), datetime.date.today()
     while day <= end:
         nxt = day + datetime.timedelta(days=7)
-        q = f"commenter:{LOGIN} org:{a.org} is:pr updated:{day}..{nxt}"
+        q = f"involves:{LOGIN} org:{a.org} is:pr updated:{day}..{nxt}"
         for it in pages("search/issues", q=q, per_page=100):
             repo = it["repository_url"].split("/repos/")[1]
             prs[(repo, it["number"])] = 1
         day = nxt + datetime.timedelta(days=1)
-    print(f"{len(prs)} PRs with a comment by {LOGIN} since {a.since}", file=sys.stderr)
+    print(f"{len(prs)} PRs involving {LOGIN} since {a.since}", file=sys.stderr)
 
     todo = []  # (kind, repo, n, id, body)
     for repo, n in sorted(prs):
