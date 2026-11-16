@@ -1,0 +1,480 @@
+[
+ {
+  "protocol": 0,
+  "critic": {
+   "name": "golden",
+   "form_id": "@golden",
+   "mode": "keel",
+   "host": "",
+   "created_at": "0001-01-01T00:00:00Z",
+   "prs": null,
+   "source": "keel-threads",
+   "keel": {
+    "repo": "jack-work/notes",
+    "waiting_on": [
+     "Jack Kelliher ⟩ jack"
+    ],
+    "self": [
+     "figaro-seat ⟩ jack"
+    ]
+   },
+   "stop": {
+    "until_all_closed": false,
+    "archive_grace_sec": 0,
+    "max_consecutive_failures": 0
+   },
+   "runtime": {
+    "round": 1,
+    "last_polled": "0001-01-01T00:00:00Z",
+    "last_success": "0001-01-01T00:00:00Z",
+    "consecutive_failures": 0,
+    "pending_since": "0001-01-01T00:00:00Z",
+    "next_retry_at": "0001-01-01T00:00:00Z",
+    "last_delivered": "0001-01-01T00:00:00Z",
+    "last_ping": "0001-01-01T00:00:00Z",
+    "keel": {
+     "seen": {
+      "b1": "28aeb5929a413233",
+      "c1": "f41e508f317558ee",
+      "c2": "fc75da4b3a839321",
+      "h1": "77b31ba4bea7e02c",
+      "h2": "af326f940c95805b",
+      "o1": "f63e34a034f19a24",
+      "o2": "db45b4f2c65403f0"
+     },
+     "resolved": {
+      "t1": false,
+      "t2": false,
+      "t3": true,
+      "t4": false
+     }
+    },
+    "stopped": false,
+    "archived": false,
+    "archived_at": "0001-01-01T00:00:00Z"
+   }
+  },
+  "set": {
+   "threads": {
+    "t1": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 1,
+     "last_by": "figaro-seat ⟩ jack"
+    },
+    "t2": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 1,
+     "last_by": "Ana ⟩ ana"
+    },
+    "t3": {
+     "path": "other/b.md",
+     "line": 3,
+     "n": 1,
+     "last_by": "Jack Kelliher ⟩ jack"
+    }
+   }
+  }
+ },
+ {
+  "protocol": 0,
+  "critic": {
+   "name": "golden",
+   "form_id": "@golden",
+   "mode": "keel",
+   "host": "",
+   "created_at": "0001-01-01T00:00:00Z",
+   "prs": null,
+   "source": "keel-threads",
+   "keel": {
+    "repo": "jack-work/notes",
+    "waiting_on": [
+     "Jack Kelliher ⟩ jack"
+    ],
+    "self": [
+     "figaro-seat ⟩ jack"
+    ]
+   },
+   "stop": {
+    "until_all_closed": false,
+    "archive_grace_sec": 0,
+    "max_consecutive_failures": 0
+   },
+   "runtime": {
+    "round": 2,
+    "last_polled": "0001-01-01T00:00:00Z",
+    "last_success": "0001-01-01T00:00:00Z",
+    "consecutive_failures": 0,
+    "pending_since": "0001-01-01T00:00:00Z",
+    "next_retry_at": "0001-01-01T00:00:00Z",
+    "last_delivered": "0001-01-01T00:00:00Z",
+    "last_ping": "0001-01-01T00:00:00Z",
+    "keel": {
+     "seen": {
+      "b1": "28aeb5929a413233",
+      "c1": "f41e508f317558ee",
+      "c2": "fc75da4b3a839321",
+      "h1": "77b31ba4bea7e02c",
+      "h2": "af326f940c95805b",
+      "o1": "f63e34a034f19a24",
+      "o2": "db45b4f2c65403f0"
+     },
+     "resolved": {
+      "t1": false,
+      "t2": false,
+      "t3": true,
+      "t4": false
+     }
+    },
+    "stopped": false,
+    "archived": false,
+    "archived_at": "0001-01-01T00:00:00Z"
+   }
+  },
+  "events": [
+   {
+    "kind": "keel_new",
+    "tier": 1,
+    "pr": "jack-work/notes",
+    "thread_id": "t1",
+    "comment_id": "c2",
+    "author": "Jack Kelliher ⟩ jack",
+    "path": "doc/a.md",
+    "detail": "yes, ship it",
+    "text": "yes, ship it",
+    "inbox": [
+     "keel-c2"
+    ]
+   },
+   {
+    "kind": "keel_new",
+    "tier": 1,
+    "pr": "jack-work/notes",
+    "thread_id": "t2",
+    "comment_id": "o2",
+    "author": "Ana ⟩ ana",
+    "path": "doc/a.md",
+    "detail": "and another",
+    "text": "and another",
+    "inbox": [
+     "keel-o2"
+    ]
+   },
+   {
+    "kind": "keel_new",
+    "tier": 1,
+    "pr": "jack-work/notes",
+    "thread_id": "t4",
+    "comment_id": "h1",
+    "author": "Jack Kelliher ⟩ jack",
+    "path": "doc/a.md",
+    "detail": "new thread head",
+    "text": "new thread head",
+    "inbox": [
+     "keel-h1"
+    ]
+   },
+   {
+    "kind": "keel_new",
+    "tier": 1,
+    "pr": "jack-work/notes",
+    "thread_id": "t4",
+    "comment_id": "h2",
+    "author": "Jack Kelliher ⟩ jack",
+    "path": "doc/a.md",
+    "detail": "and a follow-up",
+    "text": "and a follow-up",
+    "inbox": [
+     "keel-h2"
+    ]
+   },
+   {
+    "kind": "keel_resolved",
+    "tier": 2,
+    "pr": "jack-work/notes",
+    "thread_id": "t3",
+    "path": "other/b.md"
+   }
+  ],
+  "inbox": {
+   "keel-c2": {
+    "time": "1970-01-01T00:00:01Z",
+    "fetch": "keel jack-work/notes, thread t1: GET /api/r/jack-work-notes/threads | jq '.paths[\"doc/a.md\"][] | select(.id==\"t1\")'",
+    "kind": "keel_new",
+    "by": "Jack Kelliher ⟩ jack",
+    "at": "AT",
+    "thread": "t1",
+    "path": "doc/a.md",
+    "line": 12,
+    "quote": "the selected text",
+    "body": "yes, ship it"
+   },
+   "keel-h1": {
+    "time": "1970-01-01T00:00:01Z",
+    "fetch": "keel jack-work/notes, thread t4: GET /api/r/jack-work-notes/threads | jq '.paths[\"doc/a.md\"][] | select(.id==\"t4\")'",
+    "kind": "keel_new",
+    "by": "Jack Kelliher ⟩ jack",
+    "at": "AT",
+    "thread": "t4",
+    "path": "doc/a.md",
+    "line": 12,
+    "quote": "the selected text",
+    "body": "new thread head"
+   },
+   "keel-h2": {
+    "time": "1970-01-01T00:00:01Z",
+    "fetch": "keel jack-work/notes, thread t4: GET /api/r/jack-work-notes/threads | jq '.paths[\"doc/a.md\"][] | select(.id==\"t4\")'",
+    "kind": "keel_new",
+    "by": "Jack Kelliher ⟩ jack",
+    "at": "AT",
+    "thread": "t4",
+    "path": "doc/a.md",
+    "line": 12,
+    "quote": "the selected text",
+    "body": "and a follow-up"
+   },
+   "keel-o2": {
+    "time": "1970-01-01T00:00:01Z",
+    "fetch": "keel jack-work/notes, thread t2: GET /api/r/jack-work-notes/threads | jq '.paths[\"doc/a.md\"][] | select(.id==\"t2\")'",
+    "kind": "keel_new",
+    "by": "Ana ⟩ ana",
+    "at": "AT",
+    "thread": "t2",
+    "path": "doc/a.md",
+    "line": 12,
+    "quote": "the selected text",
+    "body": "and another"
+   }
+  },
+  "set": {
+   "threads": {
+    "t1": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t2": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Ana ⟩ ana"
+    },
+    "t3": {
+     "path": "other/b.md",
+     "line": 3,
+     "resolved": true,
+     "n": 1,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t4": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    }
+   }
+  }
+ },
+ {
+  "protocol": 0,
+  "critic": {
+   "name": "golden",
+   "form_id": "@golden",
+   "mode": "keel",
+   "host": "",
+   "created_at": "0001-01-01T00:00:00Z",
+   "prs": null,
+   "source": "keel-threads",
+   "keel": {
+    "repo": "jack-work/notes",
+    "waiting_on": [
+     "Jack Kelliher ⟩ jack"
+    ],
+    "self": [
+     "figaro-seat ⟩ jack"
+    ]
+   },
+   "stop": {
+    "until_all_closed": false,
+    "archive_grace_sec": 0,
+    "max_consecutive_failures": 0
+   },
+   "runtime": {
+    "round": 3,
+    "last_polled": "0001-01-01T00:00:00Z",
+    "last_success": "0001-01-01T00:00:00Z",
+    "consecutive_failures": 0,
+    "pending_since": "0001-01-01T00:00:00Z",
+    "next_retry_at": "0001-01-01T00:00:00Z",
+    "last_delivered": "0001-01-01T00:00:00Z",
+    "last_ping": "0001-01-01T00:00:00Z",
+    "keel": {
+     "seen": {
+      "b1": "28aeb5929a413233",
+      "c1": "f41e508f317558ee",
+      "c2": "fc75da4b3a839321",
+      "h1": "77b31ba4bea7e02c",
+      "h2": "af326f940c95805b",
+      "o1": "f63e34a034f19a24",
+      "o2": "db45b4f2c65403f0"
+     },
+     "resolved": {
+      "t1": false,
+      "t2": false,
+      "t3": true,
+      "t4": false
+     }
+    },
+    "stopped": false,
+    "archived": false,
+    "archived_at": "0001-01-01T00:00:00Z"
+   }
+  },
+  "set": {
+   "threads": {
+    "t1": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t2": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Ana ⟩ ana"
+    },
+    "t3": {
+     "path": "other/b.md",
+     "line": 3,
+     "resolved": true,
+     "n": 1,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t4": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    }
+   }
+  }
+ },
+ {
+  "protocol": 0,
+  "critic": {
+   "name": "golden",
+   "form_id": "@golden",
+   "mode": "keel",
+   "host": "",
+   "created_at": "0001-01-01T00:00:00Z",
+   "prs": null,
+   "source": "keel-threads",
+   "keel": {
+    "repo": "jack-work/notes",
+    "waiting_on": [
+     "Jack Kelliher ⟩ jack"
+    ],
+    "self": [
+     "figaro-seat ⟩ jack"
+    ]
+   },
+   "stop": {
+    "until_all_closed": false,
+    "archive_grace_sec": 0,
+    "max_consecutive_failures": 0
+   },
+   "runtime": {
+    "round": 4,
+    "last_polled": "0001-01-01T00:00:00Z",
+    "last_success": "0001-01-01T00:00:00Z",
+    "consecutive_failures": 0,
+    "pending_since": "0001-01-01T00:00:00Z",
+    "next_retry_at": "0001-01-01T00:00:00Z",
+    "last_delivered": "0001-01-01T00:00:00Z",
+    "last_ping": "0001-01-01T00:00:00Z",
+    "keel": {
+     "seen": {
+      "b1": "28aeb5929a413233",
+      "c1": "f41e508f317558ee",
+      "c2": "fc75da4b3a839321",
+      "h1": "77b31ba4bea7e02c",
+      "h2": "af326f940c95805b",
+      "o1": "f63e34a034f19a24",
+      "o2": "db45b4f2c65403f0"
+     },
+     "resolved": {
+      "t1": false,
+      "t2": false,
+      "t3": true,
+      "t4": false
+     }
+    },
+    "stopped": false,
+    "archived": false,
+    "archived_at": "0001-01-01T00:00:00Z"
+   }
+  },
+  "events": [
+   {
+    "kind": "keel_edited",
+    "tier": 1,
+    "pr": "jack-work/notes",
+    "thread_id": "t1",
+    "comment_id": "c2",
+    "author": "Jack Kelliher ⟩ jack",
+    "path": "doc/a.md",
+    "detail": "yes, ship it (edited)",
+    "text": "yes, ship it (edited)",
+    "inbox": [
+     "keel-c2"
+    ]
+   }
+  ],
+  "inbox": {
+   "keel-c2": {
+    "time": "1970-01-01T00:00:01Z",
+    "fetch": "keel jack-work/notes, thread t1: GET /api/r/jack-work-notes/threads | jq '.paths[\"doc/a.md\"][] | select(.id==\"t1\")'",
+    "kind": "keel_edited",
+    "by": "Jack Kelliher ⟩ jack",
+    "at": "AT",
+    "thread": "t1",
+    "path": "doc/a.md",
+    "line": 12,
+    "quote": "the selected text",
+    "body": "yes, ship it (edited)"
+   }
+  },
+  "set": {
+   "threads": {
+    "t1": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t2": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Ana ⟩ ana"
+    },
+    "t3": {
+     "path": "other/b.md",
+     "line": 3,
+     "resolved": true,
+     "n": 1,
+     "last_by": "Jack Kelliher ⟩ jack"
+    },
+    "t4": {
+     "path": "doc/a.md",
+     "line": 12,
+     "n": 2,
+     "last_by": "Jack Kelliher ⟩ jack"
+    }
+   }
+  }
+ }
+]
