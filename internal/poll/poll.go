@@ -42,6 +42,10 @@ type Poller struct {
 	// waking an aria.
 	Send   func(ctx context.Context, target, msg string) error
 	Holder func(ctx context.Context, target string) bool
+	// BackoffDir holds the per-critic figaro backoff files ("" = no backoff,
+	// as in tests); PauseFile overrides the bounce pause path ("" = PauseFile).
+	BackoffDir string
+	PauseFile  string
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
@@ -61,9 +65,48 @@ func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) 
 // The source plugin does the upstream half of the round (plugin.OpRound);
 // everything else here is the core's: trigger rules, pending events, the
 // one form patch, the outbox, delivery, succession and archival.
+// Poll runs one round for a critic, unless a figaro bounce has paused ebac
+// or the critic is backing off from an unreachable daemon (figbackoff.go).
 func (p *Poller) Poll(ctx context.Context, name string) error {
+	if Paused(p.PauseFile) {
+		fmt.Fprintf(p.Out, "%s: figaro bounce in progress (%s): round skipped\n", name, orDefault(p.PauseFile, PauseFile))
+		return nil
+	}
+	now := time.Now()
+	if p.BackoffDir != "" {
+		if b := readFigBackoff(p.BackoffDir, name); b.Until.After(now) {
+			fmt.Fprintf(p.Out, "%s: backing off from figaro until %s (attempt %d): round skipped\n", name, b.Until.UTC().Format(time.RFC3339), b.Attempt)
+			return nil
+		}
+	}
+	err := p.pollRound(ctx, name)
+	if p.BackoffDir == "" {
+		return err
+	}
+	if figaro.Unavailable(err) {
+		b, werr := noteFigFailure(p.BackoffDir, name, now, err, figRand)
+		if werr != nil {
+			return fmt.Errorf("%w (and the backoff was not saved: %v)", err, werr)
+		}
+		return fmt.Errorf("%s", fmtBackoff(name, b))
+	}
+	clearFigBackoff(p.BackoffDir, name)
+	return err
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
+}
+
+func (p *Poller) pollRound(ctx context.Context, name string) error {
 	w, err := p.Store.LoadCritic(ctx, name)
 	if err != nil {
+		if figaro.Unavailable(err) {
+			return err // the daemon is not answering: surfacing would only wait on it again
+		}
 		if berr := p.surfaceBroken(ctx, name); berr != nil {
 			return berr
 		}

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/internal/poll"
 )
 
 func cmdReconcile(ctx context.Context, g globals, args []string) error {
@@ -15,6 +17,10 @@ func cmdReconcile(ctx context.Context, g globals, args []string) error {
 	dry := fs.Bool("dry-run", false, "report what would change, change nothing")
 	asJSON := fs.Bool("j", false, "JSON")
 	_ = fs.Parse(args)
+	if poll.Paused("") {
+		fmt.Printf("reconcile: figaro bounce in progress (%s): skipped\n", poll.PauseFile)
+		return nil
+	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err

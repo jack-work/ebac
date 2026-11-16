@@ -64,7 +64,7 @@ func NewFigaro(sock string) *Figaro {
 	if sock == "" {
 		sock = AngelusSocket()
 	}
-	return &Figaro{sock: sock, Timeout: 60 * time.Second, nodes: map[string]*sdk.Aria{}}
+	return &Figaro{sock: sock, Timeout: CallTimeout, nodes: map[string]*sdk.Aria{}}
 }
 
 // AngelusSocket finds the daemon. XDG_RUNTIME_DIR is the real source; the
@@ -103,6 +103,8 @@ func (f *Figaro) Addr(id string) sdk.Addr {
 
 // node dials one aria or form, caching the connection for the process.
 func (f *Figaro) Node(ctx context.Context, id string) (*sdk.Aria, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	f.mu.Lock()
 	if c, ok := f.nodes[id]; ok {
 		f.mu.Unlock()
@@ -147,6 +149,8 @@ func (f *Figaro) Close() error {
 // ---------- forms ----------
 
 func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
@@ -169,6 +173,8 @@ func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
 // FormRaw returns the form's keys plus the version they were read at. The
 // version is the whole point: it is the token a conditional write needs.
 func (f *Figaro) FormRaw(ctx context.Context, id string) (map[string]json.RawMessage, uint64, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	c, err := f.Node(ctx, id)
 	if err != nil {
 		return nil, 0, err
@@ -217,6 +223,8 @@ func (f *Figaro) Form(ctx context.Context, id string) (map[string]any, error) {
 //     between the poller and the reconciler is silent, and silence is what
 //     makes it expensive.
 func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	if err := validFormKey(key); err != nil {
 		return err
 	}
@@ -275,6 +283,8 @@ func (f *Figaro) SetJSON(ctx context.Context, id, key string, v any) error {
 }
 
 func (f *Figaro) Unset(ctx context.Context, id, key string) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	if key == model.CriticKey {
 		return fmt.Errorf("unset %s.%s refused: a critic form keeps its critic key (remove the critic with ebac rm)", id, key)
 	}
@@ -323,6 +333,8 @@ func IsVersionConflict(err error) bool {
 }
 
 func (f *Figaro) FormRemove(ctx context.Context, id string) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return err
@@ -340,6 +352,8 @@ func (f *Figaro) FormRemove(ctx context.Context, id string) error {
 // ---------- arias ----------
 
 func (f *Figaro) NewAria(ctx context.Context, outfits string) (string, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
@@ -383,6 +397,8 @@ func (f *Figaro) Send(ctx context.Context, target, prompt string) error {
 }
 
 func (f *Figaro) SendTo(ctx context.Context, ariaID, prompt string) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	c, err := f.Node(ctx, ariaID)
 	if err != nil {
 		return err
@@ -397,6 +413,8 @@ func (f *Figaro) SendTo(ctx context.Context, ariaID, prompt string) error {
 }
 
 func (f *Figaro) Cast(ctx context.Context, aria, formID string) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	c, err := f.Node(ctx, aria)
 	if err != nil {
 		return err
@@ -411,6 +429,8 @@ func (f *Figaro) Cast(ctx context.Context, aria, formID string) error {
 // not gone: collapsing a state into an absence is how a fleet audit once
 // published nine live arias as reaped.
 func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	if id == "" {
 		return false
 	}
@@ -427,6 +447,8 @@ func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
 // AriaFill reports context fill as a fraction, plus the fields it came from.
 // Never take a seat's word for this number.
 func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens, limit int, err error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, e := f.Angelus()
 	if e != nil {
 		return 0, 0, 0, e
@@ -454,6 +476,8 @@ func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens,
 }
 
 func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, prompt string) (string, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return "", err
@@ -484,6 +508,8 @@ func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, promp
 
 // ListFormIDs enumerates every unbound form the daemon knows about.
 func (f *Figaro) ListFormIDs(ctx context.Context) ([]string, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return nil, err
@@ -537,6 +563,8 @@ func patchOf(key string, v any) message.Patch {
 // item to take was made against the version it quotes here. On conflict the
 // caller re-reads the queue and decides again.
 func (f *Figaro) SetJSONIfVersion(ctx context.Context, id, key string, v any, version uint64) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	if err := validFormKey(key); err != nil {
 		return err
 	}
@@ -576,6 +604,8 @@ const MintHint = "ebac holds no grant to mint an aria: create the seat as gluck 
 // ListArias is the aria store (conversations and forms; the null and outfit
 // anchors are skipped), each row copied field by field into model.Aria.
 func (f *Figaro) ListArias(ctx context.Context) ([]model.Aria, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return nil, err

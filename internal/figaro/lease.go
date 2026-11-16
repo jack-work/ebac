@@ -83,6 +83,8 @@ func leaseTTLFor(now time.Time, ttlMS, expiresAtMS int64, lease time.Duration) (
 // RenewLease moves a form's deadline to FormLease from now when it has come
 // within leaseRenewSlack of needing it. ErrFormGone if the form does not exist.
 func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	ang, err := f.Angelus()
 	if err != nil {
 		return false, err
@@ -107,6 +109,8 @@ func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
 // setLease merges ttl into the system subtree and writes it whole: a nested
 // SetPath can land as a flat decoy when system is a leaf (jack-work/figaro#43).
 func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) error {
+	ctx, cancel := f.bound(ctx)
+	defer cancel()
 	c, err := f.Node(ctx, id)
 	if err != nil {
 		return err
@@ -160,7 +164,9 @@ func (f *Figaro) RenewLeases(ctx context.Context, ids []string, lease time.Durat
 	if err != nil {
 		return err
 	}
-	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
+	lctx, cancel := f.bound(ctx)
+	resp, err := AuditAng(rpc.MethodList, "", ang).ListGlobal(lctx)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("list for leases: %w", err)
 	}

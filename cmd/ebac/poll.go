@@ -19,6 +19,10 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	dry := fs.Bool("dry-run", false, "reconcile and persist state, but never invoke figaro")
 	all := fs.Bool("all", false, "poll every live critic in sequence")
 	_ = fs.Parse(args)
+	if *all && poll.Paused("") {
+		fmt.Printf("poll --all: figaro bounce in progress (%s): skipped\n", poll.PauseFile)
+		return nil
+	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
@@ -27,7 +31,7 @@ func cmdPoll(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, DryRun: *dry, GH: g.gh, Host: g.host}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, DryRun: *dry, GH: g.gh, Host: g.host, BackoffDir: st.Root}
 	if *all {
 		ws, err := st.ListCritics(ctx)
 		if err != nil {
