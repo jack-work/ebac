@@ -2,6 +2,7 @@ package keel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -38,7 +39,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		if cl == nil {
 			cl = ForRef(w.Keel)
 		}
-		return round(ctx, cl, w, req.Seat), nil
+		return round(ctx, cl, w, req.Seat, req.Keys), nil
 	case plugin.OpBrief:
 		return &plugin.Reply{Brief: keelBrief(w, plugin.Unwire(req.Pending))}, nil
 	}
@@ -265,6 +266,22 @@ type keelRound struct {
 	events []model.Event
 	items  map[string]form.InboxItem
 	index  map[string]IndexEntry
+	// pos is each item's comment's place in its thread (0: the head), for
+	// the inbox scope.
+	pos map[string]int
+}
+
+// positions maps every comment's inbox key to its place in its thread.
+func positions(byPath map[string][]Thread) map[string]int {
+	pos := map[string]int{}
+	for _, ts := range byPath {
+		for _, t := range ts {
+			for i, c := range t.Comments {
+				pos["keel-"+c.ID] = i
+			}
+		}
+	}
+	return pos
 }
 
 func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model.KeelRef) (keelRound, error) {
@@ -274,7 +291,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 			return keelRound{}, err
 		}
 		ev, items, index := keelDiff(st, ref, byPath)
-		return keelRound{ev, items, index}, nil
+		return keelRound{ev, items, index, positions(byPath)}, nil
 	}
 	if !st.FeedStarted {
 		head, err := feedHead(ctx, cl, ref.Repo)
@@ -288,7 +305,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 		ev, items, index := keelDiff(st, ref, byPath)
 		st.Cursor, st.FeedStarted = head, true
 		st.Seen, st.Resolved = nil, nil
-		return keelRound{ev, items, index}, nil
+		return keelRound{ev, items, index, positions(byPath)}, nil
 	}
 	evs, next, err := cl.Events(ctx, ref.Repo, st.Cursor, feedWait)
 	if err != nil {
@@ -303,6 +320,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 		return keelRound{}, err
 	}
 	r := feedDiff(st.Cursor, ref, evs, byPath)
+	r.pos = positions(byPath)
 	st.Cursor = next
 	return r, nil
 }
@@ -376,7 +394,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 	return r
 }
 
-func round(ctx context.Context, cl *Client, w *model.Critic, seat string) *plugin.Reply {
+func round(ctx context.Context, cl *Client, w *model.Critic, seat string, keys map[string]json.RawMessage) *plugin.Reply {
 	rep := &plugin.Reply{Critic: w}
 	if w.Runtime.Keel == nil {
 		w.Runtime.Keel = &model.KeelState{}
@@ -416,6 +434,18 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string) *plugi
 	w.Runtime.LastError = ""
 	w.Runtime.LastSuccess = time.Now().UTC()
 
+	sc, serr := resolveScope(st, keys)
+	if serr != st.ScopeErr {
+		if serr == "" {
+			rep.Unset = append(rep.Unset, model.KeelScopeErr)
+		} else {
+			rep.SetKey(model.KeelScopeErr, serr)
+			rep.Logf("%s: %s", w.Name, serr)
+		}
+		st.ScopeErr = serr
+	}
+	sc.apply(&r)
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	for k, it := range r.items {
 		it.At = now
@@ -428,8 +458,11 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string) *plugi
 			rep.Events[i].Inbox = []string{"keel-" + e.Comment}
 		}
 	}
-	if r.index != nil {
-		rep.SetKey("threads", r.index)
+	switch {
+	case !sc.mirrors("threads"):
+		rep.Unset = append(rep.Unset, "threads")
+	case r.index != nil:
+		rep.SetKey("threads", sc.indexValue(r.index))
 	}
 	return rep
 }
@@ -452,9 +485,24 @@ func keelBrief(w *model.Critic, events []model.Event) string {
 	if n := len(events) - wake; n > 0 {
 		fmt.Fprintf(&b, "(%d background change(s): other authors, resolves, reopens.)\n", n)
 	}
+	if sc := briefScope(w); sc.partial() {
+		fmt.Fprintf(&b, "Comments are in form %s, key inbox (cut at %d B). %s "+
+			"When finished: ebac ack --critic %s --round %d\n", w.FormID, keelBodyBytes, sc.describe(w.Keel.Repo), w.Name, w.Runtime.Round)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Comments are in form %s, key inbox (cut at %d B); key threads indexes every thread. "+
 		"When finished: ebac ack --critic %s --round %d\n", w.FormID, keelBodyBytes, w.Name, w.Runtime.Round)
 	return b.String()
+}
+
+// briefScope is the scope the round ran under: the last good one.
+func briefScope(w *model.Critic) scope {
+	if st := w.Runtime.Keel; st != nil && st.Scope != nil {
+		if sc, err := compileScope(*st.Scope); err == nil {
+			return sc
+		}
+	}
+	return scope{}
 }
 
 // keelBlind writes the form's key blind once failures outlast keelBlindAfter,

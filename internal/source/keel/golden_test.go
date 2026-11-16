@@ -61,6 +61,12 @@ func scripted() (rounds []map[string][]Thread, events [][]FeedEvent) {
 // keys and returns each round's reply, normalised (clock fields zeroed).
 func runScripted(t *testing.T, feed bool, keys map[string]json.RawMessage) []*plugin.Reply {
 	t.Helper()
+	return runRounds(t, feed, func(int) map[string]json.RawMessage { return keys })
+}
+
+// runRounds is runScripted with each round's keys (round i from 0).
+func runRounds(t *testing.T, feed bool, keysAt func(i int) map[string]json.RawMessage) []*plugin.Reply {
+	t.Helper()
 	old := feedWait
 	feedWait = 0
 	t.Cleanup(func() { feedWait = old })
@@ -77,7 +83,7 @@ func runScripted(t *testing.T, feed bool, keys map[string]json.RawMessage) []*pl
 		f.events = append(f.events, events[i]...)
 		f.mu.Unlock()
 		w.Runtime.Round = i + 1
-		rep, err := Plugin{Client: cl}.Handle(context.Background(), plugin.Request{Op: plugin.OpRound, Critic: w, Seat: "seat0001", Keys: keys})
+		rep, err := Plugin{Client: cl}.Handle(context.Background(), plugin.Request{Op: plugin.OpRound, Critic: w, Seat: "seat0001", Keys: keysAt(i)})
 		if err != nil {
 			t.Fatal(err)
 		}

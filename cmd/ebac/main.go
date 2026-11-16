@@ -21,6 +21,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
   ebac set --critic N --ping-every D        collect mode on a live critic: ping the seat at most every D (0 = off)
+  ebac set --critic N [--threads S] [--inbox S] [--mirror K]   a keel critic's scope (see add-keel); "" clears a key
   ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
                                             watch one Teams chat through tomb
   ebac add-author --name N --login L --repo O/R[,O/R] --since T [--until T] [--alert @ROLE] [--recent 50] [--every 5m]
@@ -31,6 +32,11 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac add-keel --name N --repo O/R [--paths GLOB[,GLOB]] [--aria SEAT | --alert @ROLE] --waiting-on "A[,B]"
               [--self "A,B"] [--every 45s]  watch one keel repo's comment threads: wake when A answers (5m with --feed=false)
               [--feed=false] [--keel-url https://H --token-cmd "hush oauth get ebac"]
+              [--threads all|changed] [--inbox all|heads|last:N] [--mirror KEY[.FIELD],...]
+                                            scope: what the form gets (keys threads_scope, inbox_scope, mirror;
+                                            bad value -> last good + scope_error); wakes always see the full fetch;
+                                            changed and last:N trade completeness for size (the brief names the
+                                            full view)
   ebac add-band-hub [--name band-state] [--every 45s] [--utility leob,ross] [--socket /run/band-hub/sock]
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change

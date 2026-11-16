@@ -403,7 +403,28 @@ const (
 // on every round (Request.Keys): configuration the role holder edits.
 var SourceReads = map[string][]string{
 	"github-author": {AuthorPathsKey, AuthorTitleKey},
+	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey},
 }
+
+// The keel watch's scope (Boss 2026-11-16): holder-edited role-form keys,
+// read every round, that choose which rows and fields of a round the form
+// gets. Absent means everything, as before scopes existed. They shape only
+// what is written: the diff and the wake decision always see the full fetch.
+const (
+	KeelThreadsScopeKey = "threads_scope" // all | changed
+	KeelInboxScopeKey   = "inbox_scope"   // all | heads | last:N
+	KeelMirrorKey       = "mirror"        // KEY[.FIELD],... of threads and inbox
+	KeelScopeErr        = "scope_error"
+)
+
+// KeelScope is a keel watch's scope as written in its keys.
+type KeelScope struct {
+	Threads string   `json:"threads,omitempty"`
+	Inbox   string   `json:"inbox,omitempty"`
+	Mirror  []string `json:"mirror,omitempty"`
+}
+
+func (s KeelScope) IsZero() bool { return s.Threads == "" && s.Inbox == "" && len(s.Mirror) == 0 }
 
 type AuthorSeen struct {
 	State string `json:"s"`
@@ -468,6 +489,10 @@ type KeelState struct {
 	BlindErr    string            `json:"blind_err,omitempty"`
 	Cursor      int64             `json:"cursor,omitempty"`
 	FeedStarted bool              `json:"feed_started,omitempty"`
+	// Scope is the last good scope (nil: everything); ScopeErr the error
+	// shown in the form's key scope_error ("" when the keys are good).
+	Scope    *KeelScope `json:"scope,omitempty"`
+	ScopeErr string     `json:"scope_error,omitempty"`
 }
 
 // HardStop says why a critic must stop before it spends an upstream call, or "".

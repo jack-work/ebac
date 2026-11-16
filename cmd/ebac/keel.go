@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	feed := fs.Bool("feed", true, "read keel's event feed (GET /api/v1/r/<id>/events, long-poll); false diffs /threads every round")
 	keelURL := fs.String("keel-url", "", "read keel over HTTPS at this base (https://...) instead of the unix door")
 	tokenCmd := fs.String("token-cmd", "", "with --keel-url: the command that prints the bearer token, e.g. \"hush oauth get ebac\" (run without a shell)")
+	threads, inbox, mirror := scopeFlags(fs)
 	_ = fs.Parse(args)
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
@@ -37,6 +40,10 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	ref := &model.KeelRef{Repo: strings.TrimSpace(*repo), Paths: splitList(*paths), WaitingOn: splitList(*waiting), Self: splitList(*self), AlertRole: *alert,
 		Feed: *feed, URL: strings.TrimSpace(*keelURL), TokenCmd: strings.Fields(*tokenCmd)}
 	if err := validTransport(ref); err != nil {
+		return err
+	}
+	scope := model.KeelScope{Threads: strings.TrimSpace(*threads), Inbox: strings.TrimSpace(*inbox), Mirror: keel.ParseMirror(*mirror)}
+	if err := keel.CheckScope(scope); err != nil {
 		return err
 	}
 	interval, err := keelEvery(*every, ref.Feed)
@@ -80,6 +87,13 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	if err := st.SeedTrigger(ctx, w); err != nil {
 		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
 	}
+	if keys := keel.ScopeKeys(scope); len(keys) > 0 {
+		if err := st.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
+			return keys, nil
+		}); err != nil {
+			return fmt.Errorf("critic created (role %s), but its scope: %w", w.FormID, err)
+		}
+	}
 	if *aria != "" {
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
@@ -98,7 +112,33 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	}
 	fmt.Printf("keel watch %q: role %s, %s paths %q, waiting on %s, alert %s, every %s, %s via %s\n", *name, formID, ref.Repo,
 		strings.Join(ref.Paths, ","), strings.Join(ref.WaitingOn, ","), w.AlertTarget(), interval, source, via)
+	if !scope.IsZero() {
+		fmt.Printf("  scope: %s (form keys %s, %s, %s; edit with ebac set or figaro set; a bad value keeps the last good one, see %s)\n",
+			describeScope(scope), model.KeelThreadsScopeKey, model.KeelInboxScopeKey, model.KeelMirrorKey, model.KeelScopeErr)
+	}
 	return nil
+}
+
+// scopeHelp says what a partial scope costs (ebac-builder, 2026-11-16).
+const scopeHelp = "; changed and last:N trade completeness for size: a seat that slept through a round sees only the latest round's rows, and its wake brief names the full view (the threads fetch)"
+
+// scopeFlags are the keel scope flags of add-keel and set. Each shapes only
+// what the form gets; wake decisions always see the full fetch.
+func scopeFlags(fs *flag.FlagSet) (threads, inbox, mirror *string) {
+	threads = fs.String("threads", "", "keel: rows of key threads: all (default) or changed (only threads with news in the latest round that had any)"+scopeHelp)
+	inbox = fs.String("inbox", "", "keel: inbox items per round: all (default), heads (only a thread's first comment) or last:N (the N newest per thread)"+scopeHelp)
+	mirror = fs.String("mirror", "", "keel: comma-separated keys and fields the form gets, KEY or KEY.FIELD of threads (path, line, resolved, n, last_by) and inbox (time, thread, path, line, quote, body, cut, fetch; kind, by, at are kept); an unnamed key is not written; empty = everything")
+	return threads, inbox, mirror
+}
+
+func describeScope(s model.KeelScope) string {
+	or := func(v, d string) string {
+		if v == "" {
+			return d
+		}
+		return v
+	}
+	return fmt.Sprintf("threads %s, inbox %s, mirror %s", or(s.Threads, "all"), or(s.Inbox, "all"), or(strings.Join(s.Mirror, ","), "everything"))
 }
 
 func keelEvery(every time.Duration, feed bool) (time.Duration, error) {
@@ -137,4 +177,44 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// overlayScope lays the given scope flags over a keel critic's current scope
+// keys and validates the result: the keys to set, the keys to unset (a flag
+// given empty clears its key) and the scope in force after.
+func overlayScope(cur map[string]json.RawMessage, given map[string]bool, vals map[string]string) (map[string]json.RawMessage, []string, model.KeelScope, error) {
+	spec, err := keel.ScopeFromKeys(cur)
+	if err != nil {
+		spec = model.KeelScope{} // every broken key is overwritten or kept broken below
+	}
+	keyOf := map[string]string{"threads": model.KeelThreadsScopeKey, "inbox": model.KeelInboxScopeKey, "mirror": model.KeelMirrorKey}
+	set, unset := map[string]json.RawMessage{}, []string{}
+	for _, f := range []string{"threads", "inbox", "mirror"} {
+		if !given[f] {
+			continue
+		}
+		v := strings.TrimSpace(vals[f])
+		switch f {
+		case "threads":
+			spec.Threads = v
+		case "inbox":
+			spec.Inbox = v
+		case "mirror":
+			spec.Mirror = keel.ParseMirror(v)
+		}
+		if v == "" {
+			unset = append(unset, keyOf[f])
+		}
+	}
+	if err := keel.CheckScope(spec); err != nil {
+		return nil, nil, spec, err
+	}
+	for k, v := range keel.ScopeKeys(spec) {
+		for f, key := range keyOf {
+			if key == k && given[f] {
+				set[k] = v
+			}
+		}
+	}
+	return set, unset, spec, nil
 }

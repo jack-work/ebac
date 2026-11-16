@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -220,13 +221,18 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 // cmdSet edits a live critic's configuration. --ping-every D turns COLLECT
 // mode on (gather every round, ping the seat at most every D, only when
 // something woke) or off (0). It must be 0 or at least the poll interval.
+// --threads, --inbox and --mirror set a keel critic's scope (its form keys).
 func cmdSet(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 	name := fs.String("critic", "", "critic name")
 	pingEvery := fs.Duration("ping-every", -1, "COLLECT mode ping interval, e.g. 30m; 0 turns collect mode off")
+	threads, inbox, mirror := scopeFlags(fs)
 	_ = fs.Parse(args)
-	if *pingEvery < 0 {
-		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off)")
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	scoped := given["threads"] || given["inbox"] || given["mirror"]
+	if *pingEvery < 0 && !scoped {
+		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off), or for a keel critic --threads, --inbox or --mirror")
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
@@ -236,14 +242,36 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {
-		return err
+	var set map[string]json.RawMessage
+	var unset []string
+	var scope model.KeelScope
+	if scoped {
+		if w.SourceName() != "keel-threads" {
+			return fmt.Errorf("--threads, --inbox and --mirror are for keel critics; %s is %s", w.Name, w.SourceName())
+		}
+		vals := map[string]string{"threads": *threads, "inbox": *inbox, "mirror": *mirror}
+		if set, unset, scope, err = overlayScope(w.Reads, given, vals); err != nil {
+			return err
+		}
 	}
-	w.PingEverySec = int(pingEvery.Seconds())
-	if err := st.SaveCritic(ctx, w); err != nil {
-		return err
+	if *pingEvery >= 0 {
+		if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {
+			return err
+		}
+		w.PingEverySec = int(pingEvery.Seconds())
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		fmt.Printf("%s: %s; takes effect on the next round\n", w.Name, describeCollect(w))
 	}
-	fmt.Printf("%s: %s; takes effect on the next round\n", w.Name, describeCollect(w))
+	if scoped {
+		if err := st.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
+			return set, unset
+		}); err != nil {
+			return fmt.Errorf("%s: scope: %w", w.Name, err)
+		}
+		fmt.Printf("%s: scope %s; takes effect on the next round\n", w.Name, describeScope(scope))
+	}
 	return nil
 }
 

@@ -251,7 +251,7 @@ sees only what it needs; the others are empty tmpfs dirs. The figaro socket is h
 A build without `BwrapPath` refuses to run plugins unless `EBAC_PLUGIN_SANDBOX=off`.
 
 **Form keys.** A plugin may set or unset only its source's keys (`poll.SourceKeys`: author
-`authored`, `filter_error`; keel `threads`, `blind`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
+`authored`, `filter_error`; keel `threads`, `blind`, `scope_error`; teams `blind`; band-hub `queues`, `nodes`, `dupes`,
 `updated` (and unset of the dropped `live`); roster `role:<name>`, `forks` (and unset of the dropped `updated`); PR review none; `*` matches one segment without dots). A reply naming any other key (`target-aria`, `trigger`, ...) is
 refused whole and the round fails with the key and plugin named. A source may also READ holder-edited
 keys, handed to it as `Request.Keys` (`model.SourceReads`): the author watch's relevance filter `paths`
@@ -259,6 +259,16 @@ keys, handed to it as `Request.Keys` (`model.SourceReads`): the author watch's r
 regexp). A PR is tracked when its title matches OR a changed file does (files listed once per head);
 neither key tracks all. An untracked PR never wakes and leaves only its number and head in the skip
 list; a bad value keeps the last good filter and says why in `filter_error`.
+
+The keel watch reads its **scope** (`ebac add-keel` or `ebac set --critic N` flags `--threads`, `--inbox`,
+`--mirror`, stored as these keys; `figaro set` works too): `threads_scope` `all` | `changed` (key `threads`
+lists only the threads with news in the latest round that had any), `inbox_scope` `all` | `heads` (a
+thread's first comment only) | `last:N` (the N newest of a round's comments per thread), and `mirror`
+(`KEY` or `KEY.FIELD` of `threads` and `inbox`; an unnamed key is not written; inbox `kind`, `by`, `at`
+stay). Absent keys write everything, as before. A scope cuts only what is written: events, wake tiers and
+the seen state come from the full fetch. `changed` and `last:N` trade completeness for size: a seat that
+slept through a round sees only the latest round's rows, so its wake brief names the full view (the
+threads fetch). A bad value keeps the last good scope and says why in `scope_error`.
 
 ## Layout
 
