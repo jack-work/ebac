@@ -274,7 +274,7 @@ const pendingJSON = `{"data":{"repository":{"pullRequest":{
   "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
     {"id":"T1","isResolved":false,"isOutdated":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[
       {"id":"C1","url":"u1","body":"finding","state":"SUBMITTED","createdAt":"1","updatedAt":"1","author":{"login":"amy","__typename":"User"}},
-      {"id":"C2","url":"u2","body":"fixed <!-- ebac:post:rw:p1 -->","state":"PENDING","createdAt":"2","updatedAt":"2","author":{"login":"jack","__typename":"User"}}]}}]}
+      {"id":"C2","url":"u2","body":"fixed <!-- post:65f8310c73f49214 -->","state":"PENDING","createdAt":"2","updatedAt":"2","author":{"login":"jack","__typename":"User"}}]}}]}
 }}}}`
 
 func TestClientErrorIsFinalExceptRateLimits(t *testing.T) {

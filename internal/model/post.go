@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 )
 
@@ -56,6 +58,15 @@ func (p *Post) Terminal() bool {
 	resolved := !p.Resolve || p.Resolved != ""
 	reacted := p.React == "" || p.Reacted != ""
 	return replied && resolved && reacted
+}
+
+// PostMarker is the hidden dedupe token on every post: a hash of critic and
+// post id, so the GHE text names neither the tool nor the critic (Boss order
+// 3, 2026-11-16). Posts made under the old <!-- ebac:post:C:I --> marker were
+// rewritten in place once (scripts/rewrite-post-markers.py).
+func PostMarker(critic, id string) string {
+	h := sha256.Sum256([]byte(critic + ":" + id))
+	return fmt.Sprintf("<!-- post:%x -->", h[:8])
 }
 
 // findMarker returns the URL of a comment of ours already carrying marker.

@@ -53,6 +53,9 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 	if !p.Resolve && p.React == "" && !p.HasBody() {
 		return "empty body"
 	}
+	if why := Disclosure(p.Body); why != "" {
+		return why
+	}
 	var pr *model.PRState
 	if snap != nil {
 		pr = snap.PRs[model.PRKey(p.PR)]

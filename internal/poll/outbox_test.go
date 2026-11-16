@@ -244,7 +244,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	// A post that reached the forge but was never acked is found by its marker.
 	writePost(t, st, w, "p2", model.Post{PR: "acme/widget#1", Body: "again"})
 	snap.PRs["acme/widget#1"].Comments["IC9"] = &model.Comment{ID: "IC9", Author: "jack", URL: "https://x/pull/1#ic9",
-		Body: "again\n\n" + "<!-- ebac:post:" + w.Name + ":p2 -->"}
+		Body: "again\n\n" + model.PostMarker(w.Name, "p2")}
 	round("post-ok")
 	if got := readPost(t, f, w, "p2"); got.Sent == nil || !got.Sent.Recovered || got.Sent.URL != "https://x/pull/1#ic9" {
 		t.Fatalf("marker not recovered: %+v", got)

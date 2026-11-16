@@ -26,7 +26,7 @@ func sendPost(ctx context.Context, gh *forge.GH, w *model.Critic, snap *model.Sn
 		}
 	}()
 	if post.HasBody() && post.Sent == nil {
-		marker := postMarker(w.Name, id)
+		marker := model.PostMarker(w.Name, id)
 		if url, ok := model.FindMarker(pr, me, marker); ok {
 			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now, Recovered: true}, ""
 		} else {

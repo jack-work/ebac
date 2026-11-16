@@ -1,0 +1,32 @@
+# Internal names (case-insensitive regex, one per line). A hit is a CANDIDATE: a fork judges context
+# (e.g. "steward" or "knight" in ordinary prose is not a disclosure).
+\bcheroot\b
+\bminister\b
+\bwarden\b
+\bknight\b
+\bthinker\b
+\bsecretary\b
+\bsteward\b
+\bpitmaster\b
+\bband[-_ ]?(work|hub|cred|build|obs|web|signin)?\b
+\bkeel\b
+\brou2\b
+\bebac\b
+\btomb(-gw)?\b
+\bfigaro\b
+\baria\b
+\bangelus\b
+\b[0-9a-f]{8}(?:[0-9a-f]{24})?\b(?=.{0,40}\b(aria|fork|seat|figaro)\b)
+\b(gluk|gioco|leob|verd|sego|pucc|barr|ross)\b
+project november
+captains?[-_ ]log
+fleet-todo
+\.band\.internal
+\bnotes/
+\bgluck\b
+\bnixos-wsl\b
+\bmerge queue\b
+\bflake[-_ ]gate\b
+\bmichelangelus\b
+\banthill\b
+\bnoisefloor\b

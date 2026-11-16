@@ -297,7 +297,3 @@ func pruneClosed(w *model.Critic, snap *model.Snapshot, now time.Time) []string 
 	sort.Strings(names)
 	return names
 }
-
-func postMarker(critic, id string) string {
-	return fmt.Sprintf("<!-- ebac:post:%s:%s -->", critic, id)
-}

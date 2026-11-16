@@ -524,7 +524,7 @@ func TestFetchPRSeesPendingReviewsAndPendingComments(t *testing.T) {
 	if !pr.Threads["T1"].AwaitingUs("jack") {
 		t.Error("a reply held in a pending review counted as an answer")
 	}
-	if _, ok := model.FindMarker(pr, "jack", "<!-- ebac:post:rw:p1 -->"); ok {
+	if _, ok := model.FindMarker(pr, "jack", model.PostMarker("rw", "p1")); ok {
 		t.Error("a pending comment was recovered as sent")
 	}
 	d := Diff(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: {Key: pr.Key, State: "OPEN", HeadSHA: "sha1", Threads: pr.Threads}}},
