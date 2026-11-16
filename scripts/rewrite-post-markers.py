@@ -11,7 +11,7 @@ Dry run by default; --apply edits. Needs gh logged in to the host as the posting
 
   rewrite-post-markers.py [--since 2026-10-20] [--org bic] [--apply]
 """
-import argparse, datetime, hashlib, json, re, subprocess, sys
+import argparse, datetime, hashlib, json, re, subprocess, sys, time
 
 HOST = "microsoft.ghe.com"
 LOGIN = "John-Kelliher"  # the search login of the posting account
@@ -23,8 +23,12 @@ def new_marker(critic, pid):
 
 
 def gh(args, data=None):
-    r = subprocess.run(["gh", "api", "--hostname", HOST] + args, input=json.dumps(data) if data else None,
-                       capture_output=True, text=True)
+    for wait in (0, 5, 20, 60):  # GHE drops a page now and then ("unexpected end of JSON input")
+        time.sleep(wait)
+        r = subprocess.run(["gh", "api", "--hostname", HOST] + args, input=json.dumps(data) if data else None,
+                           capture_output=True, text=True)
+        if not r.returncode:
+            break
     if r.returncode:
         raise SystemExit(f"gh api {' '.join(args)}: {r.stderr.strip()}")
     return r.stdout
@@ -86,6 +90,7 @@ def main():
         else:
             gh(["-X", "PUT", f"repos/{repo}/pulls/{n}/reviews/{cid}", "--input", "-"], {"body": nb})
         done += 1
+        time.sleep(10)  # <= 6 edits a minute: under GHE's ~500/h content-creation secondary limit; this account also posts and polls
     print(f"{'rewrote' if a.apply else 'would rewrite'} {done if a.apply else len(hits)}", file=sys.stderr)
 
 
