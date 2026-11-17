@@ -202,3 +202,16 @@ func TestAdoptKeepsTheCoresFields(t *testing.T) {
 		t.Fatalf("a source field was not adopted: %+v", core)
 	}
 }
+
+// A review critic's probe fingerprints and its last full read are the github source's: not adopted, every round
+// read every PR in full (ledger-front 11-17: 14 points a round instead of 1).
+func TestAdoptKeepsTheProbe(t *testing.T) {
+	at := time.Date(2026, 11, 17, 18, 0, 0, 0, time.UTC)
+	from := &model.Critic{}
+	from.Runtime.Probe, from.Runtime.FullReadAt = map[string]string{"bic/aether#1": "ab"}, &at
+	core := &model.Critic{}
+	Adopt(core, from)
+	if core.Runtime.Probe["bic/aether#1"] != "ab" || core.Runtime.FullReadAt == nil || !core.Runtime.FullReadAt.Equal(at) {
+		t.Fatalf("probe state not adopted: %+v %v", core.Runtime.Probe, core.Runtime.FullReadAt)
+	}
+}

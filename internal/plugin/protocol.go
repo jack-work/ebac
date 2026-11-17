@@ -222,6 +222,7 @@ func Adopt(core, from *model.Critic) {
 	r.LastError = f.LastError
 	r.ConsecutiveFailures = f.ConsecutiveFailures
 	r.GoneStreak = f.GoneStreak
+	r.Probe, r.FullReadAt = f.Probe, f.FullReadAt
 	r.Teams = f.Teams
 	r.Author = f.Author
 	r.Keel = f.Keel
