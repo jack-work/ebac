@@ -15,6 +15,7 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
+	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -220,7 +221,9 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 	return nil
 }
 
-// cmdSet edits a live critic's configuration. --ping-every D turns COLLECT
+// cmdSet edits a live critic's configuration. --every D is its poll interval
+// (every_sec), its timer re-armed at once (a stopped critic keeps it for
+// resume). --ping-every D turns COLLECT
 // mode on (gather every round, ping the seat at most every D, only when
 // something woke) or off (0). It must be 0 or at least the poll interval.
 // --threads, --inbox and --mirror set a keel critic's scope (its form keys).
@@ -228,14 +231,15 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 	name := fs.String("critic", "", "critic name")
 	pingEvery := fs.Duration("ping-every", -1, "COLLECT mode ping interval, e.g. 30m; 0 turns collect mode off")
+	every := fs.Duration("every", 0, "poll interval, e.g. 5m: writes every_sec and re-arms the timer now")
 	threads, inbox, mirror := scopeFlags(fs)
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	_ = fs.Parse(args)
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	scoped := given["threads"] || given["inbox"] || given["mirror"]
-	if *pingEvery < 0 && !scoped && !given["ask-name"] {
-		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, or for an approve critic --ask-name")
+	if *pingEvery < 0 && !scoped && !given["ask-name"] && !given["every"] {
+		return fmt.Errorf("nothing to set: give --every D, --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, or for an approve critic --ask-name")
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
@@ -255,6 +259,27 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		vals := map[string]string{"threads": *threads, "inbox": *inbox, "mirror": *mirror}
 		if set, unset, scope, err = overlayScope(w.Reads, given, vals); err != nil {
 			return err
+		}
+	}
+	if given["every"] {
+		ping := time.Duration(w.PingEverySec) * time.Second
+		if *pingEvery >= 0 {
+			ping = *pingEvery // set in the same call: checked against the new interval below
+		}
+		if err := setEvery(w, *every, ping); err != nil {
+			return err
+		}
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		armed, err := rearm(w, systemd.EnableTimer)
+		switch {
+		case err != nil:
+			return fmt.Errorf("%s: every_sec %d saved, timer not re-armed: %w", w.Name, w.EverySec, err)
+		case armed:
+			fmt.Printf("%s: polls every %s; timer re-armed\n", w.Name, w.Interval())
+		default:
+			fmt.Printf("%s: polls every %s from its resume (stopped: timer left off)\n", w.Name, w.Interval())
 		}
 	}
 	if given["ask-name"] {
@@ -289,6 +314,36 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("%s: scope %s; takes effect on the next round\n", w.Name, describeScope(scope))
 	}
 	return nil
+}
+
+// setEvery sets a critic's poll interval: at least MinEvery, a keel critic's
+// own floor (a feed round holds its request), and never above a collect-mode
+// ping interval (ping, 0 = off), which would then hold nothing back.
+func setEvery(w *model.Critic, every, ping time.Duration) error {
+	min := MinEvery
+	if w.Keel != nil {
+		min = max(min, keel.MinEvery(w.Keel.Feed))
+	}
+	if every < min {
+		return fmt.Errorf("--every %s: want at least %s", every, min)
+	}
+	if ping > 0 && ping < every {
+		return fmt.Errorf("--every %s: longer than the collect ping (%s); set --ping-every 0 or at least %s with it", every, ping, every)
+	}
+	w.EverySec = int(every.Seconds())
+	return nil
+}
+
+// MinEvery is the shortest poll interval ebac set accepts.
+const MinEvery = 10 * time.Second
+
+// rearm re-arms a running critic's timer at its interval; a stopped critic's
+// stays off (resume arms it, through reconcile).
+func rearm(w *model.Critic, enable func(string, time.Duration) error) (bool, error) {
+	if w.Runtime.Stopped {
+		return false, nil
+	}
+	return true, enable(w.Name, w.Interval())
 }
 
 // checkPingEvery: a ping interval shorter than the poll interval would never

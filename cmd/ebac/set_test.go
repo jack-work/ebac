@@ -90,3 +90,34 @@ func TestDescribeLimit(t *testing.T) {
 		t.Fatalf("after the reset: %q", got)
 	}
 }
+
+// ebac set --every: the interval lands in every_sec and a running critic's timer is re-armed at it; a stopped one's
+// stays off; too short, under a keel feed's floor, or above the collect ping is refused and changes nothing.
+func TestSetEvery(t *testing.T) {
+	w := &model.Critic{Name: "author-jack", EverySec: 120}
+	if err := setEvery(w, 5*time.Minute, 0); err != nil || w.EverySec != 300 {
+		t.Fatalf("5m: err %v every_sec %d", err, w.EverySec)
+	}
+	var armed []string
+	enable := func(name string, d time.Duration) error { armed = append(armed, name+" "+d.String()); return nil }
+	if ok, err := rearm(w, enable); !ok || err != nil || strings.Join(armed, ",") != "author-jack 5m0s" {
+		t.Fatalf("re-arm: %v %v %q", ok, err, armed)
+	}
+	w.Runtime.Stopped, armed = true, nil
+	if ok, _ := rearm(w, enable); ok || armed != nil {
+		t.Fatalf("a stopped critic's timer was armed: %q", armed)
+	}
+	for _, c := range []struct {
+		w     *model.Critic
+		every time.Duration
+		ping  time.Duration
+	}{
+		{&model.Critic{EverySec: 60}, 5 * time.Second, 0},
+		{&model.Critic{EverySec: 60}, 10 * time.Minute, 5 * time.Minute},
+		{&model.Critic{EverySec: 60, Keel: &model.KeelRef{Feed: true}}, 15 * time.Second, 0},
+	} {
+		if err := setEvery(c.w, c.every, c.ping); err == nil || c.w.EverySec != 60 {
+			t.Errorf("every %s ping %s keel %v: accepted (every_sec %d)", c.every, c.ping, c.w.Keel, c.w.EverySec)
+		}
+	}
+}

@@ -20,6 +20,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
+  ebac set --critic N --every D             poll interval of a live critic (every_sec); re-arms its timer now
   ebac set --critic N --ping-every D        collect mode on a live critic: ping the seat at most every D (0 = off)
   ebac set --critic N [--threads S] [--inbox S] [--mirror K]   a keel critic's scope (see add-keel); "" clears a key
   ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
