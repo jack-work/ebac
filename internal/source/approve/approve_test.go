@@ -527,3 +527,28 @@ func TestCheckWatchAskName(t *testing.T) {
 		}
 	}
 }
+
+// Query is a read: a mutation never reaches gh; a read asks rateLimit and
+// books its cost.
+func TestQueryReadsOnly(t *testing.T) {
+	var argv [][]string
+	gh := &GH{exec: func(_ context.Context, args []string) ([]byte, error) {
+		argv = append(argv, args)
+		return []byte(`{"data":{"rateLimit":{"cost":2,"remaining":4000},"u0":{"nodes":[]}}}`), nil
+	}}
+	for _, q := range []string{`mutation{ addPullRequestReview(input:{}){clientMutationId} }`, `query{ a: x } mutation{ y }`, `{ viewer{login} }`} {
+		if _, err := gh.Query(context.Background(), q); err == nil {
+			t.Errorf("%q ran", q)
+		}
+	}
+	if len(argv) != 0 {
+		t.Fatalf("a refused query reached gh: %v", argv)
+	}
+	data, err := gh.Query(context.Background(), `query{ u0: search(type:ISSUE, first:1, query:"x"){nodes{__typename}} }`)
+	if err != nil || strings.Contains(string(data), "rateLimit") || !strings.Contains(argv[0][3], "rateLimit{cost remaining}") {
+		t.Fatalf("read: %s %v %v", data, err, argv)
+	}
+	if s := gh.Spent(); s.Calls != 1 || s.Points != 2 || s.Remaining != 4000 {
+		t.Fatalf("spend %+v", s)
+	}
+}

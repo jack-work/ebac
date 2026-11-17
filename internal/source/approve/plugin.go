@@ -112,3 +112,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	rep.Logf("%s: round %d: %d request(s) pending, %d decided, %d ping(s)", w.Name, w.Runtime.Round, len(reqs), len(o.Results), len(o.Pings))
 	return rep, nil
 }
+
+// GHECred is band-cred's GHE credential (ghe-ebac) on socket sock: what an
+// org-approve critic's GH runs with.
+func GHECred(sock string) *forge.Cred { return forge.NewCred(sock, forge.CredGitHub) }

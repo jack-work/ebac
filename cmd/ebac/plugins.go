@@ -7,6 +7,7 @@ import (
 	"github.com/gluck/ebac/internal/bandstate"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
 )
 
@@ -17,6 +18,9 @@ func grants(g globals) plugin.Grants {
 		plugin.GrantFigaro:   {figaro.AngelusSocket()},
 		plugin.GrantKeelDoor: {keel.Socket()},
 		plugin.GrantBandHub:  {bandstate.DefaultSocket},
+		// Hides /run/band-grants (request and honor sockets) from every
+		// plugin but org-approve's.
+		plugin.GrantBandGrants: {approve.RequestSocket},
 	}
 	if g.figaro != "" {
 		gr[plugin.GrantFigaro] = append(gr[plugin.GrantFigaro], g.figaro)

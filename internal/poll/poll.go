@@ -212,6 +212,8 @@ var SourceKeys = map[string][]string{
 	model.SourceScout: {"pr:*", "issue:*", "claim:*", "warning", "quiet_pings"},
 	// approve-requests writes only results on its inputs form (Reply.Forms).
 	model.SourceApprove: nil,
+	// org-approve writes only asks on its board (Reply.Forms).
+	model.SourceOrgApprove: nil,
 	// Keel branches write their child forms (Reply.Forms) and, on their own
 	// role form, the registry (branch -> child form) and the branches they
 	// could not follow.

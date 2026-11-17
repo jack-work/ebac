@@ -46,6 +46,15 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             the approve path for a sandboxed principal: requests.<id> on the inputs
                                             form -> APPROVE on bic/aether after grant, scope and Teams-ask checks;
                                             writes requests.<id>.result (plugin ebac-approve); no seat
+  ebac add-org-approve --board @FORM --logins A[,B] [--name org-approve] [--ping @ROLE] [--every 15m]
+              [--grant ebac-approve.org --principal org-approve --approver jack] [--known-breaks C[,C]]
+                                            ORG-APPROVE: one lean search per round over the org's open bic/aether
+                                            PRs; each stall candidate is asked as q.oa-<pr>-<head7> on the board and
+                                            filed as a band-grants request; its /grants/ approval by --approver is
+                                            the tap: APPROVE at that head (plugin ebac-approve); no seat
+  ebac set --critic N --logins A[,B] | --known-breaks C[,C]   an org-approve critic's org and known breaks
+  ebac grant-request --credential C --ttl D --reason R [--socket S]
+                                            file a band-grants request as ebac's principal; prints its id
   ebac add-scout --name effort-github --authors A[,B] --repo O/R --board @FORM --inputs @FORM [--every 2m]
               [--labels L[,L]] [--title-match REGEX] [--paths GLOB[,GLOB]]
               [--owner AUTHOR[/TITLE_REGEX]=@ROLE ...]
@@ -148,6 +157,10 @@ func main() {
 		err = cmdAddScout(ctx, g, args)
 	case "add-approve":
 		err = cmdAddApprove(ctx, g, args)
+	case "add-org-approve":
+		err = cmdAddOrgApprove(ctx, g, args)
+	case "grant-request":
+		err = cmdGrantRequest(ctx, args)
 	case "add-keel-branches":
 		err = cmdAddKeelBranches(ctx, g, args)
 	case "add-band-hub":

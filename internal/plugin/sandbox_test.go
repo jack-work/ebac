@@ -290,3 +290,25 @@ func TestReleasesNeedNoGrant(t *testing.T) {
 		t.Fatalf("For(github-releases) = %q, %v", name, err)
 	}
 }
+
+// Only org-approve sees band-grants' request socket.
+func TestBandGrantsOnlyForOrgApprove(t *testing.T) {
+	has := func(gs []Grant) bool {
+		for _, g := range gs {
+			if g == GrantBandGrants {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(Needs("approve", &model.Critic{Source: model.SourceOrgApprove})) {
+		t.Fatal("org-approve cannot file its tap requests")
+	}
+	for _, c := range []*model.Critic{{Source: model.SourceApprove}, {Source: model.SourceScout}, {Source: "github-pr"}} {
+		for _, p := range []string{"gh", "approve", "tomb", "keel", "bandhub", "roster"} {
+			if has(Needs(p, c)) {
+				t.Fatalf("%s/%s sees band-grants", p, c.Source)
+			}
+		}
+	}
+}

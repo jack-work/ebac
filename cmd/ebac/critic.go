@@ -16,6 +16,7 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/internal/source/orgapprove"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -234,12 +235,14 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	every := fs.Duration("every", 0, "poll interval, e.g. 5m: writes every_sec and re-arms the timer now")
 	threads, inbox, mirror := scopeFlags(fs)
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
+	logins := fs.String("logins", "", "org-approve critic: the org's GHE logins, comma-separated (replaces the list)")
+	breaks := fs.String("known-breaks", "", "org-approve critic: check names allowed red (main-wide known breaks), comma-separated; \"\" clears")
 	_ = fs.Parse(args)
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	scoped := given["threads"] || given["inbox"] || given["mirror"]
-	if *pingEvery < 0 && !scoped && !given["ask-name"] && !given["every"] {
-		return fmt.Errorf("nothing to set: give --every D, --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, or for an approve critic --ask-name")
+	if *pingEvery < 0 && !scoped && !given["ask-name"] && !given["every"] && !given["logins"] && !given["known-breaks"] {
+		return fmt.Errorf("nothing to set: give --every D, --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, for an approve critic --ask-name, or for an org-approve critic --logins or --known-breaks")
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
@@ -294,6 +297,24 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 			return err
 		}
 		fmt.Printf("%s: approvals now cite %q's ask; takes effect on the next round\n", w.Name, w.Requests.Asker())
+	}
+	if given["logins"] || given["known-breaks"] {
+		if w.OrgApprove == nil {
+			return fmt.Errorf("--logins and --known-breaks are for org-approve critics; %s is %s", w.Name, w.SourceName())
+		}
+		if given["logins"] {
+			w.OrgApprove.Logins = splitList(*logins)
+		}
+		if given["known-breaks"] {
+			w.OrgApprove.KnownBreaks = splitList(*breaks)
+		}
+		if err := orgapprove.CheckWatch(w.OrgApprove); err != nil {
+			return err
+		}
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		fmt.Printf("%s: %d login(s), %d known break(s); takes effect on the next round\n", w.Name, len(w.OrgApprove.Logins), len(w.OrgApprove.KnownBreaks))
 	}
 	if *pingEvery >= 0 {
 		if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {

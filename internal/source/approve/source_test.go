@@ -77,8 +77,8 @@ func TestNoOtherGHEWriteIsReachable(t *testing.T) {
 		callers = append(callers, c)
 	}
 	sort.Strings(callers)
-	if strings.Join(callers, ",") != "Approve,PR,Reviews" {
-		t.Fatalf("GH.run called from %v, want only Approve, PR, Reviews", callers)
+	if strings.Join(callers, ",") != "Approve,PR,Query,Reviews" {
+		t.Fatalf("GH.run called from %v, want only Approve, PR, Query, Reviews", callers)
 	}
 
 	main, err := parser.ParseFile(fset, "../../../cmd/ebac-approve/main.go", nil, parser.ImportsOnly)
@@ -91,7 +91,28 @@ func TestNoOtherGHEWriteIsReachable(t *testing.T) {
 		imps = append(imps, p)
 	}
 	sort.Strings(imps)
-	if strings.Join(imps, ",") != "github.com/gluck/ebac/internal/plugin,github.com/gluck/ebac/internal/source/approve" {
+	if strings.Join(imps, ",") != "context,github.com/gluck/ebac/internal/model,github.com/gluck/ebac/internal/plugin,github.com/gluck/ebac/internal/source/approve,github.com/gluck/ebac/internal/source/orgapprove" {
 		t.Fatalf("ebac-approve imports %v", imps)
+	}
+	// org-approve, the binary's other source, reaches GHE only through this
+	// package's GH: it imports no forge and execs nothing.
+	oa, err := filepath.Glob("../orgapprove/*.go")
+	if err != nil || len(oa) < 3 {
+		t.Fatalf("orgapprove sources: %v %v", oa, err)
+	}
+	for _, f := range oa {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, im := range af.Imports {
+			switch p, _ := strconv.Unquote(im.Path.Value); p {
+			case "github.com/gluck/ebac/internal/forge", "os/exec", "net/http":
+				t.Errorf("%s imports %s: org-approve reaches GHE only through approve.GH", f, p)
+			}
+		}
 	}
 }

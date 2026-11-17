@@ -68,6 +68,8 @@ type Runtime struct {
 
 	// Releases is a release watch's state: the tags already seen.
 	Releases *ReleasesState `json:"releases,omitempty"`
+	// OrgApprove is an org-approve critic's scores and filed asks.
+	OrgApprove *OrgApproveState `json:"org_approve,omitempty"`
 	// LastPing is when a collect-mode critic last pinged its seat.
 	LastPing time.Time `json:"last_ping,omitempty"`
 
@@ -200,6 +202,8 @@ type Critic struct {
 	// Approve is an approve-requests critic's configuration (source
 	// approve-requests): who may ask, in which chat, under which grant.
 	Requests *ApproveWatch `json:"approve_requests,omitempty"`
+	// OrgApprove configures an org-approve critic (SourceOrgApprove).
+	OrgApprove *OrgApproveWatch `json:"org_approve,omitempty"`
 	// PingEverySec, when set, is COLLECT mode: events are gathered every
 	// round, and the seat is pinged at most this often, one line, only when
 	// something wake-worthy arrived since the last ping (W7 item 2).

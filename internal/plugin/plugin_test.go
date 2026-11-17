@@ -215,3 +215,18 @@ func TestAdoptKeepsTheProbe(t *testing.T) {
 		t.Fatalf("probe state not adopted: %+v %v", core.Runtime.Probe, core.Runtime.FullReadAt)
 	}
 }
+
+// org-approve runs in the approve plugin, and adopts its scores and asks
+// (the core keeps its configuration).
+func TestOrgApprovePluginAndAdopt(t *testing.T) {
+	if got, err := For(model.SourceOrgApprove); err != nil || got != "approve" {
+		t.Fatalf("For(org-approve) = %q, %v", got, err)
+	}
+	core := &model.Critic{Name: "oa", OrgApprove: &model.OrgApproveWatch{Approver: "jack"}}
+	from := &model.Critic{Name: "oa", OrgApprove: &model.OrgApproveWatch{Approver: "flake:x"}}
+	from.Runtime.OrgApprove = &model.OrgApproveState{Asks: map[string]*model.OrgAsk{"oa-1-aaaaaaa": {PR: 1}}}
+	Adopt(core, from)
+	if core.Runtime.OrgApprove == nil || core.Runtime.OrgApprove.Asks["oa-1-aaaaaaa"] == nil || core.OrgApprove.Approver != "jack" {
+		t.Fatalf("adopt: %+v", core)
+	}
+}

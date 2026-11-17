@@ -45,7 +45,7 @@ func For(source string) (string, error) {
 		return "roster", nil
 	case model.SourceReleases, model.SourceScout:
 		return "gh", nil
-	case model.SourceApprove:
+	case model.SourceApprove, model.SourceOrgApprove:
 		return "approve", nil
 	}
 	return "", fmt.Errorf("no plugin serves source %q", source)

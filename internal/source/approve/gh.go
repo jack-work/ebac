@@ -23,13 +23,17 @@ type GH struct {
 	Timeout time.Duration
 	// exec runs gh with argv args and returns stdout. nil is the real gh;
 	// tests replace it to record every argv.
-	exec func(ctx context.Context, args []string) ([]byte, error)
+	exec  func(ctx context.Context, args []string) ([]byte, error)
+	spend Spend
 }
 
 // PRInfo is what scope needs of a pull request.
 type PRInfo struct {
 	State string `json:"state"` // open, closed
 	Draft bool   `json:"draft"`
+	Head  struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
 }
 
 // Review is one pull request review.
@@ -38,6 +42,10 @@ type Review struct {
 	State       string `json:"state"` // APPROVED, COMMENTED, ...
 	Body        string `json:"body"`
 	SubmittedAt string `json:"submitted_at"`
+	User        struct {
+		Login string `json:"login"`
+		Type  string `json:"type"` // User, Bot
+	} `json:"user"`
 }
 
 // PR reads one pull request of Repo (GET).
@@ -95,4 +103,67 @@ func (g *GH) run(ctx context.Context, args []string) ([]byte, error) {
 		return nil, fmt.Errorf("gh %s: %s", args[0], msg)
 	}
 	return out.Bytes(), nil
+}
+
+// Spend is what this GH has spent on GraphQL reads (points are charged per
+// call, min 1; every caller on the account shares one 5000/h bucket).
+type Spend struct {
+	Calls, Points int
+	Remaining     int // after the last call; -1 when none answered
+}
+
+func (s Spend) String() string {
+	left := "?"
+	if s.Remaining >= 0 {
+		left = strconv.Itoa(s.Remaining)
+	}
+	return fmt.Sprintf("graphql %d call(s), %d point(s), %s left", s.Calls, s.Points, left)
+}
+
+// Spent is the GraphQL spend so far.
+func (g *GH) Spent() Spend {
+	s := g.spend
+	if s.Calls == 0 {
+		s.Remaining = -1
+	}
+	return s
+}
+
+// Query runs one GraphQL READ (a query, never a mutation) and returns its
+// data without rateLimit, which it asks so each round can log its cost.
+func (g *GH) Query(ctx context.Context, q string) (json.RawMessage, error) {
+	q = strings.TrimSpace(q)
+	if !strings.HasPrefix(q, "query{") || strings.Contains(strings.ToLower(q), "mutation") {
+		return nil, fmt.Errorf("graphql: only a read (query{...}) is allowed")
+	}
+	q = "query{ rateLimit{cost remaining} " + q[len("query{"):]
+	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q})
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Data   map[string]json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return nil, fmt.Errorf("decode graphql: %w", err)
+	}
+	g.spend.Calls++
+	var rl struct {
+		Cost      int `json:"cost"`
+		Remaining int `json:"remaining"`
+	}
+	if raw, ok := r.Data["rateLimit"]; ok && json.Unmarshal(raw, &rl) == nil {
+		g.spend.Points += rl.Cost
+		g.spend.Remaining = rl.Remaining
+	} else {
+		g.spend.Points++
+	}
+	if len(r.Errors) > 0 {
+		return nil, fmt.Errorf("graphql: %s", oneLine(r.Errors[0].Message))
+	}
+	delete(r.Data, "rateLimit")
+	return json.Marshal(r.Data)
 }

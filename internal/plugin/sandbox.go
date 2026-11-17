@@ -37,6 +37,9 @@ const (
 	GrantCredCache Grant = "cred-cache"
 	// GrantKeelDoor is the keel door: read-only keel threads.
 	GrantKeelDoor Grant = "keel-door"
+	// GrantBandGrants is band-grants' request socket: the uid files
+	// requests as its principal (org-approve's tap requests).
+	GrantBandGrants Grant = "band-grants"
 	// GrantBandHub is the band hub's metadata reader socket.
 	GrantBandHub Grant = "band-hub"
 )
@@ -46,6 +49,11 @@ const (
 func Needs(plugin string, c *model.Critic) []Grant {
 	if c != nil && c.SourceName() == model.SourceReleases {
 		return nil // public github.com releases, read without a credential
+	}
+	if c != nil && c.SourceName() == model.SourceOrgApprove {
+		// GHE (reads, and the APPROVE after a /grants/ tap), and band-grants'
+		// request socket: it files one request per candidate.
+		return []Grant{GrantBandCred, GrantCredCache, GrantBandGrants}
 	}
 	if c != nil && c.SourceName() == model.SourceScout {
 		// GHE, and the hub's metadata for the band jobs on each PR head.

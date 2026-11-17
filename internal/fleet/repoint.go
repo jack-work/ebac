@@ -26,6 +26,7 @@ var RolePaths = []string{
 	"scout_watch.warn_to",
 	"keel_branches.reviewer",
 	"approve_requests.ping_to",
+	"org_approve.ping_to",
 }
 
 // AlertPaths are the alert-role fields (ebac repoint --critic N --alert @new).

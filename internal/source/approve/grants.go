@@ -1,10 +1,17 @@
 package approve
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // GrantsFile is band-grants' published list of LIVE grants (0644): a revoked
@@ -57,4 +64,89 @@ func liveGrant(gs []Grant, principal, credential string, now int64) string {
 		}
 	}
 	return why
+}
+
+// RequestSocket is band-grants' request socket: the filer's uid
+// (SO_PEERCRED) is its principal.
+const RequestSocket = "/run/band-grants/request.sock"
+
+// Filer files and reads band-grants requests over RequestSocket (HTTP on a
+// unix socket). Socket "" is RequestSocket.
+type Filer struct {
+	Socket  string
+	Timeout time.Duration
+}
+
+// RequestState is GET /request/<id>: pending, approved, denied, expired.
+type RequestState struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	ExpiresAt *int64 `json:"expires_at"`
+}
+
+var requestIDRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
+// File asks for credential for ttl, with reason; it returns the request id.
+func (f Filer) File(ctx context.Context, credential string, ttl time.Duration, reason string) (string, error) {
+	body, _ := json.Marshal(map[string]any{"credential": credential, "ttl_s": int(ttl.Seconds()), "reason": reason})
+	var out struct {
+		ID    string `json:"id"`
+		Error string `json:"error"`
+	}
+	if err := f.do(ctx, http.MethodPost, "/request", body, &out); err != nil {
+		return "", err
+	}
+	if !requestIDRe.MatchString(out.ID) {
+		return "", fmt.Errorf("band-grants: request filed, but its id %q is not 12 hex digits", out.ID)
+	}
+	return out.ID, nil
+}
+
+// State reads one of this principal's requests.
+func (f Filer) State(ctx context.Context, id string) (RequestState, error) {
+	var st RequestState
+	if !requestIDRe.MatchString(id) {
+		return st, fmt.Errorf("band-grants: request id %q is not 12 hex digits", id)
+	}
+	err := f.do(ctx, http.MethodGet, "/request/"+id, nil, &st)
+	return st, err
+}
+
+func (f Filer) do(ctx context.Context, method, path string, body []byte, out any) error {
+	sock := f.Socket
+	if sock == "" {
+		sock = RequestSocket
+	}
+	to := f.Timeout
+	if to == 0 {
+		to = 15 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, to)
+	defer cancel()
+	c := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", sock)
+	}}}
+	req, err := http.NewRequestWithContext(ctx, method, "http://band-grants"+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("band-grants %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusOK {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(b, &e)
+		if e.Error == "" {
+			e.Error = strings.TrimSpace(string(b))
+		}
+		return fmt.Errorf("band-grants %s %s: %d %s", method, path, resp.StatusCode, oneLine(e.Error))
+	}
+	return json.Unmarshal(b, out)
 }

@@ -40,6 +40,9 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 	if src == model.SourceApprove {
 		return validateApproveForms(w, rep)
 	}
+	if src == model.SourceOrgApprove {
+		return validateOrgApproveForms(w, rep)
+	}
 	if src != model.SourceScout && src != model.SourceKeelBranches {
 		return fmt.Errorf("source %s may not write other forms (%d form writes): reply refused", src, len(rep.Forms))
 	}
@@ -133,13 +136,15 @@ func (p *Poller) commitOutbox(ctx context.Context, id string, set map[string]jso
 // orphaned. Its error fails the round after the critic is saved.
 func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Reply) error {
 	src := w.SourceName()
-	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove {
+	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove && src != model.SourceOrgApprove {
 		return nil
 	}
 	var err error
 	for _, fw := range rep.Forms {
 		if fw.Inputs && src == model.SourceApprove {
 			err = p.commitResults(ctx, w.InputsForm, fw.Set)
+		} else if fw.Inputs && src == model.SourceOrgApprove {
+			err = p.commitAsks(ctx, w.InputsForm, fw.Set)
 		} else if fw.Inputs {
 			err = p.commitOutbox(ctx, w.InputsForm, fw.Set)
 		} else {
@@ -289,13 +294,20 @@ func ValidatePings(w *model.Critic, rep *plugin.Reply) error {
 		return nil
 	}
 	src := w.SourceName()
-	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove {
+	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove && src != model.SourceOrgApprove {
 		return fmt.Errorf("source %s may not ping roles: reply refused", w.SourceName())
 	}
 	if src == model.SourceApprove {
 		for i, pg := range rep.Pings {
 			if w.Requests == nil || pg.To != w.Requests.PingTo {
 				return fmt.Errorf("ping %d: approve-requests pings only its configured role: reply refused", i)
+			}
+		}
+	}
+	if src == model.SourceOrgApprove {
+		for i, pg := range rep.Pings {
+			if w.OrgApprove == nil || w.OrgApprove.PingTo == "" || pg.To != w.OrgApprove.PingTo {
+				return fmt.Errorf("ping %d: org-approve pings only its configured role: reply refused", i)
 			}
 		}
 	}
@@ -435,4 +447,96 @@ func (p *Poller) commitResults(ctx context.Context, id string, set map[string]js
 		}
 		return map[string]json.RawMessage{"requests": model.MustJSON(reqs)}, nil
 	})
+}
+
+// org-approve writes asks on its inputs form (an elicitation board): key q,
+// members q.oa-<pr>-<head7> only, asker fields only. The Boss's fields
+// (answer, elaborate) and every other q are never written.
+var (
+	orgAskID     = regexp.MustCompile(`^oa-[0-9]{1,8}-[0-9a-f]{7}$`)
+	orgAskFields = map[string]bool{"ask": true, "context": true, "since": true, "default": true, "order": true, "status": true, "resolved": true}
+	orgAskStatus = map[string]bool{"open": true, "done": true, "withdrawn": true}
+)
+
+// validateOrgApproveForms: one inputs write, key q only, each member an
+// oa- id with asker fields only and a status the asker may set.
+func validateOrgApproveForms(w *model.Critic, rep *plugin.Reply) error {
+	for i, fw := range rep.Forms {
+		where := fmt.Sprintf("form write %d", i)
+		switch {
+		case !fw.Inputs || fw.Key != "" || fw.Retire || len(fw.Unset) > 0:
+			return fmt.Errorf("%s: org-approve writes only its board's asks: reply refused", where)
+		case w.InputsForm == "":
+			return fmt.Errorf("%s: the critic has no board (inputs form): reply refused", where)
+		}
+		for k, v := range fw.Set {
+			if k != "q" {
+				return fmt.Errorf("%s may not set board key %q (allowed: q): reply refused", where, k)
+			}
+			var members map[string]map[string]json.RawMessage
+			if err := json.Unmarshal(v, &members); err != nil {
+				return fmt.Errorf("%s: q must be an object of asks: reply refused", where)
+			}
+			for id, m := range members {
+				if !orgAskID.MatchString(id) {
+					return fmt.Errorf("%s: q id %q is not oa-<pr>-<head7>: reply refused", where, id)
+				}
+				for f, fv := range m {
+					if !orgAskFields[f] {
+						return fmt.Errorf("%s: q.%s: field %q is not the asker's: reply refused", where, id, f)
+					}
+					if f == "status" {
+						var st string
+						if json.Unmarshal(fv, &st) != nil || !orgAskStatus[st] {
+							return fmt.Errorf("%s: q.%s: status %s is not open, done or withdrawn: reply refused", where, id, fv)
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// commitAsks merges the asks into the board's q, member by member and field
+// by field, in one versioned Commit: the Boss's fields and other askers' q
+// are kept as they are (a dotted key would be a flat decoy, figaro#43).
+func (p *Poller) commitAsks(ctx context.Context, id string, set map[string]json.RawMessage) error {
+	var add map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(set["q"], &add); err != nil || len(add) == 0 {
+		return err
+	}
+	return p.Store.Commit(ctx, id, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		return mergeAsks(cur["q"], add)
+	})
+}
+
+// mergeAsks is commitAsks' pure part: the new q, or nil when nothing changed.
+func mergeAsks(curQ json.RawMessage, add map[string]map[string]json.RawMessage) (map[string]json.RawMessage, []string) {
+	q := map[string]json.RawMessage{}
+	if len(curQ) > 0 && string(curQ) != "null" {
+		if json.Unmarshal(curQ, &q) != nil || q == nil {
+			return nil, nil // q is not an object: never clobber it
+		}
+	}
+	changed := false
+	for qid, fields := range add {
+		m := map[string]json.RawMessage{}
+		if raw, ok := q[qid]; ok {
+			if json.Unmarshal(raw, &m) != nil || m == nil {
+				continue // not an object: left alone
+			}
+		}
+		for f, v := range fields {
+			if string(m[f]) != string(v) {
+				m[f] = v
+				changed = true
+			}
+		}
+		q[qid] = model.MustJSON(m)
+	}
+	if !changed {
+		return nil, nil
+	}
+	return map[string]json.RawMessage{"q": model.MustJSON(q)}, nil
 }

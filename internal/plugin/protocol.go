@@ -231,6 +231,7 @@ func Adopt(core, from *model.Critic) {
 	r.KeelBranches = f.KeelBranches
 	r.Roster = f.Roster
 	r.Releases = f.Releases
+	r.OrgApprove = f.OrgApprove
 	r.Stopped = f.Stopped
 	r.StopReason = f.StopReason
 }
