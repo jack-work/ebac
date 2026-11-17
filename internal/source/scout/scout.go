@@ -401,6 +401,7 @@ type TrackedPR struct {
 	Outbox    int64             `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
 	Record    string            `json:"rh,omitempty"`   // that record's hash, 16 hex
 	Acked     bool              `json:"k,omitempty"`    // the steward acked that record
+	Board     string            `json:"bd,omitempty"`   // digest of the board's pr.<n> state when its facts were last read
 }
 
 // TrackedIssue is what the state keeps per tracked issue.
@@ -718,7 +719,41 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			settlingOnly = append(settlingOnly, n)
 		}
 	}
-	reread = append(reread, settleDue(ctx, gh, &st, in, settlingOnly, logf)...)
+	// The board (pr.<n>, its 5-min snapshot) is the PR state for every PR it carries (Warden GO 11-17): a settling
+	// PR on it is re-read only when its board state moved; any tracked open PR whose settled mergeability the board
+	// shows changed is re-read (the read rewrites its entry and pings a turn into conflict). A PR the board lacks,
+	// or a stale board, takes the GitHub path.
+	bd := boardPRs(in.Board, in.Now)
+	queued := map[int]bool{}
+	for _, n := range reread {
+		queued[n] = true
+	}
+	var offBoard []int
+	boardMoved := 0
+	for _, n := range settlingOnly {
+		b, ok := bd[n]
+		switch {
+		case !ok:
+			offBoard = append(offBoard, n)
+		case b.digest != st.PRs[n].Board:
+			reread, queued[n] = append(reread, n), true
+			boardMoved++
+		}
+	}
+	for n, t := range st.PRs {
+		b, ok := bd[n]
+		if _, isFresh := fresh[n]; !ok || isFresh || queued[n] || t.State != "OPEN" {
+			continue
+		}
+		if (b.mergeable == "MERGEABLE" || b.mergeable == "CONFLICTING") && b.mergeable != t.Mergeable {
+			reread, queued[n] = append(reread, n), true
+			boardMoved++
+		}
+	}
+	if len(bd) > 0 {
+		logf("board: %d tracked PR(s) on it, %d re-read on a board change", len(bd), boardMoved)
+	}
+	reread = append(reread, settleDue(ctx, gh, &st, in, offBoard, logf)...)
 	// 2b. the base-head watch: a base that moved re-asks its PRs' mergeability (conflict.go).
 	inFull := map[int]bool{}
 	for n := range fresh {
@@ -730,6 +765,15 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// The mergeability reads ride the re-read's first call; a PR whose settled mergeability changed is re-read in
 	// full by one more.
 	mergeAsk := basesToAsk(&st, refs, baseHeads, inFull, logf)
+	if len(bd) > 0 { // the board's mergeability stands for the PRs it carries
+		kept := mergeAsk[:0]
+		for _, n := range mergeAsk {
+			if _, ok := bd[n]; !ok {
+				kept = append(kept, n)
+			}
+		}
+		mergeAsk = kept
+	}
 	sort.Ints(reread)
 	chunk, light := SearchPage, LightPage
 	for i := 0; i < len(reread) || len(mergeAsk) > 0; {
@@ -822,6 +866,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			e.Files = Grouped(p.Files, MaxFiles)
 		}
 		t.State, t.Head, t.Links, t.Owner = p.Facts.State, head, p.Links, ownerOf(owners, p.Author, p.Title)
+		t.Board = bd[n].digest
 		t.Base = p.Base
 		if t.Base == "main" {
 			t.Base = ""
@@ -1918,4 +1963,51 @@ func rcAfter(a, b string) bool {
 	ta, err := time.Parse(time.RFC3339, a)
 	tb, err2 := time.Parse(time.RFC3339, b)
 	return err == nil && err2 == nil && ta.After(tb)
+}
+
+// BoardFresh is how old the board's snapshot may be and still stand for PR state.
+const BoardFresh = 15 * time.Minute
+
+// boardPR is what the scout takes from the board's pr.<n>: the state it compares against its own last read.
+type boardPR struct {
+	mergeable string // MERGEABLE, CONFLICTING, UNKNOWN
+	digest    string // head, state, mergeable, merge_state and each check's state
+}
+
+// boardPRs reads the board's pr map, by PR number; nil when the board has none or its snapshot is older than
+// BoardFresh (or undated): then every PR takes the GitHub path.
+func boardPRs(board map[string]json.RawMessage, now time.Time) map[int]boardPR {
+	var at string
+	if json.Unmarshal(board["snapshot_at"], &at) != nil {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, at)
+	if err != nil || now.Sub(t) > BoardFresh {
+		return nil
+	}
+	var prs map[string]*struct {
+		Head       string `json:"head"`
+		State      string `json:"state"`
+		Mergeable  string `json:"mergeable"`
+		MergeState string `json:"merge_state"`
+		Checks     map[string]struct {
+			State string `json:"state"`
+		} `json:"checks"`
+	}
+	if json.Unmarshal(board["pr"], &prs) != nil {
+		return nil
+	}
+	out := map[int]boardPR{}
+	for k, p := range prs {
+		n, err := strconv.Atoi(k)
+		if err != nil || p == nil || p.Head == "" {
+			continue
+		}
+		checks := map[string]string{}
+		for name, c := range p.Checks {
+			checks[name] = c.State
+		}
+		out[n] = boardPR{mergeable: p.Mergeable, digest: digest([]any{p.Head, p.State, p.Mergeable, p.MergeState, checks})}
+	}
+	return out
 }

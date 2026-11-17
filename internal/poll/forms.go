@@ -348,7 +348,7 @@ func (p *Poller) sendPings(ctx context.Context, w *model.Critic, pings []plugin.
 
 // BoardReadKeys are the board form keys the scout reads, read-only: the
 // owner marks the merge checklist needs (prs rows, then items).
-var BoardReadKeys = []string{"prs", "items"}
+var BoardReadKeys = []string{"prs", "items", "pr", "snapshot_at"}
 
 // readBoard is the board form's BoardReadKeys.
 func (p *Poller) readBoard(ctx context.Context, w *model.Critic) (map[string]json.RawMessage, error) {
