@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/internal/forge/fakegql"
 )
 
 // FakeGH points GH.run at THIS test binary, re-executed as a child process
@@ -72,12 +73,14 @@ func HelperProcess(t *testing.T) {
 	}
 	scenario, rest := args[0], args[1:]
 
-	reviewsCursor := ""
-	for _, a := range rest {
-		if v, ok := strings.CutPrefix(a, "reviewsCursor="); ok {
-			reviewsCursor = v
+	q := fakegql.Query(rest)
+	rowsOut := func(rows string) { // a `gh pr list` answer, or the same rows as a search
+		if fakegql.IsSearch(q) {
+			rows = fakegql.Search(q, rows)
 		}
+		os.Stdout.WriteString(rows)
 	}
+	prOut := func(doc func(number, reviewsCursor string) string) { os.Stdout.WriteString(fakegql.PRs(q, doc)) }
 
 	switch scenario {
 	case "author":
@@ -87,7 +90,7 @@ func HelperProcess(t *testing.T) {
 			f.Close()
 		}
 		recent := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-		os.Stdout.WriteString(`[{"number":61586,"url":"https://x/pull/61586","title":"feat: one","state":"OPEN","isDraft":false,` +
+		rowsOut(`[{"number":61586,"url":"https://x/pull/61586","title":"feat: one","state":"OPEN","isDraft":false,` +
 			`"headRefOid":"ffff8f68aaaabbbbcccc","createdAt":"2026-10-22T20:43:20Z","updatedAt":"2026-10-22T21:00:00Z","mergedAt":"0001-01-01T00:00:00Z"},` +
 			`{"number":61434,"url":"https://x/pull/61434","title":"feat: two","state":"MERGED","isDraft":false,` +
 			// The merge is stamped relative to now: the form's authored key keeps a closed PR only while it was
@@ -100,7 +103,7 @@ func HelperProcess(t *testing.T) {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(1)
 		}
-		os.Stdout.Write(b)
+		rowsOut(string(b))
 	case "author200":
 		// 200 PRs, newest update first as `sort:updated-desc` returns them; it ignores --limit, so the caller's own
 		// cap is what is tested. Every one was created and merged long ago: none is news after the baseline.
@@ -125,23 +128,18 @@ func HelperProcess(t *testing.T) {
 				`"createdAt":"2026-09-01T00:00:00Z","updatedAt":"%s","mergedAt":"%s"}`, 70000+i, 70000+i, i, state, i, at, merged)
 		}
 		b.WriteString("]")
-		os.Stdout.WriteString(b.String())
+		rowsOut(b.String())
 	case "prs-closed":
 		// FetchPR by number: #1 open, #2 merged long ago, #3 merged an hour ago; each with one thread.
-		num := ""
-		for _, a := range rest {
-			if v, ok := strings.CutPrefix(a, "number="); ok {
-				num = v
+		prOut(func(num, _ string) string {
+			state, merged, updated := "OPEN", false, time.Now().UTC().Format(time.RFC3339)
+			switch num {
+			case "2":
+				state, merged, updated = "MERGED", true, "2026-01-01T00:00:00Z"
+			case "3":
+				state, merged, updated = "MERGED", true, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 			}
-		}
-		state, merged, updated := "OPEN", false, time.Now().UTC().Format(time.RFC3339)
-		switch num {
-		case "2":
-			state, merged, updated = "MERGED", true, "2026-01-01T00:00:00Z"
-		case "3":
-			state, merged, updated = "MERGED", true, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-		}
-		fmt.Fprintf(os.Stdout, `{"data":{"repository":{"pullRequest":{
+			return fmt.Sprintf(`{"data":{"repository":{"pullRequest":{
   "number":%s,"url":"https://x/pull/%s","title":"t%s","state":%q,"isDraft":false,"merged":%v,
   "reviewDecision":"","updatedAt":%q,"baseRefName":"main","author":{"login":"a","__typename":"User"},"headRefOid":"sha%s",
   "pending":{"nodes":[]},
@@ -151,21 +149,43 @@ func HelperProcess(t *testing.T) {
     {"id":"T%s","isResolved":false,"isOutdated":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[
       {"id":"C%s","url":"u","body":"finding","state":"SUBMITTED","createdAt":"1","updatedAt":"1","author":{"login":"amy","__typename":"User"}}]}}]}
 }}}}`, num, num, num, state, merged, updated, num, num, num)
+		})
+	case "prs-dir":
+		// Each PR is the file $EBAC_FAKE_PRS/<n>.json (its later reviews page <n>.p2.json); a PR without one is not
+		// found. Every call is logged to $EBAC_FAKE_LOG as one line: CALL <aliases asked> <probe|full>.
+		dir := os.Getenv("EBAC_FAKE_PRS")
+		kind := "full"
+		if !strings.Contains(q, "body") {
+			kind = "probe"
+		}
+		var nums []string
+		answer := fakegql.PRs(q, func(num, cursor string) string {
+			nums = append(nums, num)
+			name := num + ".json"
+			if cursor != "" {
+				name = num + ".p2.json"
+			}
+			b, err := os.ReadFile(dir + "/" + name)
+			if err != nil {
+				return `{"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a PullRequest with the number of ` + num + `."}]}`
+			}
+			return string(b)
+		})
+		if p := os.Getenv("EBAC_FAKE_LOG"); p != "" {
+			f, _ := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			fmt.Fprintf(f, "CALL %s %s\n", strings.Join(nums, ","), kind)
+			f.Close()
+		}
+		os.Stdout.WriteString(answer)
 	case "pending":
-		os.Stdout.WriteString(pendingJSON)
+		prOut(func(string, string) string { return pendingJSON })
 	case "paginate":
-		if reviewsCursor == "" {
-			os.Stdout.WriteString(page1JSON)
-		} else {
-			os.Stdout.WriteString(page2JSON)
-		}
-	case "logcursor":
-		if strings.Contains(strings.Join(rest, " "), "reviewsCursor=") {
-			os.Stdout.WriteString(emptyJSON)
-		} else {
-			os.Stderr.WriteString("reviewsCursor argument missing\n")
-			os.Exit(1)
-		}
+		prOut(func(_, cursor string) string {
+			if cursor == "" {
+				return page1JSON
+			}
+			return page2JSON
+		})
 	case "post-422":
 		os.Stderr.WriteString("gh: Validation Failed (HTTP 422)\n")
 		os.Exit(1)
@@ -223,15 +243,6 @@ const page2JSON = `{"data":{"repository":{"pullRequest":{
   "headRefOid":"sha1",
   "reviews":{"pageInfo":{"hasNextPage":false,"endCursor":""},
     "nodes":[{"id":"r3","state":"APPROVED","submittedAt":"t3","body":"three","author":{"login":"x","__typename":"User"}}]},
-  "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
-  "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}
-}}}}`
-
-const emptyJSON = `{"data":{"repository":{"pullRequest":{
-  "number":1,"url":"https://x/pull/1","title":"t","state":"OPEN","isDraft":false,"merged":false,
-  "reviewDecision":"","updatedAt":"","baseRefName":"main","author":{"login":"a","__typename":"User"},
-  "headRefOid":"sha1",
-  "reviews":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
   "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
   "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}
 }}}}`

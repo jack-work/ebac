@@ -89,18 +89,15 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 		t.Fatalf("parsed %+v", prs)
 	}
 	b, _ := os.ReadFile(os.Getenv("EBAC_FAKE_LOG"))
-	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(calls) != 2 {
-		t.Fatalf("want 2 gh calls (open, recently closed), got %d:\n%s", len(calls), b)
+	if n := strings.Count(string(b), "CALL "); n != 1 {
+		t.Fatalf("want ONE gh call (both searches aliased in one GraphQL query: one point), got %d:\n%s", n, b)
 	}
-	for i, wants := range [][]string{
-		{"--author Chiqun-Zhang", "--state open", "updated:>=2026-10-15T00:00:00Z sort:updated-desc", "--limit 200", "--repo bic/aether"},
-		{"--author Chiqun-Zhang", "--state all", "is:closed closed:>=2026-11-12T06:00:00Z updated:>=2026-10-15T00:00:00Z", "--limit 200"},
+	for _, want := range []string{"api graphql", "rateLimit{cost remaining}",
+		`s0: search(type:ISSUE, first:100, query:"repo:bic/aether is:pr author:Chiqun-Zhang is:open updated:>=2026-10-15T00:00:00Z sort:updated-desc")`,
+		`s1: search(type:ISSUE, first:100, query:"repo:bic/aether is:pr author:Chiqun-Zhang is:closed closed:>=2026-11-12T06:00:00Z updated:>=2026-10-15T00:00:00Z sort:updated-desc")`,
 	} {
-		for _, want := range wants {
-			if !strings.Contains(calls[i], want) {
-				t.Fatalf("call %d lacks %q: %s", i, want, calls[i])
-			}
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("the call lacks %q: %s", want, b)
 		}
 	}
 }
@@ -262,7 +259,7 @@ func TestAuthorSetByStateCapped(t *testing.T) {
 		t.Fatalf("long-known PRs announced as news: %d events", len(rep.Events))
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "--state open") || !strings.Contains(string(calls), "is:closed closed:>=") {
+	if !strings.Contains(string(calls), "is:open updated:>=") || !strings.Contains(string(calls), "is:closed closed:>=") {
 		t.Fatalf("the fetch is not by state: %s", calls)
 	}
 	again := authorRound(t, rep.Critic, "author200")

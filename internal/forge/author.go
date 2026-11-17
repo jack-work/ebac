@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,20 +38,72 @@ const AuthorListLimit = 200
 // closedSince. Membership then changes only on a real transition; a window of
 // the N most recently updated PRs dropped a quiet open PR whenever N others
 // moved and re-added it on its next update (author-chiqun: 299 entries removed
-// for 15 live in a day, 2026-11-13). Two calls, deduplicated by PR.
+// for 15 live in a day, 2026-11-13). Both searches ride ONE aliased GraphQL
+// query (one point; it was two `gh pr list` calls), deduplicated by PR, at
+// most AuthorListLimit each.
 func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since, closedSince time.Time) ([]AuthoredPR, error) {
 	upd := "updated:>=" + since.UTC().Format(time.RFC3339)
-	open, err := g.listAuthored(ctx, repo, login, "open", upd+" sort:updated-desc")
-	if err != nil {
-		return nil, err
+	base := fmt.Sprintf("repo:%s is:pr author:%s ", repo, login)
+	searches := []string{
+		base + "is:open " + upd + " sort:updated-desc",
+		base + "is:closed closed:>=" + closedSince.UTC().Format(time.RFC3339) + " " + upd + " sort:updated-desc",
 	}
-	closed, err := g.listAuthored(ctx, repo, login, "all", "is:closed closed:>="+closedSince.UTC().Format(time.RFC3339)+" "+upd+" sort:updated-desc")
-	if err != nil {
-		return nil, err
+	after := make([]string, len(searches))
+	got := make([][]AuthoredPR, len(searches))
+	for page := 0; page < AuthorListLimit/100+1; page++ {
+		var b strings.Builder
+		b.WriteString("query{")
+		asked := 0
+		for i, q := range searches {
+			if page > 0 && after[i] == "" || len(got[i]) >= AuthorListLimit {
+				continue
+			}
+			cur := ""
+			if after[i] != "" {
+				cur = ", after:" + strconv.Quote(after[i])
+			}
+			fmt.Fprintf(&b, "\n  s%d: search(type:ISSUE, first:100%s, query:%s){ pageInfo{ hasNextPage endCursor }"+
+				" nodes{ ... on PullRequest { number url title state isDraft headRefOid createdAt updatedAt mergedAt closedAt } } }",
+				i, cur, strconv.Quote(q))
+			asked++
+		}
+		if asked == 0 {
+			break
+		}
+		b.WriteString("\n}")
+		data, err := g.GraphQL(ctx, b.String())
+		if err != nil {
+			return nil, err
+		}
+		var res map[string]struct {
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+			Nodes []authoredRow `json:"nodes"`
+		}
+		if err := json.Unmarshal(data, &res); err != nil {
+			return nil, fmt.Errorf("decode search: %w", err)
+		}
+		for i := range searches {
+			s, ok := res[fmt.Sprintf("s%d", i)]
+			if !ok {
+				continue
+			}
+			for _, r := range s.Nodes {
+				if r.Number != 0 && len(got[i]) < AuthorListLimit {
+					got[i] = append(got[i], r.pr(repo))
+				}
+			}
+			after[i] = ""
+			if s.PageInfo.HasNextPage {
+				after[i] = s.PageInfo.EndCursor
+			}
+		}
 	}
 	seen := map[string]bool{}
 	var out []AuthoredPR
-	for _, pr := range append(open, closed...) {
+	for _, pr := range append(got[0], got[1]...) {
 		if !seen[pr.Key()] {
 			seen[pr.Key()] = true
 			out = append(out, pr)
@@ -59,48 +112,35 @@ func (g *GH) ListAuthoredPRs(ctx context.Context, repo, login string, since, clo
 	return out, nil
 }
 
-func (g *GH) listAuthored(ctx context.Context, repo, login, state, search string) ([]AuthoredPR, error) {
-	args := []string{"pr", "list", "--repo", repo, "--author", login, "--state", state,
-		"--search", search, "--limit", fmt.Sprint(AuthorListLimit),
-		"--json", "number,url,title,state,isDraft,headRefOid,createdAt,updatedAt,mergedAt,closedAt"}
-	out, err := g.run(ctx, args, nil)
-	if err != nil {
-		return nil, err
+type authoredRow struct {
+	Number    int    `json:"number"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	State     string `json:"state"`
+	IsDraft   bool   `json:"isDraft"`
+	Head      string `json:"headRefOid"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+	MergedAt  string `json:"mergedAt"`
+	ClosedAt  string `json:"closedAt"`
+}
+
+func (r authoredRow) pr(repo string) AuthoredPR {
+	title, _ := model.CutBody(r.Title, authorTitleBytes)
+	head := r.Head
+	if len(head) > 12 {
+		head = head[:12]
 	}
-	var rows []struct {
-		Number    int    `json:"number"`
-		URL       string `json:"url"`
-		Title     string `json:"title"`
-		State     string `json:"state"`
-		IsDraft   bool   `json:"isDraft"`
-		Head      string `json:"headRefOid"`
-		CreatedAt string `json:"createdAt"`
-		UpdatedAt string `json:"updatedAt"`
-		MergedAt  string `json:"mergedAt"`
-		ClosedAt  string `json:"closedAt"`
+	closed := ""
+	if r.State == "CLOSED" {
+		closed = r.ClosedAt
 	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		return nil, fmt.Errorf("decode pr list: %w", err)
+	merged := ""
+	if r.State == "MERGED" {
+		merged = r.MergedAt
 	}
-	prs := make([]AuthoredPR, 0, len(rows))
-	for _, r := range rows {
-		title, _ := model.CutBody(r.Title, authorTitleBytes)
-		head := r.Head
-		if len(head) > 12 {
-			head = head[:12]
-		}
-		merged := r.MergedAt
-		if strings.HasPrefix(merged, "0001-") {
-			merged = ""
-		}
-		closed := ""
-		if r.State == "CLOSED" && !strings.HasPrefix(r.ClosedAt, "0001-") {
-			closed = r.ClosedAt
-		}
-		prs = append(prs, AuthoredPR{Repo: repo, Number: r.Number, URL: r.URL, Title: title, State: r.State,
-			Draft: r.IsDraft, Head: head, Created: r.CreatedAt, Updated: r.UpdatedAt, Merged: merged, Closed: closed})
-	}
-	return prs, nil
+	return AuthoredPR{Repo: repo, Number: r.Number, URL: r.URL, Title: title, State: r.State,
+		Draft: r.IsDraft, Head: head, Created: r.CreatedAt, Updated: r.UpdatedAt, Merged: merged, Closed: closed}
 }
 
 // PRFiles lists every file a pull request changes (paginated, so a PR of any

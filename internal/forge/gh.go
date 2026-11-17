@@ -37,6 +37,9 @@ type GH struct {
 	NoCred bool
 	credMu sync.Mutex // concurrent reads (author PRFiles) share creds
 	creds  map[string]*Cred
+	// spend counts this process's GraphQL reads and their cost (gql.go).
+	spendMu sync.Mutex
+	spend   Spend
 }
 
 // cred is the band-cred credential for g.Host, one per host per process.
@@ -168,267 +171,6 @@ func (g *GH) Whoami(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// graphqlPRQuery fetches everything one round needs about one PR.
-// reviews and reviewThreads are BOTH paginated with their own independent
-// cursor; the caller must honour each hasNextPage or mark the snapshot
-// incomplete. reviews used to be `reviews(last:30)` with no cursor at all --
-// on any PR whose review count exceeds 30 (every long-running automated
-// review loop gets there fast: bic/aether#24485 alone crossed a hundred
-// individual review submissions) the reviews beyond the newest 30 were
-// silently dropped, with nothing in the response distinguishing "no more
-// reviews" from "we didn't ask for the rest." A critic could report "no new
-// reviews" while reviews genuinely existed just outside the window -- a zero
-// that meant "the instrument didn't look" rendered identically to a zero
-// that meant "there was nothing there."
-const graphqlPRQuery = `
-query($owner:String!,$name:String!,$number:Int!,$cursor:String,$reviewsCursor:String){
-  repository(owner:$owner,name:$name){
-    pullRequest(number:$number){
-      number url title state isDraft merged reviewDecision updatedAt baseRefName
-      author{login __typename}
-      headRefOid
-      pending: reviews(states:PENDING, first:5){
-        nodes{ id databaseId createdAt author{login} comments{ totalCount } }
-      }
-      reviews(first:50, after:$reviewsCursor){
-        pageInfo{ hasNextPage endCursor }
-        nodes{ id state submittedAt body author{login __typename} }
-      }
-      comments(first:100){
-        pageInfo{ hasNextPage }
-        nodes{ id url body createdAt updatedAt author{login __typename} }
-      }
-      reviewThreads(first:50, after:$cursor){
-        pageInfo{ hasNextPage endCursor }
-        nodes{
-          id isResolved isOutdated path line
-          comments(first:100){
-            pageInfo{ hasNextPage }
-            nodes{ id url body state createdAt updatedAt author{login __typename} }
-          }
-        }
-      }
-    }
-  }
-}`
-
-type gqlAuthor struct {
-	Login    string `json:"login"`
-	Typename string `json:"__typename"`
-}
-
-type gqlResp struct {
-	Data struct {
-		Repository struct {
-			PullRequest *struct {
-				Number         int       `json:"number"`
-				URL            string    `json:"url"`
-				Title          string    `json:"title"`
-				State          string    `json:"state"`
-				IsDraft        bool      `json:"isDraft"`
-				Merged         bool      `json:"merged"`
-				ReviewDecision string    `json:"reviewDecision"`
-				UpdatedAt      string    `json:"updatedAt"`
-				BaseRefName    string    `json:"baseRefName"`
-				Author         gqlAuthor `json:"author"`
-				HeadRefOid     string    `json:"headRefOid"`
-				Pending        struct {
-					Nodes []struct {
-						ID         string    `json:"id"`
-						DatabaseID int64     `json:"databaseId"`
-						CreatedAt  string    `json:"createdAt"`
-						Author     gqlAuthor `json:"author"`
-						Comments   struct {
-							TotalCount int `json:"totalCount"`
-						} `json:"comments"`
-					} `json:"nodes"`
-				} `json:"pending"`
-				Reviews struct {
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-					Nodes []struct {
-						ID          string    `json:"id"`
-						State       string    `json:"state"`
-						SubmittedAt string    `json:"submittedAt"`
-						Body        string    `json:"body"`
-						Author      gqlAuthor `json:"author"`
-					} `json:"nodes"`
-				} `json:"reviews"`
-				Comments struct {
-					PageInfo struct {
-						HasNextPage bool `json:"hasNextPage"`
-					} `json:"pageInfo"`
-					Nodes []struct {
-						ID        string    `json:"id"`
-						URL       string    `json:"url"`
-						Body      string    `json:"body"`
-						CreatedAt string    `json:"createdAt"`
-						UpdatedAt string    `json:"updatedAt"`
-						Author    gqlAuthor `json:"author"`
-					} `json:"nodes"`
-				} `json:"comments"`
-				ReviewThreads struct {
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-					Nodes []struct {
-						ID         string `json:"id"`
-						IsResolved bool   `json:"isResolved"`
-						IsOutdated bool   `json:"isOutdated"`
-						Path       string `json:"path"`
-						Line       int    `json:"line"`
-						Comments   struct {
-							PageInfo struct {
-								HasNextPage bool `json:"hasNextPage"`
-							} `json:"pageInfo"`
-							Nodes []struct {
-								ID        string    `json:"id"`
-								URL       string    `json:"url"`
-								Body      string    `json:"body"`
-								State     string    `json:"state"`
-								CreatedAt string    `json:"createdAt"`
-								UpdatedAt string    `json:"updatedAt"`
-								Author    gqlAuthor `json:"author"`
-							} `json:"nodes"`
-						} `json:"comments"`
-					} `json:"nodes"`
-				} `json:"reviewThreads"`
-			} `json:"pullRequest"`
-		} `json:"repository"`
-	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"errors"`
-}
-
-// FetchPR returns one PR's state. The returned PRState carries Complete=false
-// if any page was left unread, which forbids the differ from inferring
-// deletions for it.
-func (g *GH) FetchPR(ctx context.Context, owner, repo string, number int) (*model.PRState, error) {
-	st := &model.PRState{
-		Key: model.MakePRKey(owner, repo, number), Owner: owner, Repo: repo, Number: number,
-		Threads: map[string]*model.Thread{}, Reviews: map[string]*model.Review{}, Comments: map[string]*model.Comment{}, Complete: true,
-	}
-
-	cursor := ""
-	reviewsCursor := ""
-	for page := 0; ; page++ {
-		if page > 40 {
-			st.Complete = false
-			break
-		}
-		args := []string{
-			"api", "graphql",
-			"-f", "query=" + graphqlPRQuery,
-			"-F", "owner=" + owner,
-			"-F", "name=" + repo,
-			"-F", "number=" + strconv.Itoa(number),
-			"-F", "cursor=" + cursor,
-			"-F", "reviewsCursor=" + reviewsCursor,
-		}
-		out, err := g.run(ctx, args, nil)
-		if err != nil {
-			return nil, err
-		}
-		var r gqlResp
-		if err := json.Unmarshal(out, &r); err != nil {
-			return nil, fmt.Errorf("decode graphql: %w", err)
-		}
-		if len(r.Errors) > 0 {
-			return nil, fmt.Errorf("graphql: %s", r.Errors[0].Message)
-		}
-		pr := r.Data.Repository.PullRequest
-		if pr == nil {
-			return nil, fmt.Errorf("%s/%s#%d not found", owner, repo, number)
-		}
-
-		// Reviews are paginated independently of reviewThreads, so this
-		// runs on every page: once the reviews cursor is exhausted, later
-		// pages (still walking through reviewThreads) simply repeat its
-		// last, empty page, which is harmless.
-		// Pending is asked for on every page and is the same each time.
-		st.Pending = st.Pending[:0]
-		for _, pn := range pr.Pending.Nodes {
-			st.Pending = append(st.Pending, model.PendingReview{ID: pn.ID, DatabaseID: pn.DatabaseID,
-				Author: pn.Author.Login, CreatedAt: pn.CreatedAt, Comments: pn.Comments.TotalCount})
-		}
-		for _, rv := range pr.Reviews.Nodes {
-			st.Reviews[rv.ID] = &model.Review{
-				ID: rv.ID, Author: rv.Author.Login, IsBot: isBot(rv.Author),
-				State: rv.State, SubmittedAt: rv.SubmittedAt, Body: rv.Body, Digest: model.BodyDigest(rv.Body),
-			}
-		}
-
-		if page == 0 {
-			st.URL, st.Title, st.IsDraft = pr.URL, pr.Title, pr.IsDraft
-			st.HeadSHA, st.BaseRef, st.UpdatedAt = pr.HeadRefOid, pr.BaseRefName, pr.UpdatedAt
-			st.ReviewDecision = pr.ReviewDecision
-			st.Author = pr.Author.Login
-			st.State = pr.State
-			if pr.Merged {
-				st.State = "MERGED"
-			}
-			if pr.Comments.PageInfo.HasNextPage {
-				// More than 100 top-level comments. Same rule as an
-				// over-full thread: mark the scan partial rather than
-				// silently truncate, which would make an unread comment
-				// look deleted next round.
-				st.Complete = false
-			}
-			for _, cn := range pr.Comments.Nodes {
-				c := &model.Comment{
-					ID: cn.ID, URL: cn.URL, Body: cn.Body,
-					CreatedAt: cn.CreatedAt, UpdatedAt: cn.UpdatedAt,
-					Author: cn.Author.Login, IsBot: isBot(cn.Author),
-				}
-				c.ComputeDigest()
-				st.Comments[c.ID] = c
-			}
-		}
-
-		for _, tn := range pr.ReviewThreads.Nodes {
-			t := &model.Thread{ID: tn.ID, Path: tn.Path, Line: tn.Line, IsResolved: tn.IsResolved, IsOutdated: tn.IsOutdated}
-			if tn.Comments.PageInfo.HasNextPage {
-				// More than 100 comments on one thread. Rather than
-				// silently truncate — which would make every unread
-				// comment look deleted — mark the scan partial.
-				st.Complete = false
-			}
-			for _, cn := range tn.Comments.Nodes {
-				c := &model.Comment{
-					ID: cn.ID, URL: cn.URL, Body: cn.Body,
-					CreatedAt: cn.CreatedAt, UpdatedAt: cn.UpdatedAt,
-					Author: cn.Author.Login, IsBot: isBot(cn.Author),
-				}
-				if cn.State == "PENDING" {
-					c.State = "PENDING"
-				}
-				c.ComputeDigest()
-				t.Comments = append(t.Comments, c)
-			}
-			st.Threads[t.ID] = t
-		}
-
-		threadsMore := pr.ReviewThreads.PageInfo.HasNextPage
-		reviewsMore := pr.Reviews.PageInfo.HasNextPage
-		if !threadsMore && !reviewsMore {
-			break
-		}
-		if threadsMore {
-			cursor = pr.ReviewThreads.PageInfo.EndCursor
-		}
-		if reviewsMore {
-			reviewsCursor = pr.Reviews.PageInfo.EndCursor
-		}
-	}
-	MarkStamped(st.Reviews)
-	return st, nil
-}
-
 const (
 	stampMarker = "No person reviewed this change"
 	stampWindow = 60 * time.Second
@@ -556,24 +298,15 @@ func (g *GH) BranchTip(ctx context.Context, repo, branch string) (string, error)
 	return strings.TrimSpace(string(out)), nil
 }
 
-// GraphQL runs one GraphQL query and returns its data object. A response with
-// errors is an error naming the first one.
+// GraphQL runs one GraphQL read and returns its data object (rateLimit
+// stripped). A response with errors is an error naming the first one.
 func (g *GH) GraphQL(ctx context.Context, query string) (json.RawMessage, error) {
-	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + query}, nil)
+	data, errs, err := g.query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	var r struct {
-		Data   json.RawMessage `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("graphql: %s", errs[0].Message)
 	}
-	if err := json.Unmarshal(out, &r); err != nil {
-		return nil, fmt.Errorf("decode graphql: %w", err)
-	}
-	if len(r.Errors) > 0 {
-		return nil, fmt.Errorf("graphql: %s", r.Errors[0].Message)
-	}
-	return r.Data, nil
+	return data, nil
 }

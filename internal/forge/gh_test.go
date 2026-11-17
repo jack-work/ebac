@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gluck/ebac/internal/forge/fakegql"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -66,12 +67,7 @@ func TestHelperProcess(t *testing.T) {
 	}
 	scenario, rest := args[0], args[1:]
 
-	reviewsCursor := ""
-	for _, a := range rest {
-		if v, ok := strings.CutPrefix(a, "reviewsCursor="); ok {
-			reviewsCursor = v
-		}
-	}
+	q := fakegql.Query(rest)
 
 	switch scenario {
 	case "compare":
@@ -114,18 +110,12 @@ func TestHelperProcess(t *testing.T) {
 	case "pending":
 		os.Stdout.WriteString(pendingJSON)
 	case "paginate":
-		if reviewsCursor == "" {
-			os.Stdout.WriteString(page1JSON)
-		} else {
-			os.Stdout.WriteString(page2JSON)
-		}
-	case "logcursor":
-		if strings.Contains(strings.Join(rest, " "), "reviewsCursor=") {
-			os.Stdout.WriteString(emptyJSON)
-		} else {
-			os.Stderr.WriteString("reviewsCursor argument missing\n")
-			os.Exit(1)
-		}
+		os.Stdout.WriteString(fakegql.PRs(q, func(_, cursor string) string {
+			if cursor == "" {
+				return page1JSON
+			}
+			return page2JSON
+		}))
 	case "post-422":
 		os.Stderr.WriteString("gh: Validation Failed (HTTP 422)\n")
 		os.Exit(1)
@@ -187,15 +177,6 @@ const page2JSON = `{"data":{"repository":{"pullRequest":{
   "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}
 }}}}`
 
-const emptyJSON = `{"data":{"repository":{"pullRequest":{
-  "number":1,"url":"https://x/pull/1","title":"t","state":"OPEN","isDraft":false,"merged":false,
-  "reviewDecision":"","updatedAt":"","baseRefName":"main","author":{"login":"a","__typename":"User"},
-  "headRefOid":"sha1",
-  "reviews":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
-  "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
-  "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}
-}}}}`
-
 // Observed live on bic/aether#24485: by the time it had gone through a dozen
 // automated review rounds it carried well over a hundred individual Review
 // nodes, all fetched through a single `reviews(last:30)` with no cursor at
@@ -230,16 +211,6 @@ func reviewIDs(st *model.PRState) []string {
 		out = append(out, id)
 	}
 	return out
-}
-
-// Guard against a copy-paste regression: the query must actually pass
-// reviewsCursor as its own GraphQL variable, not silently reuse
-// reviewThreads' cursor or drop it.
-func TestFetchPRPassesReviewsCursorAsGHFlag(t *testing.T) {
-	g := fakeGH(t, "logcursor")
-	if _, err := g.FetchPR(context.Background(), "bic", "aether", 1); err != nil {
-		t.Fatalf("FetchPR: %v (reviewsCursor argument likely missing from the query)", err)
-	}
 }
 
 func TestForgeHost(t *testing.T) {

@@ -46,7 +46,11 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		if files == nil {
 			files = gh.PRFiles
 		}
-		return round(ctx, gh, files, &req.Critic, req.Keys)
+		rep, err := round(ctx, gh, files, &req.Critic, req.Keys)
+		if rep != nil {
+			rep.Logf("%s: %s", req.Critic.Name, gh.Spent())
+		}
+		return rep, err
 	case plugin.OpBrief:
 		return &plugin.Reply{Brief: authorBrief(&req.Critic, plugin.Unwire(req.Pending))}, nil
 	}

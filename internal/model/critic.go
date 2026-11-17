@@ -107,6 +107,13 @@ type Runtime struct {
 	// GoneStreak counts consecutive "not found" rounds per PR key.
 	GoneStreak map[string]int `json:"gone_streak,omitempty"`
 
+	// Probe is each PR's cheap fingerprint as of its last full read (PR
+	// key -> digest), and FullReadAt when every PR was last read in full: a
+	// review critic reads a PR in full only when its fingerprint moved or
+	// the full-read interval passed (GHE GraphQL quota, 2026-11-17).
+	Probe      map[string]string `json:"probe,omitempty"`
+	FullReadAt *time.Time        `json:"full_read_at,omitempty"`
+
 	// Teams is a teams critic's seen-map and gone tracking.
 	Teams  *TeamsState  `json:"teams,omitempty"`
 	Author *AuthorState `json:"author,omitempty"`

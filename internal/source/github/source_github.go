@@ -48,6 +48,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	switch req.Op {
 	case plugin.OpRound:
 		round(ctx, gh, req, me, rep)
+		rep.Logf("%s: %s", req.Critic.Name, gh.Spent())
 	case plugin.OpPost:
 		rep.Posts = map[string]*model.Post{}
 		for id, post := range req.Posts {
@@ -105,6 +106,73 @@ func retireGone(rep *plugin.Reply, w *model.Critic, gone []model.PRRef, errs map
 		w.Name, strings.Join(names, ", "), prGoneAfter))
 }
 
+// FullReadEvery bounds how long a PR whose fingerprint has not moved goes
+// without a full read: a comment edit moves no fingerprint.
+const FullReadEvery = 30 * time.Minute
+
+// probeFrom is the PR count from which a cheap probe (1 point for the whole
+// set) before the full read pays: a full read of one PR also costs 1 point.
+const probeFrom = 3
+
+// read is the round's PR states, w.PRs order: one aliased probe of every PR,
+// then one aliased full read of only the PRs whose fingerprint moved (or that
+// the previous snapshot lacks, or read partially), every PR when the
+// full-read interval has passed. An unmoved PR carries its previous state.
+// sts[i] is nil exactly when errs[i] is set.
+func read(ctx context.Context, gh *forge.GH, w *model.Critic, prev *model.Snapshot, rep *plugin.Reply) ([]*model.PRState, []error) {
+	now := time.Now().UTC()
+	full := prev == nil || w.Runtime.FullReadAt == nil || now.Sub(*w.Runtime.FullReadAt) >= FullReadEvery
+	if len(w.PRs) < probeFrom {
+		sts, errs := gh.FetchPRs(ctx, w.PRs)
+		w.Runtime.Probe = nil
+		if full {
+			w.Runtime.FullReadAt = &now
+		}
+		return sts, errs
+	}
+	fps, perrs := gh.ProbePRs(ctx, w.PRs)
+	sts := make([]*model.PRState, len(w.PRs))
+	errs := make([]error, len(w.PRs))
+	var ask []model.PRRef
+	var at []int
+	for i, ref := range w.PRs {
+		key := string(ref.Key())
+		if perrs[i] != nil {
+			errs[i] = perrs[i]
+			continue
+		}
+		var old *model.PRState
+		if prev != nil {
+			old = prev.PRs[ref.Key()]
+		}
+		if !full && old != nil && old.Complete && w.Runtime.Probe[key] == fps[i] {
+			sts[i] = old
+			continue
+		}
+		ask = append(ask, ref)
+		at = append(at, i)
+	}
+	got, gerrs := gh.FetchPRs(ctx, ask)
+	probe := map[string]string{}
+	for i, ref := range w.PRs {
+		if sts[i] != nil {
+			probe[string(ref.Key())] = fps[i]
+		}
+	}
+	for k, i := range at {
+		sts[i], errs[i] = got[k], gerrs[k]
+		if gerrs[k] == nil {
+			probe[string(w.PRs[i].Key())] = fps[i]
+		}
+	}
+	w.Runtime.Probe = probe
+	if full {
+		w.Runtime.FullReadAt = &now
+	}
+	rep.Logf("%s: %d PR(s) probed, %d read in full", w.Name, len(w.PRs), len(ask))
+	return sts, errs
+}
+
 func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep *plugin.Reply) {
 	w := &req.Critic
 	rep.Critic = w
@@ -152,8 +220,9 @@ func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep
 	}
 	var fetchErrs []string
 	var gone []model.PRRef
-	for _, ref := range w.PRs {
-		st, ferr := gh.FetchPR(ctx, ref.Owner, ref.Repo, ref.Number)
+	sts, errs := read(ctx, gh, w, prev, rep)
+	for i, ref := range w.PRs {
+		st, ferr := sts[i], errs[i]
 		if ferr != nil && prGone.MatchString(ferr.Error()) {
 			if w.Runtime.GoneStreak == nil {
 				w.Runtime.GoneStreak = map[string]int{}
