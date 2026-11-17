@@ -58,6 +58,40 @@ func TestPrunePostsKeepsUnfinishedAndRecent(t *testing.T) {
 			t.Errorf("%s present=%v, want %v", id, ok, want)
 		}
 	}
+	if _, has := model.ObjectOf(posts["open"])["body"]; !has {
+		t.Error("an unfinished post lost its body")
+	}
+	recent := model.ObjectOf(posts["recent"])
+	if _, has := recent["body"]; has {
+		t.Error("a finished post kept its body")
+	}
+	for _, k := range []string{"pr", "sent", "done_at"} {
+		if _, has := recent[k]; !has {
+			t.Errorf("a finished post lost its %s", k)
+		}
+	}
+	var p model.Post
+	if err := json.Unmarshal(posts["recent"], &p); err != nil || !p.Terminal() {
+		t.Errorf("a stripped post is no longer terminal (would be posted again): %v", err)
+	}
+	if prunePosts(posts, now) {
+		t.Error("a second prune changed an already-stripped form")
+	}
+}
+
+func TestPostKeepIsFifteenMinutes(t *testing.T) {
+	now := time.Date(2026, 10, 21, 2, 0, 0, 0, time.UTC)
+	posts := map[string]json.RawMessage{
+		"16m": model.MustJSON(map[string]any{"pr": "a/b#1", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-16 * time.Minute).Format(time.RFC3339)}),
+		"14m": model.MustJSON(map[string]any{"pr": "a/b#1", "sent": map[string]string{"url": "u"}, "done_at": now.Add(-14 * time.Minute).Format(time.RFC3339)}),
+	}
+	prunePosts(posts, now)
+	if _, ok := posts["16m"]; ok {
+		t.Error("a post finished 16 min ago survived")
+	}
+	if _, ok := posts["14m"]; !ok {
+		t.Error("a post finished 14 min ago was dropped")
+	}
 }
 
 // Cheroot's control for the guard: a write leaving the state at 191 KB lands,

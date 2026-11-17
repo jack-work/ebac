@@ -707,10 +707,13 @@ func nextBoard(cur form.Snapshot, set map[string]json.RawMessage, remove []strin
 }
 
 // postKeep is how long a finished post stays on the form after its receipt.
-const postKeep = time.Hour
+const postKeep = 15 * time.Minute
 
 // prunePosts drops finished posts whose receipt is older than postKeep, or
-// that finished before receipts carried done_at. Unfinished posts stay.
+// that finished before receipts carried done_at. A finished post kept for its
+// receipt loses its body: the forge has it, and a reply burst of full bodies
+// filled the form (ledger-front, 81 posts, 53 KB, 2026-11-17). Unfinished
+// posts stay whole.
 func prunePosts(posts map[string]json.RawMessage, now time.Time) bool {
 	pruned := false
 	for id, raw := range posts {
@@ -722,6 +725,12 @@ func prunePosts(posts map[string]json.RawMessage, now time.Time) bool {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, p.DoneAt); err == nil && now.Sub(t) < postKeep {
+			obj := model.ObjectOf(raw)
+			if _, has := obj["body"]; has {
+				delete(obj, "body")
+				posts[id] = model.MustJSON(obj)
+				pruned = true
+			}
 			continue
 		}
 		delete(posts, id)
