@@ -362,6 +362,11 @@ func closeAsk(out *Out, st *model.OrgApproveState, id, status, resolved string) 
 // tapGrant is "" when the grants file holds the row of exactly this request,
 // for w's principal and credential, approved by w.Approver, live at now.
 func tapGrant(gs []approve.Grant, rid string, w model.OrgApproveWatch, now int64) string {
+	// A misconfigured critic (no approver, or a flake owner) must never take
+	// a standing row, or a row nobody decided, as a tap.
+	if w.Approver == "" || strings.HasPrefix(w.Approver, "flake:") {
+		return fmt.Sprintf("approver %q is not a person: no tap is taken", w.Approver)
+	}
 	for _, g := range gs {
 		if g.ID != rid {
 			continue

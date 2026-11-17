@@ -411,6 +411,7 @@ func TestCheckWatch(t *testing.T) {
 		"bad login":      func(w *model.OrgApproveWatch) { w.Logins = []string{"a b"} },
 		"glob grant":     func(w *model.OrgApproveWatch) { w.Grant = "ebac-approve.*" },
 		"flake approver": func(w *model.OrgApproveWatch) { w.Approver = "flake:cheroot" },
+		"empty approver": func(w *model.OrgApproveWatch) { w.Approver = "" },
 		"ping not role":  func(w *model.OrgApproveWatch) { w.PingTo = "cheroot" },
 	} {
 		w := ok
@@ -418,5 +419,37 @@ func TestCheckWatch(t *testing.T) {
 		if CheckWatch(&w) == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// A misconfigured approver (empty, or a flake owner) never takes a row as a
+// tap, even one whose approved_by matches it; nor does a standing row.
+func TestTapGrantRefusesNonPersonApprovers(t *testing.T) {
+	live := t0.Add(time.Hour).Unix()
+	w := model.OrgApproveWatch{Grant: "ebac-approve.org", Principal: "org-approve"}
+	row := func(by string) []approve.Grant {
+		return []approve.Grant{{ID: "000000000001", Principal: "org-approve", Credential: "ebac-approve.org", ExpiresAt: live, ApprovedBy: by}}
+	}
+	for _, c := range []struct{ approver, by string }{{"", ""}, {"flake:cheroot", "flake:cheroot"}, {"", "jack"}, {"flake:x", "jack"}} {
+		w.Approver = c.approver
+		if why := tapGrant(row(c.by), "000000000001", w, t0.Unix()); why == "" {
+			t.Errorf("approver %q took a row approved by %q", c.approver, c.by)
+		}
+	}
+	w.Approver = "jack"
+	if why := tapGrant(row("jack"), "000000000001", w, t0.Unix()); why != "" {
+		t.Fatalf("jack's row refused: %s", why)
+	}
+	if why := tapGrant(row("flake:jack"), "000000000001", w, t0.Unix()); why == "" {
+		t.Error("a flake row taken")
+	}
+	// The whole round: a critic whose approver was emptied posts nothing.
+	r := newRig()
+	r.round(t, false)
+	r.approveTap("")
+	r.w.Approver = ""
+	r.round(t, false)
+	if len(r.wr.approved) != 0 {
+		t.Fatal("posted with an empty approver")
 	}
 }
