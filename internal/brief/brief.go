@@ -38,9 +38,9 @@ func BuildBrief(w *model.Critic, snap *model.Snapshot, events []model.Event, me 
 				k, p.State, model.Short(p.HeadSHA), c.Unresolved, c.AwaitingUs, flag)
 		}
 	}
-	fmt.Fprintf(&b, "New and edited comments are in your studied form %s, key inbox (each cut at 2 KB; the url has the rest). "+
+	fmt.Fprintf(&b, "New and edited comments are in your studied form %s, key inbox (each cut at %d B; the url has the rest). "+
 		"Also `figaro form %s -j`, or GitHub. Not studying %s is a bug: `figaro study %s`.\n",
-		w.FormID, w.FormID, w.FormID, w.FormID)
+		w.FormID, model.InboxItemBytes, w.FormID, w.FormID, w.FormID)
 	fmt.Fprintf(&b, "Post through the form (harness.post); protocol in harness_protocol_*. "+
 		"When finished: ebac ack --critic %s --round %d [--note '<one line>']\n", w.Name, w.Runtime.Round)
 	return b.String()
@@ -346,7 +346,7 @@ func teamsCharge(w *model.Critic) string {
 	}
 	return "YOUR JOB — TEAMS WATCH\n" +
 		"  You are told of every new or edited message in the Teams chat " + fmt.Sprintf("%q", topic) + ". Each delivery names\n" +
-		"  the round; the messages are in key inbox (sender, time, kind, text cut at 1.5 KB, has_image, and the exact\n" +
+		"  the round; the messages are in key inbox (sender, time, kind, text cut at " + fmt.Sprintf("%d B", model.InboxItemBytes) + ", has_image, and the exact\n" +
 		"  tomb command for the full text and images). Your form key trigger decides who wakes you (first match wins; edit it with figaro set); recorded messages are in the inbox but do not wake you.\n" +
 		"  ebac only reads this chat; it never posts to it. If key gone appears, the chat is unreadable: polling has\n" +
 		"  stopped and the form says what to do.\n"
@@ -370,7 +370,7 @@ func keelCharge(w *model.Critic) string {
 	}
 	return "YOUR JOB — KEEL THREADS WATCH\n" +
 		fmt.Sprintf("  You are woken when %s writes or edits a comment in an open keel thread of %s.\n", strings.Join(k.WaitingOn, " or "), scope) +
-		"  Key inbox holds each new comment (author, thread, path, line, quote, text cut at 2 KB); key threads indexes\n" +
+		"  Key inbox holds each new comment (author, thread, path, line, quote, text cut at " + fmt.Sprintf("%d B", model.InboxItemBytes) + "); key threads indexes\n" +
 		"  every thread (path, line, resolved, comment count, last author). Other authors, resolves and reopens are\n" +
 		"  recorded but do not wake you; your own comments are never announced. ebac only reads keel; it never posts.\n" +
 		"  If key gone appears, keel is unreadable: polling has stopped and the form says what to do.\n"

@@ -145,9 +145,11 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 			seen = append(seen, e.Key)
 		}
 	}
+	// The thread detail is on disk (prs_local.go): the form sees the new
+	// comment as its PR head's comment count.
 	for _, k := range seen {
-		if !strings.HasPrefix(k, "prs.acme/widget#1.threads.PRRT_1.c.C2.") {
-			t.Errorf("seat-visible change outside the new comment: %s", k)
+		if k != "prs.acme/widget#1.n.comments" {
+			t.Errorf("seat-visible change outside the new comment's count: %s", k)
 		}
 	}
 	if len(seen) == 0 {

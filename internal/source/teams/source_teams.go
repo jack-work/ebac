@@ -53,10 +53,9 @@ func env(k, def string) string {
 }
 
 const (
-	teamsLimit     = 50
-	teamsSeenMax   = 300
-	teamsNamesMax  = 200
-	teamsBodyBytes = 1500
+	teamsLimit    = 50
+	teamsSeenMax  = 300
+	teamsNamesMax = 200
 	// teamsSelfBytes caps the first line kept of a message by chat.self.
 	teamsSelfBytes = 120
 	teamsGoneAfter = 3 // consecutive "gone" answers before the chat is declared gone
@@ -131,7 +130,7 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 		}
 		who := m.Sender(st.Names)
 		text := teamsText(m.Content)
-		body, cut := model.CutBody(text, teamsBodyBytes)
+		body, cut := model.CutBody(text, model.InboxItemBytes)
 		if self {
 			if line := model.FirstLine(text); len(line) < len(body) || cut {
 				body, cut = line, true
@@ -270,7 +269,7 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 		"an edit updates body and edited_at in place, or arrives as a new teams_edited item if the original has left the inbox). "+
 		"Not studying %s is a bug: `figaro study %s`. When finished: ebac ack --critic %s --round %d\n",
 		w.Name, w.Runtime.Round, strings.Join(parts, ", "), w.Chat.Topic, strings.Join(from, ", "),
-		w.FormID, teamsBodyBytes, w.FormID, w.FormID, w.Name, w.Runtime.Round)
+		w.FormID, model.InboxItemBytes, w.FormID, w.FormID, w.Name, w.Runtime.Round)
 }
 
 // teamsBlind tells the seat, once, that the chat has been unreadable for

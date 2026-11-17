@@ -29,7 +29,6 @@ const (
 	DefaultAPI   = "https://api.github.com"
 	perPage      = 30
 	seenMax      = 60
-	notesBytes   = 1500
 	viewReleases = 10
 )
 
@@ -190,7 +189,7 @@ func (pl Plugin) round(ctx context.Context, w *model.Critic) *plugin.Reply {
 	news := Diff(st, rels)
 	rep.Inbox = map[string]form.InboxItem{}
 	for _, n := range news {
-		notes, cut := model.CutBody(strings.TrimSpace(n.Release.Body), notesBytes)
+		notes, cut := model.CutBody(strings.TrimSpace(n.Release.Body), model.InboxItemBytes)
 		key := "release-" + n.Release.Tag
 		rep.Inbox[key] = form.InboxItem{Kind: string(EvRelease), By: n.Release.Author.Login, Time: n.Release.Published, Body: notes, Cut: cut,
 			Fetch: fmt.Sprintf("curl -s %s/repos/%s/releases/tags/%s | jq -r .body", DefaultAPI, w.Releases.Repo, n.Release.Tag)}

@@ -122,6 +122,19 @@ func diffPR(d *model.Delta, pp, np *model.PRState, me string) {
 		})
 	}
 
+	// The previous round's detail was lost (form heads only, no detail
+	// file): every thread, review and comment would read as new. Re-baseline
+	// them as one record event, like an adoption.
+	if pp.NoDetail {
+		if c := np.Counts(me); c.Unresolved > 0 {
+			d.Events = append(d.Events, model.Event{
+				Kind: model.EvThreadNew, Tier: model.TierRecord, PR: key,
+				Detail: fmt.Sprintf("%d unresolved thread(s) re-baselined: the previous round's detail was lost", c.Unresolved),
+			})
+		}
+		return
+	}
+
 	// Threads.
 	for _, id := range np.SortedThreadIDs() {
 		nt := np.Threads[id]

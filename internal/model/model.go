@@ -70,6 +70,11 @@ type PRState struct {
 	// Complete is per-PR: one PR's pagination failure must not poison
 	// the other PRs in the same critic.
 	Complete bool `json:"complete"`
+
+	// NoDetail marks a previous-round PR read from the form's heads alone:
+	// its threads, reviews and comments were lost with the detail file, so
+	// the differ re-baselines them instead of reporting each as new.
+	NoDetail bool `json:"no_detail,omitempty"`
 }
 
 type PendingReview struct {

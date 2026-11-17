@@ -26,7 +26,8 @@ import (
 // and the seat studying the form reads each round's change as its diff.
 //
 //	kind, critic                 config (seat-visible)
-//	prs.<pr>                     observed PR state; lists keyed by GitHub id
+//	prs.<pr>                     the PR's heads and counts (prs_local.go); the
+//	                             digest tree the next round diffs against is on disk
 //	harness, harness_protocol_N  the standing protocol
 //	post.<id>                    the outbox (outbox.go)
 //	system.ebac                  runtime, incl. the outbox watermark (never shown to seats)
@@ -77,6 +78,7 @@ type formPR struct {
 	ReviewDecision string                 `json:"review_decision,omitempty"`
 	Complete       bool                   `json:"complete"`
 	Pending        []model.PendingReview  `json:"pending_reviews,omitempty"`
+	NoDetail       bool                   `json:"no_detail,omitempty"`
 	Threads        map[string]*formThread `json:"threads"`
 	Reviews        map[string]*formItem   `json:"reviews"`
 	Comments       map[string]*formItem   `json:"comments"`
@@ -93,7 +95,7 @@ func prsTree(s *model.Snapshot) map[string]*formPR {
 	for k, p := range s.PRs {
 		f := &formPR{Key: p.Key, Owner: p.Owner, Repo: p.Repo, Number: p.Number, URL: p.URL, Title: p.Title,
 			Author: p.Author, State: p.State, IsDraft: p.IsDraft, HeadSHA: p.HeadSHA, ReviewDecision: p.ReviewDecision,
-			Complete: p.Complete, Pending: p.Pending,
+			Complete: p.Complete, Pending: p.Pending, NoDetail: p.NoDetail,
 			Threads: map[string]*formThread{}, Reviews: map[string]*formItem{}, Comments: map[string]*formItem{}}
 		for id, th := range p.Threads {
 			t := &formThread{R: th.IsResolved, O: th.IsOutdated, C: map[string]*formItem{}}
@@ -187,6 +189,7 @@ func prsFromTree(raw json.RawMessage) (map[model.PRKey]*model.PRState, error) {
 		Threads  map[string]*readThread `json:"threads"`
 		Reviews  map[string]*readItem   `json:"reviews"`
 		Comments map[string]*readItem   `json:"comments"`
+		N        json.RawMessage        `json:"n"` // a head (prHead): no detail
 	}
 	if err := json.Unmarshal(raw, &tree); err != nil {
 		return nil, fmt.Errorf("prs: %w", err)
@@ -199,7 +202,7 @@ func prsFromTree(raw json.RawMessage) (map[model.PRKey]*model.PRState, error) {
 		}
 		p := &model.PRState{Key: f.Key, Owner: f.Owner, Repo: f.Repo, Number: f.Number, URL: f.URL, Title: f.Title,
 			Author: f.Author, State: f.State, IsDraft: f.IsDraft, HeadSHA: f.HeadSHA, ReviewDecision: f.ReviewDecision,
-			Complete: f.Complete, Pending: f.formPR.Pending,
+			Complete: f.Complete, Pending: f.formPR.Pending, NoDetail: f.formPR.NoDetail || len(f.N) > 0,
 			Threads: map[string]*model.Thread{}, Reviews: map[string]*model.Review{}, Comments: map[string]*model.Comment{}}
 		for id, t := range f.Threads {
 			if t == nil {
@@ -265,6 +268,9 @@ type CriticForm struct {
 	// local is the scout state kept on disk (runtime_local.go), overlaid on
 	// Runtime.Scout by ebac(); nil when there is none.
 	local json.RawMessage
+	// prsLocal is the PR detail kept on disk (prs_local.go); nil when there
+	// is none.
+	prsLocal *prsFile
 }
 
 func (s *Store) ReadForm(ctx context.Context, id string) (*CriticForm, error) {
@@ -284,7 +290,7 @@ func (s *Store) ReadForm(ctx context.Context, id string) (*CriticForm, error) {
 	if err := json.Unmarshal(b, &keys); err != nil {
 		return nil, err
 	}
-	return &CriticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys, local: s.readLocal(id)}, nil
+	return &CriticForm{ID: id, Version: resp.Version, Snap: resp.Snapshot, Keys: keys, local: s.readLocal(id), prsLocal: s.readPRsLocal(id)}, nil
 }
 
 func (f *CriticForm) ebac() EbacState {
@@ -332,7 +338,7 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 
 func (f *CriticForm) Snapshot() (*model.Snapshot, error) {
 	e := f.ebac()
-	prs, err := prsFromTree(f.Keys["prs"])
+	prs, err := prsOf(f.Keys["prs"], f.prsLocal)
 	if err != nil {
 		return nil, fmt.Errorf("form %s: %w", f.ID, err)
 	}
@@ -559,6 +565,15 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	base := s.loaded[w.FormID]
 	var written json.RawMessage
 	var conflicts []string
+	// The detail goes to disk after the form (prs_local.go); a round with no
+	// snapshot reads it back for the protocol view.
+	var heads json.RawMessage
+	var detail, local *prsFile
+	if snap != nil {
+		heads, detail = roundPRs(snap)
+	} else {
+		local = s.readPRsLocal(w.FormID)
+	}
 	err = s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
 		merged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])
 		if merr != nil {
@@ -569,9 +584,9 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		sys.Runtime.LastError = model.ClipError(w.Runtime.LastError)
 		view := snap
 		if snap != nil {
-			set["prs"] = model.MustJSON(prsTree(snap))
+			set["prs"] = heads
 			sys.Round, sys.TakenAt, sys.Complete, sys.Note = snap.Round, snap.TakenAt, snap.Complete, snap.Note
-		} else if prs, err := prsFromTree(cur["prs"]); err == nil {
+		} else if prs, err := prsOf(cur["prs"], local); err == nil {
 			view = &model.Snapshot{PRs: prs}
 		}
 		for k := range set {
@@ -628,6 +643,9 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	// behind (or absent), and the worst case is one full re-read.
 	if err := s.writeLocal(w.FormID, w.Runtime.Scout); err != nil {
 		s.warnf("ebac: critic %s: scout state not saved to %s (next round re-reads more): %v\n", w.Name, s.localPath(w.FormID), err)
+	}
+	if err := s.writePRsLocal(w.FormID, detail); err != nil {
+		s.warnf("ebac: critic %s: PR detail not saved to %s (next round diffs against an older one and may repeat events): %v\n", w.Name, s.prsPath(w.FormID), err)
 	}
 	s.remember(w.FormID, written)
 	adoptWritten(w, written)

@@ -52,7 +52,6 @@ const (
 	EvKeelResolved model.EventKind = "keel_resolved"
 	EvKeelReopened model.EventKind = "keel_reopened"
 
-	keelBodyBytes  = 2000
 	keelQuoteBytes = 300
 	keelGoneAfter  = 3 // consecutive "gone" answers before the repo is declared gone
 )
@@ -222,7 +221,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 				if (!t.Resolved || !had) && shouldWake(who, ref) {
 					tier = model.TierWake
 				}
-				body, cut := model.CutBody(c.Body, keelBodyBytes)
+				body, cut := model.CutBody(c.Body, model.InboxItemBytes)
 				quote, _ := model.CutBody(t.Quote, keelQuoteBytes)
 				events = append(events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: t.ID, Comment: c.ID, Author: c.Author,
 					Path: p, Detail: model.FirstLine(body), Text: c.Body})
@@ -382,7 +381,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 				tier = model.TierWake
 			}
 			line := indexEntry(x.path, x.t).Line
-			body, cut := model.CutBody(x.c.Body, keelBodyBytes)
+			body, cut := model.CutBody(x.c.Body, model.InboxItemBytes)
 			quote, _ := model.CutBody(x.t.Quote, keelQuoteBytes)
 			r.events = append(r.events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: x.t.ID, Comment: x.c.ID, Author: e.Signed,
 				Path: x.path, Detail: model.FirstLine(body), Text: x.c.Body})
@@ -487,11 +486,11 @@ func keelBrief(w *model.Critic, events []model.Event) string {
 	}
 	if sc := briefScope(w); sc.partial() {
 		fmt.Fprintf(&b, "Comments are in form %s, key inbox (cut at %d B). %s "+
-			"When finished: ebac ack --critic %s --round %d\n", w.FormID, keelBodyBytes, sc.describe(w.Keel.Repo), w.Name, w.Runtime.Round)
+			"When finished: ebac ack --critic %s --round %d\n", w.FormID, model.InboxItemBytes, sc.describe(w.Keel.Repo), w.Name, w.Runtime.Round)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "Comments are in form %s, key inbox (cut at %d B); key threads indexes every thread. "+
-		"When finished: ebac ack --critic %s --round %d\n", w.FormID, keelBodyBytes, w.Name, w.Runtime.Round)
+		"When finished: ebac ack --critic %s --round %d\n", w.FormID, model.InboxItemBytes, w.Name, w.Runtime.Round)
 	return b.String()
 }
 

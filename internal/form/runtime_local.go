@@ -42,15 +42,21 @@ func (s *Store) localPath(formID string) string {
 // none or it is unreadable (said on Warn: the round then starts from the
 // form's copy, or from nothing).
 func (s *Store) readLocal(formID string) json.RawMessage {
-	b, err := os.ReadFile(s.localPath(formID))
+	return s.readFile(s.localPath(formID), "scout state", "starting from the form's copy")
+}
+
+// readFile reads one of ebac's on-disk JSON files, or nil when it is absent
+// or unreadable (said on Warn, as what and then).
+func (s *Store) readFile(path, what, then string) json.RawMessage {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			s.warnf("ebac: scout state %s unreadable, starting from the form's copy: %v\n", s.localPath(formID), err)
+			s.warnf("ebac: %s %s unreadable, %s: %v\n", what, path, then, err)
 		}
 		return nil
 	}
 	if !json.Valid(b) || len(strings.TrimSpace(string(b))) == 0 {
-		s.warnf("ebac: scout state %s is not JSON, starting from the form's copy\n", s.localPath(formID))
+		s.warnf("ebac: %s %s is not JSON, %s\n", what, path, then)
 		return nil
 	}
 	return json.RawMessage(b)
@@ -60,10 +66,15 @@ func (s *Store) readLocal(formID string) json.RawMessage {
 // unique temp name, so two writers never share a temp file. Empty state is
 // never written.
 func (s *Store) writeLocal(formID string, raw json.RawMessage) error {
+	return writeAtomic(s.localPath(formID), raw)
+}
+
+// writeAtomic replaces path with raw through a uniquely named temp file and a
+// rename. Empty raw writes nothing.
+func writeAtomic(path string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return nil
 	}
-	path := s.localPath(formID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

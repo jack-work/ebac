@@ -37,6 +37,10 @@ func FirstNonEmpty(a, b string) string {
 	return b
 }
 
+// InboxItemBytes cuts every inbox item's text: the item names the rest (its
+// url, its fetch command, or the critic's inbox_fetch with the item id).
+const InboxItemBytes = 500
+
 // cutBody keeps at most n bytes of s, on a rune boundary.
 func CutBody(s string, n int) (string, bool) {
 	if len(s) <= n {

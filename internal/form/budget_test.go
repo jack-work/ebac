@@ -21,7 +21,7 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 		t.Fatalf("inbox %v; want only amy's comment", got)
 	}
 	it := got["IC1"]
-	if !it.Cut || len(it.Body) > inboxItemBytes+len("…") || !strings.HasSuffix(it.Body, "…") || !json.Valid(model.MustJSON(it.Body)) {
+	if !it.Cut || len(it.Body) > model.InboxItemBytes+len("…") || !strings.HasSuffix(it.Body, "…") || !json.Valid(model.MustJSON(it.Body)) {
 		t.Fatalf("cut: %v, %d bytes", it.Cut, len(it.Body))
 	}
 

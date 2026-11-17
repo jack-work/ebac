@@ -275,7 +275,7 @@ threads fetch). A bad value keeps the last good scope and says why in `scope_err
 | Path | What |
 |---|---|
 | `critics/<name>.json` | definition, stop conditions, runtime, delivery debt |
-| `snapshots/<name>.json` | full canonical PR state — the diff input |
+| `runtime/<form>.prs.json` | a review critic's PR detail (threads, reviews, comments as digests): the diff input; the form keeps per-PR heads and counts |
 | `archive/<name>-<stamp>/` | retired critic plus its final snapshot |
 | `roster.json` | id of the fleet-view form |
 

@@ -9,13 +9,16 @@ import (
 )
 
 // The inbox is how comment text reaches a seat now that the form keeps no
-// bodies: new and edited comments by others, each cut at inboxItemBytes,
-// with the oldest evicted once the inbox passes inboxBytes. It is evicted by
-// size, not replaced each round, so a seat that sleeps through a round still
-// finds the item when it wakes.
+// bodies: new and edited comments by others, each cut at
+// model.InboxItemBytes (the item names the rest: url, fetch, or the critic's
+// inbox_fetch), the newest inboxItems kept and the oldest evicted past
+// inboxBytes. It is evicted, not replaced each round, so a seat that sleeps
+// through a round still finds the item when it wakes. The whole key reaches
+// every new or catching-up studier, so it is kept small (2026-11-17: 24 KB
+// on 14 forms, cut to 8 KB).
 const (
-	inboxItemBytes = 2000
-	inboxBytes     = 24 * 1024
+	inboxItems = 20
+	inboxBytes = 8 * 1024
 )
 
 type InboxItem struct {
@@ -57,7 +60,7 @@ func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.
 			return
 		}
 		it.At = at
-		it.Body, it.Cut = model.CutBody(body, inboxItemBytes)
+		it.Body, it.Cut = model.CutBody(body, model.InboxItemBytes)
 		out[id] = it
 	}
 	for _, e := range events {
@@ -93,8 +96,10 @@ func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.
 	return out
 }
 
-// mergeInbox adds fresh items to the current inbox and evicts the oldest
-// until it fits inboxBytes.
+// mergeInbox adds fresh items to the current inbox, cuts every item's text
+// to model.InboxItemBytes (held items too: a form written under a larger cut
+// is cut on its first round), and evicts the oldest until at most inboxItems
+// remain within inboxBytes. An evicted item leaves nothing behind.
 //
 // A Teams item is written once and then immutable (the form-churn order,
 // 2026-11-13): a later teams_edited only replaces body and cut and stamps
@@ -125,7 +130,13 @@ func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]Inbo
 			box[id] = old
 		}
 	}
-	for len(model.MustJSON(box)) > inboxBytes {
+	for id, it := range box {
+		if body, cut := model.CutBody(it.Body, model.InboxItemBytes); cut {
+			it.Body, it.Cut = body, true
+			box[id] = it
+		}
+	}
+	for len(box) > inboxItems || len(model.MustJSON(box)) > inboxBytes {
 		oldest := ""
 		for id, it := range box {
 			if oldest == "" || it.At < box[oldest].At || (it.At == box[oldest].At && id < oldest) {

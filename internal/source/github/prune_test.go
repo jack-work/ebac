@@ -113,13 +113,18 @@ func TestLiveLongMergedPRLeavesTheForm(t *testing.T) {
 	if err := st.Save(ctx, w, pre, nil); err != nil {
 		t.Fatal(err)
 	}
+	// The form's heads and the detail on disk (threads live there).
 	prsKey := func() string {
 		t.Helper()
 		cf, err := st.ReadForm(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(cf.Keys["prs"])
+		snap, err := cf.Snapshot()
+		if err != nil || snap == nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		return string(cf.Keys["prs"]) + string(model.MustJSON(snap.PRs))
 	}
 	before := prsKey()
 	for _, want := range []string{"acme/widget#2", "T2", "acme/widget#3"} {
