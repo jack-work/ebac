@@ -47,10 +47,34 @@ func (w *world) change(f func(is *item)) Result {
 	return w.pass(2 * time.Minute)
 }
 
-func pingsTo(r Result) map[string]string {
+// quietNew is the owner notes this pass recorded on the form (quiet_pings), newest pass only; issue notes never ping.
+func quietNew(t *testing.T, r Result) []Quiet {
+	t.Helper()
+	if len(r.Pings) != 0 {
+		t.Fatalf("an owner note pinged: %v", r.Pings)
+	}
+	raw, ok := r.Set["quiet_pings"]
+	if !ok {
+		return nil
+	}
+	var all []Quiet
+	if err := json.Unmarshal(raw, &all); err != nil || len(all) == 0 {
+		t.Fatalf("quiet_pings %s: %v", raw, err)
+	}
+	var out []Quiet
+	for _, q := range all {
+		if q.At == all[len(all)-1].At {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func quietTo(t *testing.T, r Result) map[string]string {
+	t.Helper()
 	out := map[string]string{}
-	for _, p := range r.Pings {
-		out[p.To] = p.Text
+	for _, q := range quietNew(t, r) {
+		out[q.To] = q.Text
 	}
 	return out
 }
@@ -64,9 +88,9 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 	r := w.change(func(is *item) {
 		is.comments = append(is.comments, map[string]any{"author": who("alice"), "createdAt": w.now.Format(time.RFC3339)})
 	})
-	got := pingsTo(r)
-	if len(r.Pings) != 3 || !strings.Contains(got[knight], "#101") || !strings.Contains(got[lead], "#104") || !strings.Contains(got[secretary], "#201") {
-		t.Fatalf("human comment: pings %v", r.Pings)
+	got := quietTo(t, r)
+	if len(got) != 3 || !strings.Contains(got[knight], "#101") || !strings.Contains(got[lead], "#104") || !strings.Contains(got[secretary], "#201") {
+		t.Fatalf("human comment: quiet %v", got)
 	}
 	for to, text := range got {
 		if !strings.Contains(text, "issue #301") || !strings.Contains(text, "comment by alice") || strings.Contains(text, "#105") ||
@@ -83,14 +107,14 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.body = strings.Replace(is.body, "Plan: owner Knight.\n- [ ] synced step", "Plan: owner Knight, needs #4100.\n- [x] synced step", 1)
 		is.editor = who(ours)
 	})
-	if len(r.Pings) != 0 {
+	if q := quietNew(t, r); len(q) != 0 {
 		t.Fatalf("sync block edit: pings %v", r.Pings)
 	}
 	// The same login edits outside the block: news.
 	r = w.change(func(is *item) {
 		is.body = strings.Replace(is.body, "human tail", "human tail, amended", 1)
 	})
-	if text := pingsTo(r)[knight]; !strings.Contains(text, "changed: body by "+ours) {
+	if text := quietTo(t, r)[knight]; !strings.Contains(text, "changed: body by "+ours) {
 		t.Fatalf("edit outside the block: %v", r.Pings)
 	}
 	r = w.change(func(is *item) {
@@ -98,7 +122,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.events = append(is.events, map[string]any{"__typename": "LabeledEvent", "createdAt": w.now.Format(time.RFC3339), "actor": bot("automaton[bot]")})
 		is.comments = append(is.comments, map[string]any{"author": bot("ci"), "createdAt": w.now.Format(time.RFC3339)})
 	})
-	if len(r.Pings) != 0 || r.Set["issue:301"] == nil {
+	if q := quietNew(t, r); len(q) != 0 || r.Set["issue:301"] == nil {
 		t.Fatalf("bot label: pings %v, entry written %v", r.Pings, r.Set["issue:301"] != nil)
 	}
 
@@ -107,7 +131,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.body = strings.Replace(is.body, "- [ ] one", "- [x] one", 1)
 		is.editor = who("bob")
 	})
-	if text := pingsTo(r)[knight]; !strings.Contains(text, "changed: checklist by bob") {
+	if text := quietTo(t, r)[knight]; !strings.Contains(text, "changed: checklist by bob") {
 		t.Fatalf("checklist tick: %q", text)
 	}
 	// A human relabels (case and order only: no change), then closes it.
@@ -115,14 +139,14 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.labels = []string{"TRIAGED", "Effort-Router"}
 		is.events = append(is.events, map[string]any{"__typename": "LabeledEvent", "createdAt": w.now.Format(time.RFC3339), "actor": who("carol")})
 	})
-	if len(r.Pings) != 0 {
+	if q := quietNew(t, r); len(q) != 0 {
 		t.Fatalf("a label re-case pinged: %v", r.Pings)
 	}
 	r = w.change(func(is *item) {
 		is.state, is.closedAt = "CLOSED", w.now.Format(time.RFC3339)
 		is.events = append(is.events, map[string]any{"__typename": "ClosedEvent", "createdAt": w.now.Format(time.RFC3339), "actor": who("carol")})
 	})
-	if text := pingsTo(r)[secretary]; !strings.Contains(text, "changed: state closed by carol") {
+	if text := quietTo(t, r)[secretary]; !strings.Contains(text, "changed: state closed by carol") {
 		t.Fatalf("close: %v", r.Pings)
 	}
 }
@@ -144,47 +168,38 @@ func TestIssueBaselineAndUnlinked(t *testing.T) {
 	}
 }
 
-// At most MaxIssuePings a pass; the rest wait in the queue, oldest first, and go out on the next pass, which still
-// costs one GitHub call.
-func TestIssuePingsCappedAndQueued(t *testing.T) {
+// Issue changes never ping: each is recorded on the form (quiet_pings), the newest MaxQuiet kept, and nothing is
+// re-sent or re-recorded on a later pass (Knight wake noise, 2026-11-17).
+func TestIssueChangesRecordedNotPinged(t *testing.T) {
 	w := newWorld(t)
 	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}}
 	var body []string
-	for i := 0; i < 10; i++ {
+	for i := 0; i < MaxQuiet+3; i++ {
 		n := 4000 + i
 		w.gh.items[n] = &item{n: n, issue: true, author: ours, title: fmt.Sprint("issue ", n), labels: []string{"effort-router"}, state: "OPEN", updated: w.now}
 		body = append(body, fmt.Sprintf("#%d", n))
 	}
 	w.gh.items[101].body = strings.Join(body, " ")
 	w.pass(0)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < MaxQuiet+3; i++ {
 		is := w.gh.items[4000+i]
 		is.comments = []map[string]any{{"author": who("alice"), "createdAt": w.now.Format(time.RFC3339)}}
 		is.updated = w.now.Add(time.Minute)
 	}
 	r := w.pass(2 * time.Minute)
-	if len(r.Pings) != MaxIssuePings || len(w.st.Queue) != 10-MaxIssuePings || !strings.Contains(r.Pings[0].Text, "#4000") {
-		t.Fatalf("pass 1: %d pings, %d queued", len(r.Pings), len(w.st.Queue))
+	if len(r.Pings) != 0 {
+		t.Fatalf("issue changes pinged: %v", r.Pings)
+	}
+	var quiet []Quiet
+	if err := json.Unmarshal(r.Set["quiet_pings"], &quiet); err != nil || len(quiet) != MaxQuiet {
+		t.Fatalf("quiet_pings: %d (%v) %s", len(quiet), err, r.Set["quiet_pings"])
+	}
+	if !strings.Contains(quiet[MaxQuiet-1].Text, "#4014") || quiet[0].To != knight {
+		t.Fatalf("quiet_pings kept the wrong end: first %+v last %+v", quiet[0], quiet[MaxQuiet-1])
 	}
 	r = w.pass(2 * time.Minute)
-	if len(r.Pings) != 10-MaxIssuePings || len(w.st.Queue) != 0 || r.GHCalls != 1 || !strings.Contains(r.Pings[3].Text, "#4009") {
-		t.Fatalf("pass 2: %d pings, %d queued, %d calls", len(r.Pings), len(w.st.Queue), r.GHCalls)
-	}
-	if r := w.pass(2 * time.Minute); len(r.Pings) != 0 {
-		t.Fatalf("pass 3 re-sent: %v", r.Pings)
-	}
-}
-
-func TestQueueBounded(t *testing.T) {
-	st := State{}
-	var fresh []plugin.Ping
-	for i := 0; i < MaxQueue+20; i++ {
-		fresh = append(fresh, plugin.Ping{To: knight, Text: fmt.Sprint(i)})
-	}
-	var log []string
-	sent := queuePings(&st, fresh, func(f string, a ...any) { log = append(log, fmt.Sprintf(f, a...)) })
-	if len(sent) != MaxIssuePings || len(st.Queue) != MaxQueue-MaxIssuePings || sent[0].Text != "20" || len(log) != 1 {
-		t.Fatalf("sent %d (first %q), queued %d, log %v", len(sent), sent[0].Text, len(st.Queue), log)
+	if _, set := r.Set["quiet_pings"]; set || len(r.Pings) != 0 {
+		t.Fatalf("pass 3 re-recorded or pinged: %v %s", r.Pings, r.Set["quiet_pings"])
 	}
 }
 
@@ -247,13 +262,13 @@ func TestHumanCommentPastTheWindow(t *testing.T) {
 	r := w.change(func(is *item) {
 		is.comments = append(is.comments, map[string]any{"author": who("dave"), "createdAt": w.now.Add(time.Hour).Format(time.RFC3339)})
 	})
-	if !strings.Contains(pingsTo(r)[knight], "comment by dave") {
-		t.Fatalf("a comment past the window: %v", r.Pings)
+	if !strings.Contains(quietTo(t, r)[knight], "comment by dave") {
+		t.Fatalf("a comment past the window: %s", r.Set["quiet_pings"])
 	}
 }
 
-// The plugin hands the pass's pings to the core.
-func TestHandleCarriesPings(t *testing.T) {
+// The plugin hands the core no ping for an issue change and the form its note (quiet_pings).
+func TestHandleRecordsIssueNotes(t *testing.T) {
 	w := s5World(t)
 	now := w.now
 	pl := Plugin{GH: w.gh, Hub: w.hub, Now: func() time.Time { return now }}
@@ -263,7 +278,7 @@ func TestHandleCarriesPings(t *testing.T) {
 	w.gh.items[301].updated = now.Add(time.Minute)
 	now = now.Add(2 * time.Minute)
 	rep, err := pl.Handle(context.Background(), plugin.Request{Op: plugin.OpRound, Critic: c, Inputs: w.in})
-	if err != nil || len(rep.Pings) != 3 || !strings.Contains(strings.Join(rep.Log, " "), "3 ping(s), 0 queued") {
+	if err != nil || len(rep.Pings) != 0 || rep.Set["quiet_pings"] == nil || !strings.Contains(strings.Join(rep.Log, " "), "0 ping(s), 3 quiet") {
 		t.Fatalf("err %v pings %v log %v", err, rep.Pings, rep.Log)
 	}
 }

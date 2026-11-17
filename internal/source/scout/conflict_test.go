@@ -64,8 +64,10 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "m201:") || strings.Contains(w.gh.light[0], "m101:") {
 		t.Fatalf("recheck reads %q", w.gh.light)
 	}
-	if len(r.Pings) != 1 || r.Pings[0].To != secretary || !strings.Contains(r.Pings[0].Text, "with stack/x") || len(w.st.Recheck) != 0 {
-		t.Fatalf("settled conflict on the stack base: pings %v, recheck %v", r.Pings, w.st.Recheck)
+	// Not on main: recorded on the form (quiet_pings), never pinged (Knight wake noise, 2026-11-17).
+	if len(r.Pings) != 0 || len(w.st.Recheck) != 0 || !strings.Contains(string(r.Set["quiet_pings"]), "with stack/x") ||
+		!strings.Contains(string(r.Set["quiet_pings"]), secretary) {
+		t.Fatalf("settled conflict on the stack base: pings %v, quiet %s, recheck %v", r.Pings, r.Set["quiet_pings"], w.st.Recheck)
 	}
 
 	// Quiet again: one call, no mergeability read.

@@ -6,7 +6,8 @@
 // kept Keep after it closed and then removed (S2); a material change on an
 // issue (body, checklist, labels, state, a human comment; never an edit
 // confined to the sync's <!-- plan-sync --> blocks, never a bot) pings the owner role of each open PR whose body links it,
-// one line, at most MaxIssuePings a pass (S5).
+// one line, RECORDED on the form (quiet_pings), never pinged: a seat is woken only by a PR of its own on main
+// turning CONFLICTING or BLOCKED (Knight wake noise, ebac-leader 2026-11-17).
 //
 // Every pass is a catch-up, never a full pull:
 //  1. ONE GraphQL call: one aliased search per author for PRs and issues
@@ -142,12 +143,15 @@ const MissingRetry = time.Hour
 // MaxFilePages bounds one PR's file listing (100 files a page).
 const MaxFilePages = 30
 
-// MaxIssuePings bounds one pass's issue pings; the rest wait in the state's
-// queue (at most MaxQueue) for the next passes.
-const (
-	MaxIssuePings = 6
-	MaxQueue      = 50
-)
+// MaxQuiet bounds quiet_pings: the newest owner notes that were recorded instead of pinged.
+const MaxQuiet = 12
+
+// Quiet is an owner note recorded on the form instead of pinged.
+type Quiet struct {
+	At   string `json:"at"`
+	To   string `json:"to"`
+	Text string `json:"text"`
+}
 
 // GitHub is what a pass needs from the forge: one GraphQL query per call.
 type GitHub interface {
@@ -417,7 +421,7 @@ type State struct {
 	Missing map[int]int64         `json:"missing,omitempty"` // linked number that is not a readable issue -> when tried (unix)
 	Tests   map[int64]int         `json:"tests,omitempty"`   // known test counts by job id (a done job's count never changes)
 	Crates  map[int64]int         `json:"crates,omitempty"`  // known check-ni crates checked by job id
-	Queue   []plugin.Ping         `json:"queue,omitempty"`   // issue pings beyond MaxIssuePings, oldest first
+	Quiet   []Quiet               `json:"quiet,omitempty"`   // the last MaxQuiet owner notes recorded, not pinged (quiet_pings)
 	Warned  bool                  `json:"warned,omitempty"`  // the warn role was pinged: open entries alone are past the cap
 	Warning string                `json:"warning,omitempty"` // digest of the warning key last written
 	NoSubs  bool                  `json:"nosubs,omitempty"`  // the forge has no sub-issues: they are not asked for
@@ -777,9 +781,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	}
 
 	// PR entries.
-	sentNow := map[int]bool{} // ledger records sent this pass: an ack can only be of an older one
-	var conflictPings []plugin.Ping
-	if st.RCSince == "" { // the first pass with RC pings: RCs standing before it are old news (Warden 11-13)
+	sentNow := map[int]bool{}              // ledger records sent this pass: an ack can only be of an older one
+	var conflictPings, pings []plugin.Ping // pings: owner notes recorded on the form, not sent (quiet_pings)
+	if st.RCSince == "" {                  // the first pass with RC pings: RCs standing before it are old news (Warden 11-13)
 		st.RCSince = start.Format(time.RFC3339)
 	}
 	for _, n := range sortedKeys(fresh) {
@@ -818,17 +822,27 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		// A turn into conflict (settled, from mergeable) pings the PR's owner role at once, as S5 routes.
 		if p.Facts.State == "OPEN" && wasMergeable && settledConflict(p.Facts.Mergeable, p.Facts.MergeState) {
 			if role := roleOf(owners, p.Author, p.Title); role != "" {
-				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
-					"scout: PR #%d %q is now CONFLICTING with %s (head %s): rebase it", n, clip(p.Title, MaxTitle), baseOf(t), cut(head, 8)))})
+				ping := plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
+					"scout: PR #%d %q is now CONFLICTING with %s (head %s): rebase it", n, clip(p.Title, MaxTitle), baseOf(t), cut(head, 8)))}
+				if t.Base == "" {
+					conflictPings = append(conflictPings, ping)
+				} else {
+					pings = append(pings, ping)
+				}
 			}
 			logf("PR #%d turned conflicting", n)
 		}
 		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Warden 11-13).
 		if mergecheck.ArchBlock(&p.Facts, p.Arch) != "" && p.Arch.At != t.RC {
 			if role := roleOf(owners, p.Author, p.Title); role != "" && rcAfter(p.Arch.At, st.RCSince) {
-				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
+				ping := plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
 					"scout: PR #%d %q is BLOCKED: architect REQUEST_CHANGES at %s (%s): fix and push for a fresh pass",
-					n, clip(p.Title, MaxTitle), cut(p.Arch.Sha, 8), p.Arch.At))})
+					n, clip(p.Title, MaxTitle), cut(p.Arch.Sha, 8), p.Arch.At))}
+				if t.Base == "" {
+					conflictPings = append(conflictPings, ping)
+				} else {
+					pings = append(pings, ping)
+				}
 			}
 			t.RC = p.Arch.At
 			logf("PR #%d blocked by architect RC at %s", n, cut(p.Arch.Sha, 8))
@@ -921,7 +935,6 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			}
 		}
 	}
-	var pings []plugin.Ping
 	for _, n := range sortedKeys(freshIssues) {
 		is := freshIssues[n]
 		delete(st.Missing, n)
@@ -1018,7 +1031,12 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 
-	res.Pings = append(queuePings(&st, pings, logf), conflictPings...)
+	// Only a PR of ours on main turning CONFLICTING or BLOCKED wakes its owner; every other owner note (issue
+	// changes, other bases) is recorded on the form, quiet_pings, for the owner to read when it next looks.
+	res.Pings = conflictPings
+	if recordQuiet(&st, pings, in.Now) {
+		res.Set["quiet_pings"] = model.MustJSON(st.Quiet)
+	}
 
 	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member.
 	// The steward (board-inputs ledger_committer.py) commits an outbox member as prs/<n>.json and acks it with the
@@ -1668,21 +1686,19 @@ func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []str
 	return out
 }
 
-// queuePings sends at most MaxIssuePings this pass, oldest first; the rest wait in the queue (bounded at MaxQueue,
-// the oldest dropped and said).
-func queuePings(st *State, fresh []plugin.Ping, logf func(string, ...any)) []plugin.Ping {
-	q := append(st.Queue, fresh...)
-	if over := len(q) - MaxQueue; over > 0 {
-		logf("issue ping queue full: %d oldest dropped", over)
-		q = q[over:]
+// recordQuiet keeps the newest MaxQuiet owner notes, oldest first; true when any were added.
+func recordQuiet(st *State, fresh []plugin.Ping, now time.Time) bool {
+	if len(fresh) == 0 {
+		return false
 	}
-	n := min(len(q), MaxIssuePings)
-	send := append([]plugin.Ping(nil), q[:n]...)
-	st.Queue = append([]plugin.Ping(nil), q[n:]...)
-	if len(st.Queue) == 0 {
-		st.Queue = nil
+	at := now.UTC().Format(time.RFC3339)
+	for _, p := range fresh {
+		st.Quiet = append(st.Quiet, Quiet{At: at, To: p.To, Text: p.Text})
 	}
-	return send
+	if over := len(st.Quiet) - MaxQuiet; over > 0 {
+		st.Quiet = append([]Quiet(nil), st.Quiet[over:]...)
+	}
+	return true
 }
 
 func containsInt(list []int, k int) bool {

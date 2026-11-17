@@ -144,9 +144,9 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 	}
 }
 
-// Live S5, through the core on scratch forms: a human's issue comment reaches the owner role of each open PR linking
-// it (through the core's send, faked here so no aria is woken); an edit inside the plan-sync block reaches nobody.
-func TestLiveIssueChangeReachesOwner(t *testing.T) {
+// Live S5, through the core on scratch forms: a human's issue comment is recorded on the scout form (quiet_pings) for
+// the owner role of each open PR linking it, and nobody is sent anything; an edit inside the plan-sync block records nothing.
+func TestLiveIssueChangeRecordedForOwner(t *testing.T) {
 	if os.Getenv("EBAC_LIVE") != "1" {
 		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
 	}
@@ -199,8 +199,9 @@ func TestLiveIssueChangeReachesOwner(t *testing.T) {
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("human pass: %v\n%s", err, out.String())
 	}
-	got := strings.Join(sent, "\n")
-	if len(sent) != 3 || !strings.Contains(got, knight+" scout: issue #301") || !strings.Contains(got, "comment by alice") {
-		t.Fatalf("human comment: sent %q\n%s", got, out.String())
+	keys, _, _ = f.FormRaw(ctx, role)
+	got := string(keys["quiet_pings"])
+	if len(sent) != 0 || strings.Count(got, "scout: issue #301") != 3 || !strings.Contains(got, knight) || !strings.Contains(got, "comment by alice") {
+		t.Fatalf("human comment: sent %q, quiet_pings %s\n%s", sent, got, out.String())
 	}
 }

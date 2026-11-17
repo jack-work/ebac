@@ -127,3 +127,23 @@ func TestArchitectRCSeed(t *testing.T) {
 		t.Fatalf("a new RC after the seed: pings %v", r.Pings)
 	}
 }
+
+// An architect RC on a PR whose base is not main is recorded on the form (quiet_pings), never pinged; the same RC on
+// main pings (Knight wake noise, 2026-11-17).
+func TestArchitectRCOffMainIsQuiet(t *testing.T) {
+	w := newWorld(t)
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}}
+	p := w.gh.items[101]
+	p.base = "stack/x"
+	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB, "APPROVE")}
+	w.pass(0)
+	p.comments = append(p.comments, archComment("2026-11-12T11:00:00Z", headA, "REQUEST_CHANGES"))
+	p.updated = w.now.Add(time.Minute)
+	r := w.pass(2 * time.Minute)
+	if e := entry(t, r, "pr:101"); e["ms"] != "blocked: architect RC at aaaaaaaa" {
+		t.Fatalf("ms %v (log %v)", e["ms"], r.Log)
+	}
+	if q := string(r.Set["quiet_pings"]); len(r.Pings) != 0 || !strings.Contains(q, "#101") || !strings.Contains(q, "BLOCKED") || !strings.Contains(q, knight) {
+		t.Fatalf("off main: pings %v, quiet %s", r.Pings, q)
+	}
+}
