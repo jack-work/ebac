@@ -386,7 +386,29 @@ type world struct {
 	in    map[string]json.RawMessage
 	watch model.ScoutWatch
 	cap   int
-	own   []string // the entry keys on the form (Pass.OwnKeys)
+	own   []string  // the entry keys on the form (Pass.OwnKeys)
+	refs  *fakeRefs // when set, the forge also answers PullHeads (git ls-refs)
+}
+
+// fakeRefs serves refs/pull/<n>/head from the fake's items.
+type fakeRefs struct {
+	gh   *fakeGH
+	asks [][]int
+	fail error
+}
+
+func (f *fakeRefs) PullHeads(_ context.Context, _ string, prs []int) (map[int]string, error) {
+	f.asks = append(f.asks, prs)
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	out := map[int]string{}
+	for _, n := range prs {
+		if it := f.gh.items[n]; it != nil {
+			out[n] = it.head
+		}
+	}
+	return out, nil
 }
 
 // newWorld: 101 ours (title tag), 102 ours draft (label), 201 Chiqun's (path hit), 103 ours unrelated (no hit), 301 an
@@ -423,7 +445,14 @@ func (w *world) pass(dt time.Duration) Result {
 func (w *world) try(dt time.Duration) (Result, error) {
 	w.now = w.now.Add(dt)
 	w.gh.calls = 0
-	r, err := Run(context.Background(), w.gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap, OwnKeys: w.own})
+	var gh GitHub = w.gh
+	if w.refs != nil {
+		gh = struct {
+			*fakeGH
+			*fakeRefs
+		}{w.gh, w.refs}
+	}
+	r, err := Run(context.Background(), gh, w.hub, w.st, Pass{Watch: w.watch, Inputs: w.in, Board: w.board, Now: w.now, Cap: w.cap, OwnKeys: w.own})
 	if err == nil {
 		w.st = r.State
 		// The inputs form's outbox as the core merges the writes into it.
@@ -711,6 +740,37 @@ func TestSettlingChecksAreReRead(t *testing.T) {
 	}
 	if r := w.pass(2 * time.Minute); r.GHCalls != 1 {
 		t.Fatalf("settled PR still re-read: %d calls", r.GHCalls)
+	}
+}
+
+// With the git refs (ls-refs, no quota) a settling PR whose head has not moved is not re-read: a pass is one GraphQL
+// call; a moved head, SettleEvery since the last read, or refs that fail re-read it (ebac-leader 2026-11-17).
+func TestSettlingWaitsForHeadMove(t *testing.T) {
+	w := newWorld(t)
+	w.refs = &fakeRefs{gh: w.gh}
+	w.gh.items[101].checks = []map[string]any{{"name": "Aether Runtime PR Pipeline", "status": "IN_PROGRESS"}}
+	w.pass(0)
+	if r := w.pass(2 * time.Minute); r.GHCalls != 1 || len(w.refs.asks) != 1 || fmt.Sprint(w.refs.asks[0]) != "[101]" {
+		t.Fatalf("unmoved head: %d calls, ls-refs asks %v", r.GHCalls, w.refs.asks)
+	}
+	w.gh.items[101].head = headB // a push the search has not seen yet
+	if r := w.pass(2 * time.Minute); r.GHCalls != 2 {
+		t.Fatalf("moved head not re-read: %d calls", r.GHCalls)
+	}
+	w.pass(2 * time.Minute) // unmoved again: one call
+	if r := w.pass(SettleEvery); r.GHCalls != 2 {
+		t.Fatalf("SettleEvery passed and no re-read: %d calls", r.GHCalls)
+	}
+	w.refs.fail = fmt.Errorf("HTTP 401")
+	if r := w.pass(2 * time.Minute); r.GHCalls != 2 || !strings.Contains(strings.Join(r.Log, "\n"), "pull heads: HTTP 401") {
+		t.Fatalf("failed refs: %d calls, log %v", r.GHCalls, r.Log)
+	}
+	w.refs.fail = nil
+	w.gh.items[101].checks = []map[string]any{{"name": "Aether Runtime PR Pipeline", "conclusion": "SUCCESS"}}
+	w.pass(SettleEvery)
+	asks := len(w.refs.asks)
+	if r := w.pass(2 * time.Minute); r.GHCalls != 1 || len(w.refs.asks) != asks {
+		t.Fatalf("settled PR: %d calls, ls-refs asked again %v", r.GHCalls, w.refs.asks[asks:])
 	}
 }
 

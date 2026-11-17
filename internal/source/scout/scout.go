@@ -13,9 +13,10 @@
 //  1. ONE GraphQL call: one aliased search per author for PRs and issues
 //     updated at or after the cursor, facts inline (a quiet pass is this
 //     call and nothing else);
-//  2. one alias batch re-reading only the tracked open PRs whose checks or
-//     mergeability were still settling, or whose band jobs or owner marks
-//     changed (CI completion does not always bump updatedAt);
+//  2. one alias batch re-reading only the tracked open PRs whose band jobs or
+//     owner marks changed, or that were still settling (checks, mergeability)
+//     and whose head moved by the git refs (ls-refs, no quota) or that were
+//     last read SettleEvery ago (CI completion does not always bump updatedAt);
 //  3. the band hub's jobs (metadata reader) for the tracked heads.
 //
 // The scout never writes GitHub. The board is read only for the owner marks
@@ -386,7 +387,8 @@ type TrackedPR struct {
 	Head      string            `json:"h,omitempty"`    // 12 hex
 	Entry     string            `json:"e"`              // digest of the entry last written
 	Inputs    string            `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
-	Settling  bool              `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
+	Settling  bool              `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read when its head moves or SettleEvery passes
+	ReadAt    int64             `json:"ra,omitempty"`   // when its facts were last read (unix)
 	Owner     int               `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
 	Mergeable string            `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
 	Base      string            `json:"bs,omitempty"`   // its base branch, "" is main (the base-head watch)
@@ -702,16 +704,21 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	}
 	marks := boardMarks(in.Board)
 
-	// 2. the re-read: tracked open PRs not in the search whose facts may have moved without an update.
-	var reread []int
+	// 2. the re-read: tracked open PRs not in the search whose facts may have moved without an update. A PR re-read
+	// only because it was settling waits for its head to move (git ls-refs, no quota) or for SettleEvery.
+	var reread, settlingOnly []int
 	for n, t := range st.PRs {
 		if _, ok := fresh[n]; ok || t.State != "OPEN" && !migrating {
 			continue
 		}
-		if migrating || t.Settling || t.Held || t.Inputs != digest([]any{jobsFor(jobs, st.Tests, t.Head), marks.of(n)}) {
+		switch {
+		case migrating || t.Held || t.Inputs != digest([]any{jobsFor(jobs, st.Tests, t.Head), marks.of(n)}):
 			reread = append(reread, n)
+		case t.Settling:
+			settlingOnly = append(settlingOnly, n)
 		}
 	}
+	reread = append(reread, settleDue(ctx, gh, &st, in, settlingOnly, logf)...)
 	// 2b. the base-head watch: a base that moved re-asks its PRs' mergeability (conflict.go).
 	inFull := map[int]bool{}
 	for n := range fresh {
@@ -850,7 +857,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if p.Facts.State != "OPEN" {
 			t.Mergeable = "" // only an open PR's mergeability is asked again
 		}
-		t.Inputs, t.Settling = digest([]any{js, mk}), settling(p)
+		t.Inputs, t.Settling, t.ReadAt = digest([]any{js, mk}), settling(p), in.Now.Unix()
 		if d := digest(e); d != t.Entry {
 			raw := model.MustJSON(e)
 			if t.Entry == "" {
@@ -1684,6 +1691,53 @@ func issuePings(prs map[int]*TrackedPR, owners []owner, is Issue, what, by []str
 			is.Number, title, strings.Join(what, ", "), strings.Join(by, ", "), strings.Join(byRole[role], " "), is.URL))})
 	}
 	return out
+}
+
+// SettleEvery bounds how long a settling PR whose head has not moved goes without a re-read (checks completing and
+// mergeability settling move no ref).
+const SettleEvery = 10 * time.Minute
+
+// PullHeader reads PR head shas off the git refs at no GraphQL quota (forge.GH.PullHeads).
+type PullHeader interface {
+	PullHeads(ctx context.Context, repo string, prs []int) (map[int]string, error)
+}
+
+// settleDue is the settling PRs to re-read this pass: those last read SettleEvery ago, and those whose head moved by
+// the git refs (one ls-refs request for the rest). Without the refs (no PullHeader, an error) every one is due.
+func settleDue(ctx context.Context, gh GitHub, st *State, in Pass, prs []int, logf func(string, ...any)) []int {
+	var due, ask []int
+	for _, n := range prs {
+		if in.Now.Unix()-st.PRs[n].ReadAt >= int64(SettleEvery/time.Second) {
+			due = append(due, n)
+		} else {
+			ask = append(ask, n)
+		}
+	}
+	if len(ask) == 0 {
+		return due
+	}
+	ph, ok := gh.(PullHeader)
+	if !ok {
+		return append(due, ask...)
+	}
+	sort.Ints(ask)
+	heads, err := ph.PullHeads(ctx, in.Watch.Repo, ask)
+	if err != nil {
+		logf("pull heads: %v (settling PRs re-read)", err)
+		return append(due, ask...)
+	}
+	quiet := 0
+	for _, n := range ask {
+		if h, ok := heads[n]; !ok || cut(h, 12) != st.PRs[n].Head {
+			due = append(due, n)
+		} else {
+			quiet++
+		}
+	}
+	if quiet > 0 {
+		logf("settling: %d PR(s) not re-read (heads unmoved)", quiet)
+	}
+	return due
 }
 
 // recordQuiet keeps the newest MaxQuiet owner notes, oldest first; true when any were added.

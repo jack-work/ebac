@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -35,8 +36,11 @@ type GH struct {
 	// (the poller retargets Host per critic, so the credential is chosen per
 	// call, not at construction). NoCred is the test seam for a fake gh.
 	NoCred bool
-	credMu sync.Mutex // concurrent reads (author PRFiles) share creds
-	creds  map[string]*Cred
+	// GitBase and HTTP are test seams for PullHeads (lsrefs.go): the git host URL and its client.
+	GitBase string
+	HTTP    *http.Client
+	credMu  sync.Mutex // concurrent reads (author PRFiles) share creds
+	creds   map[string]*Cred
 	// spend counts this process's GraphQL reads and their cost (gql.go).
 	spendMu sync.Mutex
 	spend   Spend
