@@ -1,73 +1,61 @@
-// Package mergecheck is the PR merge checklist: one ordered row per step of the
-// merge policy (RULE-chiqun-merge-criteria.md, sections "## <step-id>: <label>"),
-// each evaluated from facts, and one state per PR (draft, "waiting: <label>" of
-// the first unmet step, ready, merged, closed, unknown).
+// Package mergecheck is the PR merge checklist of the Commander's rule.merge_ready (role form @2ea091e5, Boss
+// 11-16; it replaced RULE-chiqun-merge-criteria.md): one row per step, each evaluated from facts, and one state per
+// PR (draft, "waiting: <label>" of the first unmet step, ready, merged, closed, unknown, or the architect's
+// "blocked: architect RC at <h8>").
 //
-// It is a Go port of minister-control's states.py (dashboard-steward, 846872c),
-// which it replaces: ONE implementation (board-sync stage 1, 2026-11-10). The
-// policy text is parsed on every call, so the checklist cannot drift from it:
-// a policy step with no evaluator is "not automated" (never blocks, never
-// passes silently); an evaluator whose step is gone is reported by SelfCheck.
-// Pure: no I/O.
+// ready is MERGE READY by the facts: one general bot approval at the head (or a same-tree head), no red of ours, no
+// conflict. Checks are not waited on. Whether a reviewer's stated condition is open is the Minister's judgment
+// (ready.<pr> on its form, rule.queue_protocol): the needs-merge table follows ready.<pr>, not this state.
+//
+// The rule is prose, so its steps live here (Steps). Their ids and labels are minister-control states.py's
+// (1b629ed), whose local checklist covers the PRs the scout does not carry; RuleSHA is the rule text they encode
+// (sha256[:16]), and the board flags a change of it. Pure: no I/O.
 package mergecheck
 
 import (
 	"fmt"
-	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
 
-// Job ids are band-hub job ids.
+// RuleSHA is sha256[:16] of the rule.merge_ready text Steps encode.
+const RuleSHA = "c951bc0b4047d33e"
+
+// Logins and pipelines the steps read.
 const (
-	Ilya    = "Ilya-Grebnov" // the architect-review bot's APPROVE lands under this login
-	Lukas   = "lukas"
-	Runtime = "Aether Runtime PR Pipeline"
-	Rust    = "Aether Rust PR Pipeline"
+	Ilya      = "Ilya-Grebnov" // the architect-review bot's APPROVE also lands as a review under this login
+	Lukas     = "lukas"
+	Automaton = "automaton"
+	Runtime   = "Aether Runtime PR Pipeline"
+	Rust      = "Aether Rust PR Pipeline"
 )
 
-// FastJobs are the band-hub queues the band-jobs step reads; which of them
-// are required is the policy's (RequiredJobs), the rest are opt-in evidence.
-// TestJobs run tests (the hub's /jobs/<id>/tests counts them).
+// Bots are the general review bots whose APPROVED review counts (rule.merge_ready).
+var Bots = []string{Ilya, Lukas, Automaton}
+
+// FastJobs are the band-hub queues read at a head (evidence; a check-ni FAIL is a red). TestJobs run tests (the
+// hub's /jobs/<id>/tests counts them).
 var (
 	FastJobs = []string{"aether.check-ni", "aether.gate-kit", "aether.gate-ext", "aether.gate-services", "aether.clippy-pr"}
 	TestJobs = []string{"aether.gate-kit", "aether.gate-ext", "aether.gate-services"}
 )
 
-var jobRE = regexp.MustCompile(`aether\.[a-z0-9-]+`)
-
-// RequiredJobs are the band jobs the policy's band-jobs step requires at an
-// open PR head, parsed from its text: every aether.<queue> named in a clause
-// (split at ";" and ". ") that does not exempt it (a clause saying "not an
-// open PR head", "never" or "opt-in" names jobs that are not required).
-func RequiredJobs(p Policy) []string {
-	var text string
-	for _, s := range p.Steps {
-		if s.ID == "band-jobs" {
-			text = s.Text
-		}
-	}
-	var out []string
-	for _, sent := range strings.Split(text, ". ") {
-		for _, clause := range strings.Split(sent, ";") {
-			l := strings.ToLower(clause)
-			if strings.Contains(l, "not an open pr head") || strings.Contains(l, "never") || strings.Contains(l, "opt-in") {
-				continue
-			}
-			for _, q := range jobRE.FindAllString(clause, -1) {
-				if !in(q, out) {
-					out = append(out, q)
-				}
-			}
-		}
-	}
-	return out
+// Step is one step of the rule.
+type Step struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
-// KindOf is what a PR's changed files are (states.py _kind): docs when every
-// file is a doc, tests when every file is a doc or a test, else code; ""
-// when the files are not known (nil).
+// Steps are rule.merge_ready's, in order. conditions has no evaluator: it never blocks (the Minister's ready.<pr>).
+var Steps = []Step{
+	{"bot-approval", "bot approval"},
+	{"no-red", "no red of ours"},
+	{"conflict", "conflict"},
+	{"conditions", "reviewer conditions"},
+}
+
+// KindOf is what a PR's changed files are: docs when every file is a doc, tests when every file is a doc or a test,
+// else code; "" when the files are not known (nil).
 func KindOf(files []string) string {
 	if files == nil {
 		return ""
@@ -100,62 +88,6 @@ func KindOf(files []string) string {
 	return "code"
 }
 
-// Step is one policy section.
-type Step struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Text  string `json:"text"`
-}
-
-// Policy is the parsed policy file.
-type Policy struct {
-	Title string `json:"title"`
-	Intro string `json:"intro"`
-	Steps []Step `json:"steps"`
-	Error string `json:"error,omitempty"`
-}
-
-var headRE = regexp.MustCompile(`^##\s+([a-z0-9-]+):\s*(.+?)\s*$`)
-
-// Parse reads the policy text: the "# " title line, the first prose line, and
-// one step per "## <id>: <label>" section in order; other "## " sections
-// (WHEN, FOLLOW-UP) are policy only.
-func Parse(text string) Policy {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	var p Policy
-	for _, l := range lines {
-		if strings.HasPrefix(l, "# ") {
-			p.Title = strings.TrimSpace(strings.TrimLeft(l, "# "))
-			break
-		}
-	}
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" && !strings.HasPrefix(l, "#") {
-			p.Intro = strings.TrimSpace(l)
-			break
-		}
-	}
-	cur := -1
-	for _, l := range lines {
-		if m := headRE.FindStringSubmatch(l); m != nil {
-			p.Steps = append(p.Steps, Step{ID: m[1], Label: m[2]})
-			cur = len(p.Steps) - 1
-			continue
-		}
-		if strings.HasPrefix(l, "## ") {
-			cur = -1
-			continue
-		}
-		if cur >= 0 && strings.TrimSpace(l) != "" {
-			p.Steps[cur].Text = strings.TrimSpace(p.Steps[cur].Text + " " + strings.TrimSpace(l))
-		}
-	}
-	if len(p.Steps) == 0 && text == "" {
-		p.Error = "policy unreadable: no text"
-	}
-	return p
-}
-
 // Context is one CI status context at the PR head.
 type Context struct {
 	Name  string `json:"name"`
@@ -168,13 +100,15 @@ type Review struct {
 	Login string `json:"login"`
 	State string `json:"state"`
 	Oid   string `json:"oid,omitempty"`
-	At    string `json:"at,omitempty"` // submittedAt (RFC 3339, UTC)
+	Tree  string `json:"tree,omitempty"` // the reviewed commit's tree
+	At    string `json:"at,omitempty"`   // submittedAt (RFC 3339, UTC)
 }
 
 // Facts are a PR's GitHub facts.
 type Facts struct {
 	Oid        string `json:"oid"`
-	State      string `json:"state"` // OPEN, MERGED, CLOSED
+	Tree       string `json:"tree,omitempty"` // the head's tree ("" not known)
+	State      string `json:"state"`          // OPEN, MERGED, CLOSED
 	Draft      bool   `json:"draft"`
 	Heavy      bool   `json:"heavy"` // full facts (checks, threads, reviews) were read
 	Mergeable  string `json:"mergeable,omitempty"`
@@ -195,37 +129,35 @@ type Job struct {
 	Tests   string `json:"tests,omitempty"` // the job's tests param
 	Verdict string `json:"verdict,omitempty"`
 	State   string `json:"state,omitempty"`
-	// Crates is a check-ni's crates checked, as the hub counted them (nil:
-	// unknown, read as today). A PASS that checked 0 crates is no verdict.
+	// Crates is a check-ni's crates checked, as the hub counted them (nil: unknown).
 	Crates *int `json:"crates,omitempty"`
 }
 
-// Arch is the architect-review[bot] verdict.
+// Arch is the architect-review[bot] verdict comment, and its newest hold (a pass in progress).
 type Arch struct {
 	Verdict string `json:"verdict,omitempty"`
 	Sha     string `json:"sha,omitempty"`
+	Tree    string `json:"tree,omitempty"` // Sha's tree ("" not known)
 	At      string `json:"at,omitempty"`
 	Hold    bool   `json:"hold,omitempty"`
 	HoldAt  string `json:"hold_at,omitempty"`
 	HoldSha string `json:"hold_sha,omitempty"` // the head the newest hold names (its Head: line)
 }
 
-// Marks are the owner-written marks the steps read (majors_handled,
-// majors_note, marginal, marginal_reason, chiqun_notified, rust_not_ours),
+// Written is another bot's written verdict naming the head it read (the automaton's marker): it counts whatever
+// state GitHub records for the bot.
+type Written struct {
+	By      string `json:"by"`
+	Verdict string `json:"verdict"` // APPROVE, REQUEST_CHANGES, ...
+	Sha     string `json:"sha"`
+	Tree    string `json:"tree,omitempty"` // Sha's tree ("" not known)
+}
+
+// Marks are the owner-written marks the steps read (red_not_ours, rust_not_ours: the proof a red is main-side),
 // looked up in Row first, then Item (the board row, then the board item).
 type Marks struct {
 	Row  map[string]any
 	Item map[string]any
-}
-
-func (m Marks) get(k string) any {
-	if v, ok := m.Row[k]; ok && v != nil {
-		return v
-	}
-	if v, ok := m.Item[k]; ok {
-		return v
-	}
-	return nil
 }
 
 func (m Marks) str(k string) string {
@@ -236,43 +168,23 @@ func (m Marks) str(k string) string {
 	return s
 }
 
-// boolOf is the mark as Python reads `is True` / `is False`: nil when unset.
-func (m Marks) boolOf(k string) *bool {
-	if b, ok := m.get(k).(bool); ok {
-		return &b
-	}
-	return nil
+// In is everything the checklist reads about one PR.
+type In struct {
+	Facts   Facts
+	Jobs    []Job // band jobs at the head, newest first
+	Marks   Marks
+	Arch    *Arch
+	Written []Written
+	Files   []string // nil: not known
 }
 
 // Row is one evaluated checklist row.
 type Row struct {
-	ID     string   `json:"id"`
-	Label  string   `json:"k"`
-	OK     bool     `json:"ok"`
-	Status string   `json:"status"` // yes | no | pending | manual
-	Note   string   `json:"note"`
-	Ev     []string `json:"ev"`
-	At     string   `json:"at"`
-	Stale  bool     `json:"stale"`
-}
-
-type res struct {
-	ok     bool
-	status string
-	note   string
-	at     string
-	ev     []string
-	carry  bool
-}
-
-func mk(ok bool, note, at string, ev []string, status string) res {
-	if status == "" {
-		status = map[bool]string{true: "yes", false: "no"}[ok]
-	}
-	if ev == nil {
-		ev = []string{}
-	}
-	return res{ok: ok, status: status, note: note, at: at, ev: ev}
+	ID     string `json:"id"`
+	Label  string `json:"k"`
+	OK     bool   `json:"ok"`
+	Status string `json:"status"` // yes | no | pending | manual
+	Note   string `json:"note"`
 }
 
 func short(oid string) string {
@@ -291,415 +203,169 @@ func in(s string, list []string) bool {
 	return false
 }
 
-type ctx struct {
-	f     Facts
-	jobs  []Job
-	marks Marks
-	tests map[int64]int
-	head  string
-	arch  *Arch
-	files []string // nil: not known
-	need  []string // the required band jobs (RequiredJobs)
+// samePrefix says whether two hex ids name the same object: equal over the shorter, of at least 7.
+func samePrefix(a, b string) bool {
+	n := min(len(a), len(b))
+	return n >= 7 && a[:n] == b[:n]
 }
 
-func evBandJobs(c ctx) res {
-	kind := KindOf(c.files)
-	if kind == "docs" {
-		return mk(true, "docs-only PR: no band job needed", "", nil, "")
+// AtHead says whether a verdict naming sha (whose tree is tree, "" unknown) stands at the head: the head itself, or a
+// head with the same tree (rule.merge_ready: a same-tree head keeps it).
+func AtHead(f *Facts, sha, tree string) (at, sameTree bool) {
+	if samePrefix(sha, f.Oid) {
+		return true, false
 	}
-	type key struct{ q, t string }
-	latest := map[key]Job{}
-	var order []key
-	for _, j := range c.jobs { // newest first: one verdict per (queue, tests param)
-		if !in(j.Queue, FastJobs) && !in(j.Queue, c.need) {
-			continue
+	if samePrefix(tree, f.Tree) {
+		return true, true
+	}
+	return false, false
+}
+
+var approving = []string{"APPROVE", "APPROVE_WITH_NOTES", "APPROVED"}
+
+func label(v string) string { return strings.ToLower(strings.ReplaceAll(v, "_", " ")) }
+
+// evBotApproval: ONE general bot approval at the head (or a same-tree head): the architect's verdict comment
+// (APPROVE, APPROVE_WITH_NOTES), another bot's written verdict, or an APPROVED review by a Bots login. Approvals at
+// other heads are shown, not counted.
+func evBotApproval(c In) (bool, string, string) {
+	f := &c.Facts
+	var by, ev []string
+	add := func(who, verdict, sha, tree string) {
+		ev = append(ev, fmt.Sprintf("%s %s at %s", who, label(verdict), short(sha)))
+		if !in(verdict, approving) {
+			return
 		}
-		k := key{j.Queue, j.Tests}
-		if _, ok := latest[k]; !ok {
-			latest[k] = j
-			order = append(order, k)
+		if at, same := AtHead(f, sha, tree); at && same {
+			by = append(by, who+" (same tree)")
+		} else if at {
+			by = append(by, who)
 		}
 	}
-	ok, pending := true, false
-	var ev, names []string
-	for _, q := range c.need {
-		name := strings.SplitN(q, ".", 2)[1]
-		names = append(names, name)
-		var j *Job
-		for _, k := range order {
-			if k.q == q {
-				jj := latest[k]
-				j = &jj
-				break
+	if a := c.Arch; a != nil && a.Verdict != "" {
+		add("architect", a.Verdict, a.Sha, a.Tree)
+	}
+	for _, w := range c.Written {
+		add(w.By, w.Verdict, w.Sha, w.Tree)
+	}
+	for _, r := range f.Reviews {
+		if in(r.Login, Bots) {
+			add(r.Login, r.State, r.Oid, r.Tree)
+		}
+	}
+	seen := strings.Join(ev, "; ")
+	if seen == "" {
+		seen = "no bot verdict yet"
+	}
+	switch {
+	case len(by) > 0:
+		return true, "", "approved at the head by " + strings.Join(by, ", ") + "; " + seen
+	case c.Arch != nil && c.Arch.Hold:
+		return false, "pending", "architect pass in progress (hold posted " + c.Arch.HoldAt + "); " + seen
+	}
+	return false, "", "no bot approval at this head; " + seen
+}
+
+// evNoRed: checks race the merge, so pending or absent never blocks; only a red at the head does (a check-ni FAIL,
+// a Runtime or Rust pipeline FAILURE or ERROR), until the board carries a not-ours proof (red_not_ours, or
+// rust_not_ours for the Rust pipeline).
+func evNoRed(c In) (bool, string, string) {
+	proof := c.Marks.str("red_not_ours")
+	rustProof := proof
+	if rustProof == "" {
+		rustProof = c.Marks.str("rust_not_ours")
+	}
+	var open, proven []string
+	running := false
+	red := func(what, pf string) {
+		if pf == "" {
+			open = append(open, what)
+		} else {
+			proven = append(proven, what+" (proven not ours: "+pf+")")
+		}
+	}
+	if KindOf(c.Files) != "docs" {
+		for _, j := range c.Jobs { // newest first: the latest check-ni
+			if j.Queue != "aether.check-ni" {
+				continue
 			}
-		}
-		if j == nil {
-			ok = false
-			ev = append(ev, name+": not run on this head")
-			continue
-		}
-		if j.Verdict == "" {
-			pending = true
-		}
-		if j.Verdict != "PASS" {
-			ok = false
-		}
-		v := j.Verdict
-		if v == "" {
-			v = j.State
-		}
-		switch {
-		case j.Verdict == "PASS" && q == "aether.check-ni" && j.Crates != nil && *j.Crates == 0:
-			ok = false // the rule: a check-ni PASS with 0 crates checked is no verdict
-			v += ", 0 crates checked: no verdict"
-		case j.Crates != nil:
-			v += fmt.Sprintf(", %d crates", *j.Crates)
-		}
-		ev = append(ev, fmt.Sprintf("job %d %s: %s", j.ID, name, v))
-	}
-	for _, k := range order { // opt-in targeted runs: evidence only, never a merge requirement
-		if in(k.q, c.need) {
-			continue
-		}
-		j := latest[k]
-		t := ""
-		if k.t != "" {
-			t = "(" + k.t + ")"
-		}
-		v := j.Verdict
-		if v == "" {
-			v = j.State
-		}
-		line := fmt.Sprintf("opt-in job %d %s%s: %s", j.ID, strings.SplitN(k.q, ".", 2)[1], t, v)
-		if n, has := c.tests[j.ID]; has {
-			line += fmt.Sprintf(", %d tests", n)
-		}
-		ev = append(ev, line)
-	}
-	need := strings.Join(names, " + ")
-	head := map[string]string{"tests": "tests-only PR: " + need + " only", "code": need + " at the head (clippy verdict = ADO Rust)",
-		"": need + " at the head (files not read yet)"}[kind]
-	st := ""
-	if !ok && pending {
-		st = "pending"
-	}
-	return mk(ok, head+"; "+strings.Join(ev, "; "), "", ev, st)
-}
-
-func ctxLine(x Context) string {
-	s := x.Name + ": " + strings.ToLower(x.State)
-	if x.Build != "" {
-		s += " (build " + x.Build + ")"
-	}
-	return s
-}
-
-func evRuntimeCI(c ctx) res {
-	var rt []Context
-	for _, x := range c.f.Contexts {
-		if strings.HasPrefix(x.Name, Runtime) {
-			rt = append(rt, x)
-		}
-	}
-	ok, pend := len(rt) > 0, false
-	var ev []string
-	for _, x := range rt {
-		if x.State != "SUCCESS" {
-			ok = false
-		}
-		if x.State == "PENDING" {
-			pend = true
-		}
-		ev = append(ev, ctxLine(x))
-	}
-	note := strings.Join(ev, "; ")
-	if note == "" {
-		note = "no Runtime pipeline run at this head"
-	}
-	st := ""
-	if !ok && pend {
-		st = "pending"
-	}
-	return mk(ok, note, "", ev, st)
-}
-
-func evRustTriage(c ctx) res {
-	var rust []Context
-	for _, x := range c.f.Contexts {
-		if strings.HasPrefix(x.Name, Rust) {
-			rust = append(rust, x)
-		}
-	}
-	st := "none"
-	if len(rust) > 0 {
-		green, red := true, false
-		for _, x := range rust {
-			if x.State != "SUCCESS" {
-				green = false
+			running = j.Verdict == ""
+			if j.Verdict != "" && j.Verdict != "PASS" {
+				red(fmt.Sprintf("check-ni job %d %s", j.ID, j.Verdict), proof)
 			}
-			if x.State == "FAILURE" || x.State == "ERROR" {
-				red = true
+			break
+		}
+	}
+	for _, p := range []struct{ name, proof string }{{Runtime, proof}, {Rust, rustProof}} {
+		isRed := false
+		for _, x := range c.Facts.Contexts {
+			if !strings.HasPrefix(x.Name, p.name) {
+				continue
 			}
+			running = running || x.State == "PENDING"
+			isRed = isRed || x.State == "FAILURE" || x.State == "ERROR"
 		}
-		st = map[bool]string{true: "green", false: map[bool]string{true: "red", false: "running"}[red]}[green]
-	}
-	proof := c.marks.str("rust_not_ours")
-	var ev []string
-	for _, x := range rust {
-		ev = append(ev, ctxLine(x))
-	}
-	if st == "red" {
-		n := "not yet proven not ours"
-		if proof != "" {
-			n = "proven not ours: " + proof
+		if isRed {
+			red(p.name+" red", p.proof)
 		}
-		return mk(proof != "", "Rust PR Pipeline red; "+n, "", ev, "")
 	}
-	return mk(true, map[string]string{"none": "no Rust pipeline run at this head (not waited on)", "green": "Rust PR Pipeline green",
-		"running": "Rust PR Pipeline still running (not waited on)"}[st], "", ev, "")
+	switch {
+	case len(open) > 0:
+		return false, "", "red at the head, ours until proven main-side: " + strings.Join(open, "; ")
+	case len(proven) > 0:
+		return true, "", strings.Join(proven, "; ")
+	case running:
+		return true, "", "no red yet; checks still running (not waited on)"
+	}
+	return true, "", "no red at the head"
 }
 
-func lowerOr(s string) string {
-	if s == "" {
-		return "?"
-	}
-	return strings.ToLower(s)
-}
-
-// evConflict (Minister 11-11): only mergeable CONFLICTING or merge state DIRTY
-// is a conflict. UNKNOWN is GitHub recomputing: never a wait; the last known
-// value stands meanwhile. BLOCKED (branch protection) and BEHIND are not
-// conflicts.
-func evConflict(c ctx) res {
-	ms, mg := c.f.MergeState, c.f.Mergeable
+// evConflict (Minister 11-11): only mergeable CONFLICTING or merge state DIRTY is a conflict. UNKNOWN is GitHub
+// recomputing: never a wait; the last known value stands meanwhile. BLOCKED and BEHIND are not conflicts.
+func evConflict(c In) (bool, string, string) {
+	ms, mg := c.Facts.MergeState, c.Facts.Mergeable
 	recomputing := mg == "" || mg == "UNKNOWN"
-	if recomputing && c.f.LastMergeable != "" {
-		mg = c.f.LastMergeable
+	if recomputing && c.Facts.LastMergeable != "" {
+		mg = c.Facts.LastMergeable
 	}
 	conflict := mg == "CONFLICTING" || ms == "DIRTY"
 	var note string
 	switch {
-	case recomputing && c.f.LastMergeable != "":
+	case recomputing && c.Facts.LastMergeable != "":
 		note = "mergeable: recomputing (last known " + strings.ToLower(mg) + ")"
 	case recomputing:
 		note = "mergeable: recomputing"
 	default:
 		note = "mergeable " + strings.ToLower(mg)
 	}
-	note += ", merge state " + lowerOr(ms)
+	if ms == "" {
+		ms = "?"
+	}
+	note += ", merge state " + strings.ToLower(ms)
 	if conflict {
 		note += ": rebase on main"
 	}
-	return mk(!conflict, note, "", nil, "")
+	return !conflict, "", note
 }
 
-func evThreads(c ctx) res {
-	n := c.f.Unresolved
-	s := "s"
-	if n == 1 {
-		s = ""
-	}
-	return mk(n == 0, fmt.Sprintf("%d unresolved review thread%s", n, s), "", nil, "")
+var evaluators = map[string]func(In) (ok bool, status, note string){
+	"bot-approval": evBotApproval, "no-red": evNoRed, "conflict": evConflict,
 }
 
-func review(c ctx, login string) *Review {
-	for i := range c.f.Reviews {
-		if c.f.Reviews[i].Login == login {
-			return &c.f.Reviews[i]
-		}
-	}
-	return nil
-}
-
-var approving = []string{"APPROVE", "APPROVE_WITH_NOTES"}
-
-var verdictLabel = map[string]string{"APPROVE": "approve", "APPROVE_WITH_NOTES": "approve with notes", "REQUEST_CHANGES": "request changes"}
-
-func archNote(a *Arch) string {
-	if a == nil || a.Verdict == "" {
-		return "no architect verdict yet"
-	}
-	l, ok := verdictLabel[a.Verdict]
-	if !ok {
-		l = strings.ToLower(strings.ReplaceAll(a.Verdict, "_", " "))
-	}
-	return fmt.Sprintf("architect %s at %s (%s)", l, short(a.Sha), a.At)
-}
-
-// majors: rule 5a. An APPROVE_WITH_NOTES counts only once every Major is handled (majors_handled + majors_note).
-func majors(c ctx, a *Arch) (bool, string) {
-	if a == nil || a.Verdict != "APPROVE_WITH_NOTES" {
-		return true, ""
-	}
-	note := c.marks.str("majors_note")
-	if h := c.marks.boolOf("majors_handled"); h != nil && *h {
-		if note == "" {
-			note = "yes"
-		}
-		return true, "Majors handled (Knight): " + note
-	}
-	return false, "Majors in the notes not yet marked handled (the Knight sets majors_handled + majors_note on the board)"
-}
-
-func join(parts ...string) string {
-	var out []string
-	for _, p := range parts {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return strings.Join(out, "; ")
-}
-
-func archAtHead(a *Arch, head string) bool {
-	return a != nil && in(a.Verdict, approving) && short(a.Sha) == short(head)
-}
-
-func evIlya(c ctx) res {
-	a, r, head := c.arch, review(c, Ilya), c.head
-	ilya := "no Ilya-Grebnov review (not required)"
-	if r != nil {
-		ilya = fmt.Sprintf("Ilya-Grebnov review: %s at %s", strings.ToLower(strings.ReplaceAll(r.State, "_", " ")), short(r.Oid))
-	}
-	sha := ""
-	if a != nil {
-		sha = a.Sha
-	}
-	if archAtHead(a, head) {
-		ok, mnote := majors(c, a)
-		return mk(ok, join(archNote(a), mnote, ilya), sha, nil, "")
-	}
-	if a != nil && a.Hold {
-		return mk(false, fmt.Sprintf("architect pass in progress (hold posted %s); last %s; %s", a.HoldAt, archNote(a), ilya), sha, nil, "pending")
-	}
-	return mk(false, archNote(a)+"; "+ilya, sha, nil, "")
-}
-
-func evLukasCarryover(c ctx) res {
-	a, lukas, head := c.arch, review(c, Lukas), c.head
-	if archAtHead(a, head) {
-		return mk(true, "not needed: the architect approved this head", "", nil, "")
-	}
-	if a == nil || !in(a.Verdict, approving) {
-		return mk(false, "needs an approving architect verdict first (on any head)", "", nil, "")
-	}
-	mok, mnote := majors(c, a)
-	marginal := c.marks.boolOf("marginal")
-	reason := c.marks.str("marginal_reason")
-	lk := lukas != nil && lukas.State == "APPROVED" && short(lukas.Oid) == short(head)
-	mtxt := "interdiff not yet confirmed marginal (the Knight sets marginal on the board)"
-	if marginal != nil {
-		mtxt = map[bool]string{true: "interdiff marginal (board)", false: "interdiff NOT marginal (board): fresh architect pass needed"}[*marginal]
-	}
-	if reason != "" {
-		reason = "Knight: " + reason
-	}
-	lt := "no lukas review"
-	at := ""
-	if lukas != nil {
-		lt = fmt.Sprintf("lukas %s at %s", strings.ToLower(lukas.State), short(lukas.Oid))
-		at = lukas.Oid
-	}
-	isMarginal := marginal != nil && *marginal
-	r := mk(isMarginal && mok && lk, join(archNote(a)+" (an earlier head)", mnote, mtxt, reason, lt), at, nil, "")
-	r.carry = isMarginal && mok
-	return r
-}
-
-func evNotified(c ctx) res {
-	ms, rd := strings.ToUpper(c.f.MergeState), strings.ToUpper(c.f.Review)
-	ok := ms == "CLEAN" && rd == "APPROVED"
-	rds := strings.ReplaceAll(strings.ToLower(rd), "_", " ")
-	if rds == "" {
-		rds = "none"
-	}
-	note := fmt.Sprintf("GitHub: merge state %s, review decision %s", lowerOr(ms), rds)
-	if ok {
-		note += ": mergeable now, the owner merges it (squash)"
-	} else {
-		note += ": not mergeable yet"
-	}
-	if m, isMap := c.marks.get("chiqun_notified").(map[string]any); isMap {
-		at, chat := m["at"], m["chat"]
-		if at == nil {
-			at = "?"
-		}
-		if chat == nil {
-			chat = "?"
-		}
-		note += fmt.Sprintf("; Chiqun FYI sent %v in %v", at, chat)
-	}
-	st := ""
-	if !ok && (ms == "" || ms == "UNKNOWN") {
-		st = "pending"
-	}
-	return mk(ok, note, "", nil, st)
-}
-
-var evaluators = map[string]func(ctx) res{
-	"band-jobs": evBandJobs, "runtime-ci": evRuntimeCI, "rust-triage": evRustTriage, "conflict": evConflict,
-	"threads": evThreads, "ilya": evIlya, "lukas-carryover": evLukasCarryover, "notified": evNotified,
-}
-
-// Automated says whether a policy step id has an evaluator.
-func Automated(id string) bool { _, ok := evaluators[id]; return ok }
-
-// Check is the drift report: evaluators with no policy step (loud), policy
-// steps with no evaluator (shown as not automated).
-type Check struct {
-	OrphanEvaluators []string `json:"orphan_evaluators"`
-	NotAutomated     []string `json:"not_automated"`
-	Error            string   `json:"error"`
-}
-
-func SelfCheck(p Policy) Check {
-	ids := map[string]bool{}
-	c := Check{OrphanEvaluators: []string{}, NotAutomated: []string{}, Error: p.Error}
-	for _, s := range p.Steps {
-		ids[s.ID] = true
-		if !Automated(s.ID) {
-			c.NotAutomated = append(c.NotAutomated, s.ID)
-		}
-	}
-	for id := range evaluators {
-		if !ids[id] {
-			c.OrphanEvaluators = append(c.OrphanEvaluators, id)
-		}
-	}
-	sort.Strings(c.OrphanEvaluators)
-	if c.Error == "" && len(p.Steps) == 0 {
-		c.Error = "no steps parsed from the policy"
-	}
-	return c
-}
-
-// Checklist is the ordered checklist for one PR: one row per policy step.
-// files are the PR's changed files (nil: not known yet).
-func Checklist(p Policy, f Facts, jobs []Job, marks Marks, tests map[int64]int, arch *Arch, files []string) []Row {
-	c := ctx{f: f, jobs: jobs, marks: marks, tests: tests, head: f.Oid, arch: arch, files: files, need: RequiredJobs(p)}
-	results := map[string]res{}
-	for id, fn := range evaluators {
-		results[id] = fn(c)
-	}
-	if lc := results["lukas-carryover"]; lc.carry && !results["ilya"].ok { // 5b: the carry-over meets the architect step
-		il := results["ilya"]
-		il.ok, il.status, il.at = true, "yes", "" // an earlier head is expected here: not stale
-		il.note += "; carried over (rule 5b, marginal interdiff)"
-		results["ilya"] = il
-	}
-	out := make([]Row, 0, len(p.Steps))
-	for _, s := range p.Steps {
-		r, ok := results[s.ID]
+// Checklist is the ordered checklist for one PR: one row per step.
+func Checklist(c In) []Row {
+	out := make([]Row, 0, len(Steps))
+	for _, s := range Steps {
+		fn, ok := evaluators[s.ID]
 		if !ok {
-			out = append(out, Row{ID: s.ID, Label: s.Label, OK: true, Status: "manual", Note: "not automated: read the policy", Ev: []string{}})
+			out = append(out, Row{ID: s.ID, Label: s.Label, OK: true, Status: "manual", Note: "not automated: the Minister's ready.<pr>"})
 			continue
 		}
-		at := short(c.head)
-		if r.at != "" {
-			at = short(r.at)
+		yes, st, note := fn(c)
+		if st == "" {
+			st = map[bool]string{true: "yes", false: "no"}[yes]
 		}
-		out = append(out, Row{ID: s.ID, Label: s.Label, OK: r.ok, Status: r.status, Note: r.note, Ev: r.ev, At: at,
-			Stale: r.at != "" && c.head != "" && at != short(c.head)})
+		out = append(out, Row{ID: s.ID, Label: s.Label, OK: yes, Status: st, Note: note})
 	}
 	return out
 }
@@ -716,12 +382,11 @@ func StateOf(f *Facts, steps []Row) string {
 	case f.Draft:
 		return "draft"
 	case strings.ToUpper(f.Mergeable) == "CONFLICTING" || strings.ToUpper(f.MergeState) == "DIRTY":
-		return "waiting: conflict" // light facts carry mergeability too (states.py state_of)
+		return "waiting: conflict" // light facts carry mergeability too
 	case !f.Heavy || steps == nil:
 		return "unknown"
 	}
-	// A conflict invalidates the head, so it overrides step order (board-sync 1e12bbbb 11-12): "waiting: conflict"
-	// even while an earlier step (band jobs, CI) is unmet. UNKNOWN never counts (evConflict: recomputing).
+	// A conflict invalidates the head, so it overrides step order (board-sync 1e12bbbb 11-12). UNKNOWN never counts.
 	for _, s := range steps {
 		if s.ID == "conflict" && !s.OK {
 			return "waiting: " + s.Label
@@ -735,23 +400,19 @@ func StateOf(f *Facts, steps []Row) string {
 	return "ready"
 }
 
-// ArchState is the architect's override of a PR's state (Warden 11-13, outside the states.py port, which the golden
-// pins): the latest architect verdict REQUEST_CHANGES, not superseded by a later approving one, blocks the PR at once
-// ("blocked: architect RC at <h8>", rc true). archOf keeps only the latest verdict comment, so a later APPROVE comment
-// already replaces the RC; the bot's APPROVE can also land as an Ilya-Grebnov review, which supersedes the RC when
-// submitted after it. Else a hold (a pass in progress, newer than the verdict) naming the PR's own head is
-// "waiting: architect review". "" leaves the state as StateOf gave it.
-func ArchState(f *Facts, a *Arch) (state string, rc bool) {
-	if f == nil || a == nil || f.State != "OPEN" || f.Draft { // a draft stays "draft"
-		return "", false
+// ArchBlock is the architect's override of an open PR's state (Warden 11-13, narrowed by rule.merge_ready): a
+// REQUEST_CHANGES verdict naming the head (or a same-tree head) blocks it ("blocked: architect RC at <h8>") until a
+// later approving architect verdict replaces it (archOf keeps only the latest verdict comment) or an Ilya-Grebnov
+// APPROVED review is submitted after it. An RC at an older head no longer blocks: the fix is pushed, and the
+// bot-approval step asks for an approval at the new head. "" leaves the state as StateOf gave it.
+func ArchBlock(f *Facts, a *Arch) string {
+	if f == nil || a == nil || f.State != "OPEN" || f.Draft || a.Verdict != "REQUEST_CHANGES" {
+		return ""
 	}
-	if a.Verdict == "REQUEST_CHANGES" && !approvedAfter(f.Reviews, a.At) {
-		return "blocked: architect RC at " + short(a.Sha), true
+	if at, _ := AtHead(f, a.Sha, a.Tree); !at || approvedAfter(f.Reviews, a.At) {
+		return ""
 	}
-	if a.Hold && a.HoldSha != "" && short(a.HoldSha) == short(f.Oid) {
-		return "waiting: architect review", false
-	}
-	return "", false
+	return "blocked: architect RC at " + short(a.Sha)
 }
 
 // approvedAfter says whether an Ilya-Grebnov APPROVED review was submitted after at.

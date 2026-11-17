@@ -46,7 +46,7 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 		return id
 	}
 	board := mint("livetest-board", map[string]any{"prs": map[string]any{}})
-	inputs := mint("livetest-scout-inputs", map[string]any{"rule": policyText(t)})
+	inputs := mint("livetest-scout-inputs", nil)
 	role := mint("ebac-livetest-scout", nil)
 	wd := newWorld(t)
 	name := "livetest-scout-" + strings.TrimPrefix(role, "@")[:8]

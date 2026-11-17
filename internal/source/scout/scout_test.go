@@ -45,6 +45,7 @@ type item struct {
 	events     []map[string]any // issue: label and state events, oldest first
 	base       string           // PR: its base branch ("" main)
 	mergeState string           // PR: its mergeStateStatus ("" BLOCKED)
+	tree       string           // PR: its head's tree ("" not answered)
 }
 
 func (p *item) gql() map[string]any {
@@ -114,9 +115,12 @@ func (p *item) gql() map[string]any {
 		"files":         map[string]any{"totalCount": len(p.files), "pageInfo": map[string]any{"hasNextPage": more != "", "endCursor": more}, "nodes": files},
 		"reviewThreads": map[string]any{"nodes": threads}, "comments": map[string]any{"nodes": comments},
 		"latestOpinionatedReviews": map[string]any{"nodes": reviews},
-		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{
+		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": p.head, "statusCheckRollup": map[string]any{
 			"state": "SUCCESS", "contexts": map[string]any{"nodes": ctxs}}}}}}} {
 		base[k] = v
+	}
+	if p.tree != "" {
+		base["commits"].(map[string]any)["nodes"].([]any)[0].(map[string]any)["commit"].(map[string]any)["tree"] = map[string]any{"oid": p.tree}
 	}
 	return base
 }
@@ -149,7 +153,11 @@ type fakeGH struct {
 	pages    []int             // the page size of each search call
 	heads    map[string]string // branch -> head commit: answers the search's bh alias (nil: no bh)
 	light    []string          // the mergeability-only queries
+	trees    map[string]string // commit -> its tree: answers object(expression:) by sha prefix
+	asked    []string          // the shas object(expression:) was asked
 }
+
+var objectRE = regexp.MustCompile(`(t\d+): object\(expression:"([^"]+)"\)`)
 
 var refRE = regexp.MustCompile(`r(\d+): ref\(qualifiedName:"refs/heads/([^"]+)"\)`)
 
@@ -286,6 +294,19 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 		return model.MustJSON(map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"files": map[string]any{
 			"pageInfo": map[string]any{"hasNextPage": more != "", "endCursor": more}, "nodes": files}}}}), nil
 	}
+	if strings.Contains(q, "object(expression:") {
+		repo := map[string]any{}
+		for _, m := range objectRE.FindAllStringSubmatch(q, -1) {
+			g.asked = append(g.asked, m[2])
+			repo[m[1]] = nil
+			for c, tr := range g.trees {
+				if strings.HasPrefix(c, m[2]) {
+					repo[m[1]] = map[string]any{"oid": c, "tree": map[string]any{"oid": tr}}
+				}
+			}
+		}
+		return model.MustJSON(map[string]any{"repository": repo}), nil
+	}
 	if strings.Contains(q, "{number mergeable mergeStateStatus}") {
 		g.light = append(g.light, q)
 	}
@@ -340,22 +361,6 @@ func hubJob(id int64, queue, sha, state string, ok bool) HubJob {
 	return j
 }
 
-func policyText(t *testing.T) string {
-	t.Helper()
-	b, err := os.ReadFile("../../mergecheck/testdata/golden.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var g struct {
-		Rule string `json:"rule"`
-	}
-	_ = json.Unmarshal(b, &g)
-	if len(g.Rule) < 500 {
-		t.Fatalf("policy text %d B", len(g.Rule))
-	}
-	return g.Rule
-}
-
 const (
 	headA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	headB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -382,7 +387,7 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	now := time.Date(2026, 11, 11, 1, 0, 0, 0, time.UTC)
 	w := &world{t: t, now: now, hub: &fakeHub{tests: map[int64]int{}},
-		in: map[string]json.RawMessage{"rule": model.MustJSON(policyText(t))},
+		in: map[string]json.RawMessage{},
 		watch: model.ScoutWatch{Repo: "bic/aether", Authors: []string{ours, his}, Labels: []string{"effort-router"},
 			TitleMatch: `^\[(Effort|MD1)[^\]]*\]`, Paths: []string{"**/decision_judge/**", "**/system1*"}}}
 	old := now.Add(-time.Hour)
@@ -702,24 +707,27 @@ func TestSettlingChecksAreReRead(t *testing.T) {
 	}
 }
 
-// ms is the first unmet step of the rule on the inputs form. Today's rule requires check-ni at the head: a check-ni
-// finishing moves it (re-read, rewritten); one passed by a descendant counts; the hub's own verdict wins; a cancelled
-// job is no job; opt-in jobs (gate-kit) are evidence only (bj, with their tests_run), never a wait.
+// ms is rule.merge_ready (mergecheck): a bot approval at the head, no red of ours, no conflict. A check-ni is never
+// waited on: running reads ready; a FAIL is a red of ours (re-read, rewritten); one passed by a descendant counts; the
+// hub's own verdict wins; a cancelled job is no job; opt-in jobs (gate-kit) are evidence only (bj, with their
+// tests_run), never a red.
 func TestMergeStateAndBandJobs(t *testing.T) {
 	w := newWorld(t)
 	ms := func(r Result, n string) any { return entry(t, r, "pr:"+n)["ms"] }
+	if r := w.pass(0); ms(r, "101") != "waiting: bot approval" || ms(r, "102") != "draft" {
+		t.Fatalf("no approval: %v; draft: %v", ms(r, "101"), ms(r, "102"))
+	}
+	w.gh.items[101].reviews = []map[string]any{{"author": map[string]any{"login": "lukas"}, "state": "APPROVED", "commit": map[string]any{"oid": headA}}}
+	w.gh.items[101].updated = w.now.Add(time.Minute)
 	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "leased", false), hubJob(8, "aether.gate-kit", headA, "failed", false)}
-	r0 := w.pass(0)
-	if got := ms(r0, "101"); got != "waiting: band jobs" {
-		t.Fatalf("check-ni running: %v", got)
+	r0 := w.pass(2 * time.Minute)
+	if got := ms(r0, "101"); got != "ready" {
+		t.Fatalf("approved, check-ni running (gate-kit FAIL is opt-in): %v", got)
 	}
-	if got := ms(r0, "102"); got != "draft" {
-		t.Fatalf("draft: %v", got)
-	}
-	w.hub.jobs[0] = hubJob(7, "aether.check-ni", headA, "done", true)
+	w.hub.jobs[0] = hubJob(7, "aether.check-ni", headA, "failed", false)
 	r := w.pass(2 * time.Minute)
-	if got := ms(r, "101"); r.GHCalls != 2 || got == "waiting: band jobs" {
-		t.Fatalf("check-ni PASS (gate-kit FAIL is opt-in): %d calls, %v", r.GHCalls, got)
+	if got := ms(r, "101"); got != "waiting: no red of ours" {
+		t.Fatalf("check-ni FAIL: %v", got)
 	}
 	// Passed by a descendant (state superseded, ok false): still a pass. A cancelled newer job is no job.
 	pbd := hubJob(9, "aether.check-ni", headA, "superseded", false)
@@ -727,7 +735,7 @@ func TestMergeStateAndBandJobs(t *testing.T) {
 	cancelled := hubJob(10, "aether.check-ni", headA, "leased", false)
 	cancelled.Result.CancelledBy = json.RawMessage(`"newer"`)
 	w.hub.jobs = []HubJob{cancelled, pbd}
-	if r := w.pass(2 * time.Minute); r.Set["pr:101"] == nil || ms(r, "101") == "waiting: band jobs" ||
+	if r := w.pass(2 * time.Minute); r.Set["pr:101"] == nil || ms(r, "101") != "ready" ||
 		!strings.Contains(string(r.Set["pr:101"]), `"bj":[[9,"check-ni","PASS"]]`) {
 		t.Fatalf("pass by descendant: %s", r.Set["pr:101"])
 	}
@@ -735,7 +743,7 @@ func TestMergeStateAndBandJobs(t *testing.T) {
 	v := hubJob(11, "aether.check-ni", headA, "done", true)
 	v.Result.Verdict = "FAIL"
 	w.hub.jobs = []HubJob{v}
-	if r := w.pass(2 * time.Minute); ms(r, "101") != "waiting: band jobs" {
+	if r := w.pass(2 * time.Minute); ms(r, "101") != "waiting: no red of ours" {
 		t.Fatalf("hub verdict FAIL: %v", ms(r, "101"))
 	}
 	// Opt-in evidence with its count.
@@ -750,27 +758,84 @@ func TestMergeStateAndBandJobs(t *testing.T) {
 	if _, kept := w.st.Tests[12]; kept {
 		t.Fatalf("a count outlived its job: %v", w.st.Tests)
 	}
-	// No rule on the inputs form: unknown, said in the log.
-	w.in = map[string]json.RawMessage{}
+	// The retired policy text on the inputs form is not read.
+	w.in["rule"] = model.MustJSON("## band-jobs: band jobs\naether.check-ni at the head")
 	w.gh.items[101].updated = w.now.Add(time.Minute)
-	r = w.pass(2 * time.Minute)
-	if ms(r, "101") != "unknown" || !strings.Contains(strings.Join(r.Log, " "), "no merge policy") {
-		t.Fatalf("no rule: %v %v", ms(r, "101"), r.Log)
+	if r = w.pass(2 * time.Minute); ms(r, "101") != "ready" {
+		t.Fatalf("inputs key rule read: %v", ms(r, "101"))
 	}
 }
 
-// The PR's own diff classifies it (fk, and the band-jobs step): #108334's shape (only a *_tests.rs, check-ni PASS) is
-// past band jobs; a docs-only PR needs no job at all; a page of docs with more pages is not known.
+// The ask (dashboard-steward 11-17): an approval at the head with Runtime CI still running reads ready, not
+// "waiting: Runtime CI"; a Runtime red unsets it until the board proves it main-side (red_not_ours).
+func TestReadyWhileChecksRun(t *testing.T) {
+	w := newWorld(t)
+	ms := func(r Result) any { return entry(t, r, "pr:101")["ms"] }
+	p := w.gh.items[101]
+	p.checks = []map[string]any{{"name": "Aether Runtime PR Pipeline", "status": "IN_PROGRESS"}}
+	p.reviews = []map[string]any{{"author": map[string]any{"login": "Ilya-Grebnov"}, "state": "APPROVED", "commit": map[string]any{"oid": headA}}}
+	if got := ms(w.pass(0)); got != "ready" {
+		t.Fatalf("approved, Runtime CI running: %v", got)
+	}
+	p.checks = []map[string]any{{"name": "Aether Runtime PR Pipeline", "conclusion": "FAILURE"}}
+	p.updated = w.now.Add(time.Minute)
+	if got := ms(w.pass(2 * time.Minute)); got != "waiting: no red of ours" {
+		t.Fatalf("Runtime red: %v", got)
+	}
+	w.board = map[string]json.RawMessage{"prs": model.MustJSON(map[string]any{"cw-1": map[string]any{"pr": 101, "red_not_ours": "main build 9 red too"}})}
+	if got := ms(w.pass(2 * time.Minute)); got != "ready" {
+		t.Fatalf("Runtime red proven main-side: %v", got)
+	}
+}
+
+// A same-tree head keeps a written verdict: the tree of the head it names is asked once (one query for the pass),
+// kept on the tracked PR, and dropped when no verdict names that head any more.
+func TestSameTreeKeepsApproval(t *testing.T) {
+	w := newWorld(t)
+	ms := func(r Result) any { return entry(t, r, "pr:101")["ms"] }
+	p := w.gh.items[101]
+	p.tree = "7777777777777777777777777777777777777777"
+	w.gh.trees = map[string]string{headB: p.tree, headC: "8888888888888888888888888888888888888888"}
+	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB[:8], "APPROVE")}
+	r := w.pass(0)
+	if got := ms(r); got != "ready" || fmt.Sprint(w.gh.asked) != "[bbbbbbbb]" || r.GHCalls != 2 {
+		t.Fatalf("same tree: ms %v, asked %v, %d calls", got, w.gh.asked, r.GHCalls)
+	}
+	if tr := w.st.PRs[101].Trees; fmt.Sprint(tr) != "map[bbbbbbbb:777777777777]" {
+		t.Fatalf("tracked trees %v", tr)
+	}
+	p.updated = w.now.Add(time.Minute)
+	if r = w.pass(2 * time.Minute); len(w.gh.asked) != 1 || r.GHCalls != 1 {
+		t.Fatalf("a known tree asked again: %v, %d calls", w.gh.asked, r.GHCalls)
+	}
+	// An automaton approve at a head with another tree is another head.
+	p.comments = []map[string]any{{"author": map[string]any{"login": "bob"}, "createdAt": "2026-11-12T11:00:00Z",
+		"body": "<!-- automaton:101:cccccccc verdict:approve -->"}}
+	p.updated = w.now.Add(time.Minute)
+	if r = w.pass(2 * time.Minute); ms(r) != "waiting: bot approval" || fmt.Sprint(w.st.PRs[101].Trees) != "map[cccccccc:888888888888]" {
+		t.Fatalf("other tree: ms %v, trees %v", ms(r), w.st.PRs[101].Trees)
+	}
+	// The automaton's written approve at the head itself: no lookup.
+	p.comments = []map[string]any{{"author": map[string]any{"login": "bob"}, "createdAt": "2026-11-12T12:00:00Z",
+		"body": "<!-- automaton:101:aaaaaaaa verdict:approve -->"}}
+	p.updated = w.now.Add(time.Minute)
+	if r = w.pass(2 * time.Minute); ms(r) != "ready" || len(w.gh.asked) != 2 || w.st.PRs[101].Trees != nil {
+		t.Fatalf("automaton at head: ms %v, asked %v, trees %v", ms(r), w.gh.asked, w.st.PRs[101].Trees)
+	}
+}
+
+// The PR's own diff classifies it (fk; a docs-only PR's check-ni is not read for a red): #108334's shape (only a
+// *_tests.rs) is tests; a page of docs with more pages is not known.
 func TestFilesKind(t *testing.T) {
 	w := newWorld(t)
 	w.gh.items[101].files = []string{"aether_rust/crates/aether_grpc/src/effort_stamp_tests.rs"}
 	w.gh.items[201].files = []string{"README.md", "aether_rust/docs/decision_judge/x.md"}
 	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "done", true)}
 	r := w.pass(0)
-	if e := entry(t, r, "pr:101"); e["fk"] != "tests" || e["ms"] == "waiting: band jobs" {
+	if e := entry(t, r, "pr:101"); e["fk"] != "tests" {
 		t.Fatalf("tests-only: %v", e)
 	}
-	if e := entry(t, r, "pr:201"); e["fk"] != "docs" || e["ms"] == "waiting: band jobs" {
+	if e := entry(t, r, "pr:201"); e["fk"] != "docs" {
 		t.Fatalf("docs-only: %v", e)
 	}
 	more := PR{Files: []string{"a.md"}, FilesMore: "x"}
@@ -799,26 +864,25 @@ func TestTestsRoute(t *testing.T) {
 	}
 }
 
-// A check-ni PASS that checked 0 crates is no verdict (band jobs not met, the evidence says why); unknown (null)
-// reads as a pass, as before the hub counted; a known count passes, is cached (not asked again) and shown in bj.
+// A check-ni's crates checked is evidence in bj (0 shown as 0, unknown left out), asked once per job and cached.
 func TestCheckNiCratesChecked(t *testing.T) {
 	w := newWorld(t)
 	w.hub.crates = map[int64]int{}
 	w.hub.jobs = []HubJob{hubJob(7, "aether.check-ni", headA, "done", true)}
 	r := w.pass(0)
-	if e := entry(t, r, "pr:101"); e["ms"] == "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[7 check-ni PASS]]" {
+	if e := entry(t, r, "pr:101"); fmt.Sprint(e["bj"]) != "[[7 check-ni PASS]]" {
 		t.Fatalf("crates unknown: %v %v", e["ms"], e["bj"])
 	}
 	w.hub.crates[7] = 0
 	r = w.pass(2 * time.Minute)
-	if e := entry(t, r, "pr:101"); e["ms"] != "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[7 check-ni PASS <nil> 0]]" || w.st.Crates[7] != 0 {
+	if e := entry(t, r, "pr:101"); fmt.Sprint(e["bj"]) != "[[7 check-ni PASS <nil> 0]]" || w.st.Crates[7] != 0 {
 		t.Fatalf("0 crates: %v %v", e["ms"], e["bj"])
 	}
 	// A new check-ni that checked 12: band jobs met; the count is asked once.
 	w.hub.jobs = []HubJob{hubJob(8, "aether.check-ni", headA, "done", true)}
 	w.hub.crates[8] = 12
 	r = w.pass(2 * time.Minute)
-	if e := entry(t, r, "pr:101"); e["ms"] == "waiting: band jobs" || fmt.Sprint(e["bj"]) != "[[8 check-ni PASS <nil> 12]]" {
+	if e := entry(t, r, "pr:101"); fmt.Sprint(e["bj"]) != "[[8 check-ni PASS <nil> 12]]" {
 		t.Fatalf("12 crates: %v %v", e["ms"], e["bj"])
 	}
 	asked := w.hub.asked
@@ -831,12 +895,17 @@ func TestCheckNiCratesChecked(t *testing.T) {
 	}
 }
 
-// Owner marks are read from the board (read-only): a mark landing re-reads the PR and moves merge_state.
+// Owner marks are read from the board (read-only): a mark landing re-reads the PR and moves merge_state. Only the
+// not-ours proofs are marks now: a retired mark (chiqun_notified) re-reads nothing.
 func TestBoardMarksMoveMergeState(t *testing.T) {
 	w := newWorld(t)
 	w.board = map[string]json.RawMessage{"prs": model.MustJSON(map[string]any{})}
 	w.pass(0)
 	w.board["prs"] = model.MustJSON(map[string]any{"cache-1": map[string]any{"pr": 101, "chiqun_notified": map[string]any{"at": "x"}}})
+	if r := w.pass(2 * time.Minute); r.GHCalls != 1 {
+		t.Fatalf("a retired mark re-read: %d calls", r.GHCalls)
+	}
+	w.board["prs"] = model.MustJSON(map[string]any{"cache-1": map[string]any{"pr": 101, "red_not_ours": "main red too"}})
 	if r := w.pass(2 * time.Minute); r.GHCalls != 2 {
 		t.Fatalf("a mark change did not re-read: %d calls", r.GHCalls)
 	}

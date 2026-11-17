@@ -68,8 +68,9 @@ const JobsWindow = 72 * time.Hour
 // SchemaVersion is the shape of the entries this code writes. A state written
 // under another one (a code upgrade that changed the entries) re-reads every
 // tracked PR and issue once and rewrites every entry, as a filter change does.
-// Bump it with any change to PREntry or IssueEntry.
-const SchemaVersion = 6
+// Bump it with any change to PREntry or IssueEntry, or to what a value means
+// (7: ms follows rule.merge_ready).
+const SchemaVersion = 7
 
 // KeepClosed is the least an entry stays after its PR merged or closed (and,
 // for a PR, until its ledger record is acked), or its issue closed (S2).
@@ -199,7 +200,8 @@ type Hub interface {
 //	          f fail, w pending, x failing names}, ar architect / lk lukas /
 //	          au automaton {v verdict, h head8 read (absent: h), at (ar only)},
 //	          th open threads, mg mergeable, ms merge_state (merged closed draft
-//	          unknown ready "waiting: <step>"), u updated, m merged, cl closed
+//	          unknown ready "waiting: <step>" "blocked: architect RC at <h8>";
+//	          mergecheck, rule.merge_ready), u updated, m merged, cl closed
 //	          without merging, cr created,
 //	          rd ready for review (absent and not d: cr), ln [additions,
 //	          deletions], fk files kind (docs tests code), bj band jobs at h
@@ -272,7 +274,7 @@ func (b Band) MarshalJSON() ([]byte, error) {
 }
 
 // Band is one band job's evidence at the head (h): the newest per queue and
-// tests param, as the band-jobs step reads them.
+// tests param (evidence; the no-red step reads the check-ni).
 type Band struct {
 	ID      int64  `json:"i"`
 	Queue   string `json:"q"` // without aether.
@@ -376,22 +378,23 @@ func IssueKey(n int) string { return "issue:" + strconv.Itoa(n) }
 // TrackedPR is what the state keeps per tracked PR between passes, kept small:
 // it sits on the same form as the entries.
 type TrackedPR struct {
-	State     string `json:"s"`              // OPEN, MERGED, CLOSED
-	Head      string `json:"h,omitempty"`    // 12 hex
-	Entry     string `json:"e"`              // digest of the entry last written
-	Inputs    string `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
-	Settling  bool   `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
-	Owner     int    `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
-	Mergeable string `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
-	Base      string `json:"bs,omitempty"`   // its base branch, "" is main (the base-head watch)
-	RC        string `json:"rc,omitempty"`   // the architect RC comment last pinged (its createdAt): one ping per RC
-	Links     []int  `json:"l,omitempty"`    // issue numbers its body links
-	Size      int    `json:"b,omitempty"`    // bytes of its entry on the form
-	Held      bool   `json:"held,omitempty"` // new while the form was at its cap: not written yet
-	Done      int64  `json:"z,omitempty"`    // merged or closed (unix)
-	Outbox    int64  `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
-	Record    string `json:"rh,omitempty"`   // that record's hash, 16 hex
-	Acked     bool   `json:"k,omitempty"`    // the steward acked that record
+	State     string            `json:"s"`              // OPEN, MERGED, CLOSED
+	Head      string            `json:"h,omitempty"`    // 12 hex
+	Entry     string            `json:"e"`              // digest of the entry last written
+	Inputs    string            `json:"x,omitempty"`    // digest of the band jobs, counts and owner marks the checklist last saw
+	Settling  bool              `json:"r,omitempty"`    // checks pending or mergeability unknown: re-read next pass
+	Owner     int               `json:"oi,omitempty"`   // its owner rule (S5, 1-based into the config's owners), resolved when last read
+	Mergeable string            `json:"mk,omitempty"`   // the last mergeable GitHub settled on (MERGEABLE, CONFLICTING)
+	Base      string            `json:"bs,omitempty"`   // its base branch, "" is main (the base-head watch)
+	RC        string            `json:"rc,omitempty"`   // the architect RC comment last pinged (its createdAt): one ping per RC
+	Trees     map[string]string `json:"tr,omitempty"`   // sha a written verdict names off the head -> its tree (12 hex, "-" none)
+	Links     []int             `json:"l,omitempty"`    // issue numbers its body links
+	Size      int               `json:"b,omitempty"`    // bytes of its entry on the form
+	Held      bool              `json:"held,omitempty"` // new while the form was at its cap: not written yet
+	Done      int64             `json:"z,omitempty"`    // merged or closed (unix)
+	Outbox    int64             `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
+	Record    string            `json:"rh,omitempty"`   // that record's hash, 16 hex
+	Acked     bool              `json:"k,omitempty"`    // the steward acked that record
 }
 
 // TrackedIssue is what the state keeps per tracked issue.
@@ -518,10 +521,6 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		if filesRE, err = regexp.Compile(in.Watch.FilesTitle); err != nil {
 			return res, fmt.Errorf("files_title: %w", err)
 		}
-	}
-	pol := mergecheck.Parse(inputString(in.Inputs["rule"]))
-	if len(pol.Steps) == 0 {
-		logf("no merge policy on the inputs form (key rule): merge_state not computed")
 	}
 
 	// A changed filter (repo, authors, labels, title, paths) re-reads every open item: an untouched PR that the new
@@ -745,6 +744,13 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 	}
 
+	// 2c. the trees of the heads written verdicts name off the PR head (rule.merge_ready: a same-tree head keeps an
+	// approval): one query for every PR this pass, each sha asked once (TrackedPR.Trees).
+	trees, err := verdictTrees(&st, fresh, in.Watch.Repo, call)
+	if err != nil {
+		logf("verdict trees: %v (asked again next pass)", err)
+	}
+
 	// PR entries.
 	sentNow := map[int]bool{} // ledger records sent this pass: an ack can only be of an older one
 	var conflictPings []plugin.Ping
@@ -773,7 +779,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		head := cut(p.Facts.Oid, 12)
 		js := jobsFor(jobs, st.Tests, head)
 		mk := marks.of(n)
-		e := prEntry(p, pol, js, mk)
+		t.Trees = treesOf(p, trees)
+		p.withTrees(t.Trees)
+		e := prEntry(p, js, mk)
 		if filesRE != nil && p.Facts.State == "OPEN" && filesRE.MatchString(p.Title) && filesBy(in.Watch, p.Author) {
 			e.Files = Grouped(p.Files, MaxFiles)
 		}
@@ -791,7 +799,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			logf("PR #%d turned conflicting", n)
 		}
 		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Warden 11-13).
-		if _, rc := mergecheck.ArchState(&p.Facts, p.Arch); rc && p.Arch.At != t.RC {
+		if mergecheck.ArchBlock(&p.Facts, p.Arch) != "" && p.Arch.At != t.RC {
 			if role := roleOf(owners, p.Author, p.Title); role != "" && rcAfter(p.Arch.At, st.RCSince) {
 				conflictPings = append(conflictPings, plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
 					"scout: PR #%d %q is BLOCKED: architect REQUEST_CHANGES at %s (%s): fix and push for a fresh pass",
@@ -1078,10 +1086,96 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	return res, nil
 }
 
-func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREntry {
+// offHead are the shas the PR's written verdicts (the architect's, the automaton's) name other than its head: the
+// ones whose tree decides a same-tree head. None when the head's tree is not known.
+func offHead(p PR) []string {
+	if p.Facts.State != "OPEN" || p.Facts.Tree == "" {
+		return nil
+	}
+	var out []string
+	add := func(sha string) {
+		if at, _ := mergecheck.AtHead(&mergecheck.Facts{Oid: p.Facts.Oid}, sha, ""); sha != "" && !at && !contains(out, sha) {
+			out = append(out, sha)
+		}
+	}
+	if p.Arch != nil && p.Arch.Verdict != "" {
+		add(p.Arch.Sha)
+	}
+	if p.Automaton != nil {
+		add(p.Automaton.Head)
+	}
+	return out
+}
+
+// verdictTrees is the tree of every sha offHead names for the fresh PRs: the tracked one when known, else asked in
+// one query. A failed query leaves those trees unknown (a same-tree head reads as another head this pass).
+func verdictTrees(st *State, fresh map[int]PR, repo string, call func(string) (json.RawMessage, error)) (map[string]string, error) {
+	known, seen := map[string]string{}, map[string]bool{}
+	var ask []string
+	for _, n := range sortedKeys(fresh) {
+		for _, sha := range offHead(fresh[n]) {
+			if t := st.PRs[n]; t != nil && t.Trees[sha] != "" {
+				known[sha] = t.Trees[sha]
+			} else if !seen[sha] {
+				seen[sha] = true
+				ask = append(ask, sha)
+			}
+		}
+	}
+	if len(ask) == 0 {
+		return known, nil
+	}
+	data, err := call(treesQuery(repo, ask))
+	if err != nil {
+		return known, err
+	}
+	got, err := decodeTrees(data, ask)
+	for sha, t := range got {
+		known[sha] = t
+	}
+	return known, err
+}
+
+// treesOf is the PR's own slice of the known trees: the shas offHead names now (an older one is dropped).
+func treesOf(p PR, known map[string]string) map[string]string {
+	var out map[string]string
+	for _, sha := range offHead(p) {
+		if t := known[sha]; t != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[sha] = t
+		}
+	}
+	return out
+}
+
+// withTrees gives the PR's written verdicts the trees of the heads they name (trees: sha -> tree, "-" none).
+func (p *PR) withTrees(trees map[string]string) {
+	tree := func(sha string) string {
+		if t := trees[sha]; t != "-" {
+			return t
+		}
+		return ""
+	}
+	if p.Arch != nil {
+		a := *p.Arch
+		a.Tree = tree(a.Sha)
+		p.Arch = &a
+	}
+	if p.Automaton != nil {
+		p.AutoTree = tree(p.Automaton.Head)
+	}
+}
+
+func prEntry(p PR, js headJobs, mk mergecheck.Marks) PREntry {
 	var steps []mergecheck.Row
-	if p.Facts.State == "OPEN" && len(pol.Steps) > 0 {
-		steps = mergecheck.Checklist(pol, p.Facts, js.jobs, mk, js.tests, p.Arch, p.KindFiles())
+	if p.Facts.State == "OPEN" {
+		c := mergecheck.In{Facts: p.Facts, Jobs: js.jobs, Marks: mk, Arch: p.Arch, Files: p.KindFiles()}
+		if v := p.Automaton; v != nil {
+			c.Written = []mergecheck.Written{{By: mergecheck.Automaton, Verdict: v.Verdict, Sha: v.Head, Tree: p.AutoTree}}
+		}
+		steps = mergecheck.Checklist(c)
 	}
 	head8 := short(p.Facts.Oid)
 	at := func(sha string) string { // a verdict at the entry's own head leaves h out
@@ -1103,9 +1197,9 @@ func prEntry(p PR, pol mergecheck.Policy, js headJobs, mk mergecheck.Marks) PREn
 	if e.Base == "main" {
 		e.Base = ""
 	}
-	// The architect's verdict overrides the step order (Warden 11-13); a conflict still comes first.
-	if ms, _ := mergecheck.ArchState(&p.Facts, p.Arch); ms != "" && e.MergeState != "waiting: conflict" {
-		e.MergeState = ms
+	// An architect RC at the head overrides the step order (Warden 11-13); a conflict still comes first.
+	if b := mergecheck.ArchBlock(&p.Facts, p.Arch); b != "" && e.MergeState != "waiting: conflict" {
+		e.MergeState = b
 	}
 	if e.Ready == e.Created && !p.Facts.Draft {
 		e.Ready = 0 // ready when created
@@ -1302,14 +1396,6 @@ func jobsFor(jobs map[string][]mergecheck.Job, tests map[int64]int, head string)
 	return headJobs{jobs: js, tests: t}
 }
 
-func inputString(raw json.RawMessage) string {
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
-	}
-	return ""
-}
-
 // marks are the owner-written marks per PR the checklist reads, from the board
 // (read-only): the prs row naming the PR, then the item naming it (as
 // minister-control).
@@ -1342,8 +1428,8 @@ func boardMarks(board map[string]json.RawMessage) marks {
 	return m
 }
 
-// markKeys are the only fields the checklist reads from a row or item.
-var markKeys = []string{"majors_handled", "majors_note", "marginal", "marginal_reason", "chiqun_notified", "rust_not_ours"}
+// markKeys are the only fields the checklist reads from a row or item: the proof a red is main-side.
+var markKeys = []string{"red_not_ours", "rust_not_ours"}
 
 func (m marks) of(n int) mergecheck.Marks {
 	pick := func(src map[string]any) map[string]any {

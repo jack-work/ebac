@@ -20,10 +20,10 @@ createdAt updatedAt mergedAt closedAt additions deletions reviewDecision author{
 timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{__typename ... on ReadyForReviewEvent{createdAt}}}
 files(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{path}}
 closingIssuesReferences(first:10){nodes{number}}
-latestOpinionatedReviews(first:20){nodes{author{login} state submittedAt commit{oid}}}
+latestOpinionatedReviews(first:20){nodes{author{login} state submittedAt commit{oid tree{oid}}}}
 reviewThreads(first:100){nodes{isResolved}}
 comments(last:30){nodes{author{login} createdAt body}}
-commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:60){nodes{
+commits(last:1){nodes{commit{oid tree{oid} statusCheckRollup{state contexts(first:60){nodes{
 ... on CheckRun{name conclusion status detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`
 
 // issueFields is everything a pass reads about one issue, including who made
@@ -144,6 +144,52 @@ func filesQuery(repo string, n int, after string) string {
 		owner, name, n, after)
 }
 
+// commitTree is a commit's oid and tree (a same-tree head keeps a bot approval, rule.merge_ready).
+type commitTree struct {
+	Oid  string `json:"oid"`
+	Tree *struct {
+		Oid string `json:"oid"`
+	} `json:"tree"`
+}
+
+func (c *commitTree) tree() string {
+	if c == nil || c.Tree == nil {
+		return ""
+	}
+	return c.Tree.Oid
+}
+
+// treesQuery asks the trees of commits by (abbreviated) sha, aliases t<i>: a sha the repo does not have answers null.
+func treesQuery(repo string, shas []string) string {
+	owner, name, _ := strings.Cut(repo, "/")
+	var b strings.Builder
+	fmt.Fprintf(&b, "{repository(owner:%q, name:%q){", owner, name)
+	for i, s := range shas {
+		fmt.Fprintf(&b, "t%d: object(expression:%q){... on Commit{oid tree{oid}}} ", i, s)
+	}
+	b.WriteString("}}")
+	return b.String()
+}
+
+// decodeTrees reads a treesQuery answer: sha (as asked) -> its tree (12 hex), "-" when the repo has no such commit.
+func decodeTrees(data json.RawMessage, shas []string) (map[string]string, error) {
+	var r struct {
+		Repository map[string]*commitTree `json:"repository"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("decode trees: %w", err)
+	}
+	out := map[string]string{}
+	for i, s := range shas {
+		t := cut(r.Repository[fmt.Sprintf("t%d", i)].tree(), 12)
+		if t == "" {
+			t = "-"
+		}
+		out[s] = t
+	}
+	return out, nil
+}
+
 type login struct {
 	Typename string `json:"__typename,omitempty"`
 	Login    string `json:"login"`
@@ -218,12 +264,10 @@ type ghNode struct {
 	} `json:"closingIssuesReferences"`
 	Reviews struct {
 		Nodes []struct {
-			Author      *login `json:"author"`
-			State       string `json:"state"`
-			SubmittedAt string `json:"submittedAt"`
-			Commit      *struct {
-				Oid string `json:"oid"`
-			} `json:"commit"`
+			Author      *login      `json:"author"`
+			State       string      `json:"state"`
+			SubmittedAt string      `json:"submittedAt"`
+			Commit      *commitTree `json:"commit"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
 	Threads struct {
@@ -259,6 +303,7 @@ type ghNode struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
+				commitTree
 				Rollup *struct {
 					State    string `json:"state"`
 					Contexts struct {
@@ -310,6 +355,7 @@ type PR struct {
 	Facts     mergecheck.Facts
 	Arch      *mergecheck.Arch
 	Automaton *Verdict
+	AutoTree  string // the tree of the head the automaton's verdict names ("" not known)
 }
 
 // Issue is one issue's facts as a pass read them.
@@ -440,7 +486,10 @@ func toPR(g ghNode) PR {
 		if r.Author != nil {
 			who = r.Author.Login
 		}
-		f.Reviews = append(f.Reviews, mergecheck.Review{Login: who, State: r.State, Oid: oid, At: r.SubmittedAt})
+		f.Reviews = append(f.Reviews, mergecheck.Review{Login: who, State: r.State, Oid: oid, Tree: r.Commit.tree(), At: r.SubmittedAt})
+	}
+	if len(g.Commits.Nodes) > 0 && g.Commits.Nodes[0].Commit.Oid == g.HeadRefOid {
+		f.Tree = g.Commits.Nodes[0].Commit.tree()
 	}
 	if len(g.Commits.Nodes) > 0 && g.Commits.Nodes[0].Commit.Rollup != nil {
 		roll := g.Commits.Nodes[0].Commit.Rollup
@@ -602,7 +651,7 @@ func decodeFiles(data json.RawMessage) ([]string, string, error) {
 	return out, more, nil
 }
 
-// KindFiles are the changed files the band-jobs step classifies: all of them
+// KindFiles are the changed files the checklist classifies (fk; docs-only skips check-ni): all of them
 // when one page held them, else the first page only when it already shows
 // code (the rest cannot make it docs or tests), else nil (not known).
 func (p PR) KindFiles() []string {

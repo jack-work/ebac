@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/mergecheck"
 	"github.com/gluck/ebac/internal/model"
 )
 
@@ -70,69 +69,32 @@ func TestArchitectRCBlocks(t *testing.T) {
 	}
 }
 
-// A hold (a pass in progress) on the PR's own head reads "waiting: architect review"; a hold naming an older head
-// leaves the state to the steps; a conflict still comes first; an unsuperseded RC wins over a hold.
+// A hold (a pass in progress) is no state of its own (rule.merge_ready): with no approval at the head the PR waits on
+// the bot approval (ar shows the hold); any bot approval at the head is ready; an RC at an older head no longer
+// blocks (the fix is pushed); a conflict still comes first.
 func TestArchitectHold(t *testing.T) {
 	w := newWorld(t)
 	p := w.gh.items[101]
 	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB, "APPROVE"), archHold("2026-11-12T11:00:00Z", headA)}
 	e := entry(t, w.pass(0), "pr:101")
-	if e["ms"] != "waiting: architect review" || vs(e["ar"]) != "hold@<nil>@2026-11-12T11:00:00Z" {
+	if e["ms"] != "waiting: bot approval" || vs(e["ar"]) != "hold@<nil>@2026-11-12T11:00:00Z" {
 		t.Fatalf("hold at head: ms %v ar %s", e["ms"], vs(e["ar"]))
 	}
-	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB, "APPROVE"), archHold("2026-11-12T11:00:00Z", headB)}
+	p.reviews = []map[string]any{{"author": map[string]any{"login": "lukas"}, "state": "APPROVED", "commit": map[string]any{"oid": headA}}}
 	p.updated = w.now.Add(time.Minute)
-	e = entry(t, w.pass(2*time.Minute), "pr:101")
-	if e["ms"] == "waiting: architect review" || vs(e["ar"]) != "hold@bbbbbbbb@2026-11-12T11:00:00Z" {
-		t.Fatalf("stale hold: ms %v ar %s", e["ms"], vs(e["ar"]))
+	if e = entry(t, w.pass(2*time.Minute), "pr:101"); e["ms"] != "ready" {
+		t.Fatalf("hold at head, lukas approved: ms %v", e["ms"])
 	}
+	p.reviews = nil
 	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB, "REQUEST_CHANGES"), archHold("2026-11-12T11:00:00Z", headA)}
 	p.updated = w.now.Add(time.Minute)
-	if e = entry(t, w.pass(2*time.Minute), "pr:101"); e["ms"] != "blocked: architect RC at bbbbbbbb" {
-		t.Fatalf("RC then hold at head: ms %v", e["ms"])
+	if e = entry(t, w.pass(2*time.Minute), "pr:101"); e["ms"] != "waiting: bot approval" {
+		t.Fatalf("RC at an older head, then hold at head: ms %v", e["ms"])
 	}
 	p.mergeable, p.mergeState = "CONFLICTING", "DIRTY"
 	p.updated = w.now.Add(time.Minute)
 	if e = entry(t, w.pass(2*time.Minute), "pr:101"); e["ms"] != "waiting: conflict" {
-		t.Fatalf("conflict and RC: ms %v", e["ms"])
-	}
-}
-
-// ArchState is open-only and needs a verdict; an RC with an unparseable time is never superseded (fail closed).
-func TestArchState(t *testing.T) {
-	open := &mergecheck.Facts{State: "OPEN", Oid: headA}
-	rc := &mergecheck.Arch{Verdict: "REQUEST_CHANGES", Sha: headB, At: "2026-11-12T10:00:00Z"}
-	if s, b := mergecheck.ArchState(open, rc); s != "blocked: architect RC at bbbbbbbb" || !b {
-		t.Fatalf("rc: %q %v", s, b)
-	}
-	if s, b := mergecheck.ArchState(&mergecheck.Facts{State: "OPEN", Draft: true, Oid: headA}, rc); s != "" || b {
-		t.Fatalf("draft: %q %v", s, b)
-	}
-	for _, st := range []string{"MERGED", "CLOSED"} {
-		if s, b := mergecheck.ArchState(&mergecheck.Facts{State: st}, rc); s != "" || b {
-			t.Fatalf("%s: %q %v", st, s, b)
-		}
-	}
-	if s, _ := mergecheck.ArchState(open, nil); s != "" {
-		t.Fatalf("nil arch: %q", s)
-	}
-	for _, v := range []string{"APPROVE", "APPROVE_WITH_NOTES", "COMMENT", "UNREAD"} {
-		if s, b := mergecheck.ArchState(open, &mergecheck.Arch{Verdict: v, Sha: headB, At: rc.At}); s != "" || b {
-			t.Fatalf("%s: %q %v", v, s, b)
-		}
-	}
-	other := &mergecheck.Facts{State: "OPEN", Oid: headA, Reviews: []mergecheck.Review{{Login: "someone", State: "APPROVED", At: "2026-11-12T12:00:00Z"}}}
-	if _, b := mergecheck.ArchState(other, rc); !b {
-		t.Fatal("a non-Ilya approve superseded the RC")
-	}
-	cr := &mergecheck.Facts{State: "OPEN", Oid: headA, Reviews: []mergecheck.Review{{Login: "Ilya-Grebnov", State: "CHANGES_REQUESTED", At: "2026-11-12T12:00:00Z"}}}
-	if _, b := mergecheck.ArchState(cr, rc); !b {
-		t.Fatal("an Ilya CHANGES_REQUESTED superseded the RC")
-	}
-	bad := &mergecheck.Arch{Verdict: "REQUEST_CHANGES", Sha: headB, At: "garbage"}
-	ilya := &mergecheck.Facts{State: "OPEN", Oid: headA, Reviews: []mergecheck.Review{{Login: "Ilya-Grebnov", State: "APPROVED", At: "2026-11-12T12:00:00Z"}}}
-	if _, b := mergecheck.ArchState(ilya, bad); !b {
-		t.Fatal("an RC with an unparseable time was superseded")
+		t.Fatalf("conflict: ms %v", e["ms"])
 	}
 }
 
@@ -143,14 +105,14 @@ func TestArchitectRCSeed(t *testing.T) {
 	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}, {Author: his, Role: secretary}}
 	w.gh.items[102].draft = false
 	for _, n := range []int{101, 102, 201} {
-		w.gh.items[n].comments = []map[string]any{archComment("2026-11-10T20:00:00Z", headB, "REQUEST_CHANGES")}
+		w.gh.items[n].comments = []map[string]any{archComment("2026-11-10T20:00:00Z", w.gh.items[n].head, "REQUEST_CHANGES")}
 	}
 	r := w.pass(0)
 	if len(r.Pings) != 0 {
 		t.Fatalf("standing RCs pinged on the first pass: %v", r.Pings)
 	}
-	for _, k := range []string{"pr:101", "pr:102", "pr:201"} {
-		if e := entry(t, r, k); e["ms"] != "blocked: architect RC at bbbbbbbb" {
+	for k, h := range map[string]string{"pr:101": "aaaaaaaa", "pr:102": "bbbbbbbb", "pr:201": "cccccccc"} {
+		if e := entry(t, r, k); e["ms"] != "blocked: architect RC at "+h {
 			t.Fatalf("%s ms %v", k, e["ms"])
 		}
 	}
