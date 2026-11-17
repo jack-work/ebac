@@ -33,7 +33,7 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	w.gh.heads["main"] = "a2aaaaaaaa"
 	w.gh.items[101].mergeable, w.gh.items[101].mergeState = "CONFLICTING", "DIRTY"
 	r = w.pass(2 * time.Minute)
-	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "p101:") || strings.Contains(w.gh.light[0], "p201:") {
+	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "m101:") || strings.Contains(w.gh.light[0], "m201:") {
 		t.Fatalf("mergeability reads %q, bases %v, log %v, q0 %.300s", w.gh.light, w.st.Bases, r.Log, w.gh.queries[len(w.gh.queries)-1])
 	}
 	if e := entry(t, r, "pr:101"); e["mg"] != "CONFLICTING" || e["ms"] != "waiting: conflict" {
@@ -61,7 +61,7 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	w.gh.light = nil
 	w.gh.items[201].mergeable, w.gh.items[201].mergeState = "CONFLICTING", "DIRTY"
 	r = w.pass(2 * time.Minute)
-	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "p201:") || strings.Contains(w.gh.light[0], "p101:") {
+	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "m201:") || strings.Contains(w.gh.light[0], "m101:") {
 		t.Fatalf("recheck reads %q", w.gh.light)
 	}
 	if len(r.Pings) != 1 || r.Pings[0].To != secretary || !strings.Contains(r.Pings[0].Text, "with stack/x") || len(w.st.Recheck) != 0 {
@@ -75,11 +75,16 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	}
 }
 
-// The mergeability query asks two scalars a PR; the refs alias rides a root query and is absent without bases.
+// The mergeability aliases ask two scalars a PR and ride the re-read's query (alone when nothing is re-read); the refs
+// alias rides a root query and is absent without bases.
 func TestBaseWatchQueries(t *testing.T) {
-	q := mergeQuery("bic/aether", []int{1, 2})
-	if !strings.HasPrefix(q, `{repository(owner:"bic", name:"aether"){p1: pullRequest(number:1){number mergeable mergeStateStatus} `) {
+	q := withMerge(batchQuery("bic/aether", nil, nil, false), []int{1, 2})
+	if q != `{repository(owner:"bic", name:"aether"){m1: pullRequest(number:1){number mergeable mergeStateStatus} m2: pullRequest(number:2){number mergeable mergeStateStatus} }}` {
 		t.Fatalf("query %s", q)
+	}
+	if q := withMerge(batchQuery("bic/aether", []int{7}, nil, false), []int{1}); !strings.Contains(q, "p7: pullRequest(number:7){") ||
+		!strings.HasSuffix(q, "m1: pullRequest(number:1){number mergeable mergeStateStatus} }}") {
+		t.Fatalf("one call for the re-read and the mergeability: %s", q)
 	}
 	if got := withRefs("{a0: x }", "bic/aether", []string{"main", "s/x"}); got !=
 		`{a0: x bh: repository(owner:"bic", name:"aether"){r0: ref(qualifiedName:"refs/heads/main"){target{oid}} r1: ref(qualifiedName:"refs/heads/s/x"){target{oid}} } }` {
@@ -100,5 +105,21 @@ func TestSettledConflict(t *testing.T) {
 		if got := settledConflict(c.mg, c.ms); got != c.want {
 			t.Errorf("%s/%s: %v", c.mg, c.ms, got)
 		}
+	}
+}
+
+// GHE quota (11-17): a pass that re-reads a PR and asks mergeability after a base move spends ONE call on both, not two.
+func TestBaseWatchRidesTheReRead(t *testing.T) {
+	w := newWorld(t)
+	w.gh.items[201].base = "stack/x"
+	w.gh.heads = map[string]string{"main": "a1aaaaaaaa", "stack/x": "b1bbbbbbbb"}
+	w.pass(0)
+	w.pass(2 * time.Minute) // bases first seen
+	w.gh.heads["main"] = "a2aaaaaaaa"
+	w.st.PRs[201].Settling = true // re-read this pass
+	w.gh.light, w.gh.queries = nil, nil
+	r := w.pass(2 * time.Minute)
+	if w.gh.calls != 2 || len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "m101:") || !strings.Contains(w.gh.light[0], "p201: pullRequest") {
+		t.Fatalf("%d calls (want the search + one), light %q, log %v", w.gh.calls, w.gh.light, r.Log)
 	}
 }

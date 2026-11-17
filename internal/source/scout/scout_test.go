@@ -169,6 +169,7 @@ var (
 	authorRE  = regexp.MustCompile(`author:(\S+)`)
 	prRE      = regexp.MustCompile(`p(\d+): pullRequest`)
 	issueRE   = regexp.MustCompile(`i(\d+): issueOrPullRequest`)
+	mergeRE   = regexp.MustCompile(`m(\d+): pullRequest`)
 	filesRE   = regexp.MustCompile(`pullRequest\(number:(\d+)\)\{files\(first:100, after:"([^"]*)"\)`)
 )
 
@@ -315,6 +316,12 @@ func (g *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 		n, _ := strconv.Atoi(m[1])
 		if it, ok := g.items[n]; ok && !it.issue {
 			repo["p"+m[1]] = it.gql()
+		}
+	}
+	for _, m := range mergeRE.FindAllStringSubmatch(q, -1) {
+		n, _ := strconv.Atoi(m[1])
+		if it, ok := g.items[n]; ok && !it.issue {
+			repo["m"+m[1]] = it.gql()
 		}
 	}
 	for _, m := range issueRE.FindAllStringSubmatch(q, -1) {

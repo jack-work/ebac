@@ -716,19 +716,31 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	for _, n := range reread {
 		inFull[n] = true
 	}
-	if changed, err := watchBases(&st, in.Watch.Repo, refs, baseHeads, inFull, call, logf); err != nil {
-		logf("base-head watch: %v (asked again next pass)", err)
-	} else {
-		reread = append(reread, changed...)
-	}
+	// The mergeability reads ride the re-read's first call; a PR whose settled mergeability changed is re-read in
+	// full by one more.
+	mergeAsk := basesToAsk(&st, refs, baseHeads, inFull, logf)
 	sort.Ints(reread)
-	chunk := SearchPage
-	for i := 0; i < len(reread); {
+	chunk, light := SearchPage, LightPage
+	for i := 0; i < len(reread) || len(mergeAsk) > 0; {
 		part := reread[i:min(i+chunk, len(reread))]
-		data, err := call(batchQuery(in.Watch.Repo, part, nil, false))
-		if err != nil && tooHeavy(err) && chunk/2 >= MinPage {
-			chunk /= 2
-			logf("re-read batch too heavy for GitHub: %d PRs a batch", chunk)
+		mpart := mergeAsk[:min(light, len(mergeAsk))]
+		data, err := call(withMerge(batchQuery(in.Watch.Repo, part, nil, false), mpart))
+		if err != nil && tooHeavy(err) {
+			if len(part) > 0 && chunk/2 >= MinPage {
+				chunk /= 2
+				logf("re-read batch too heavy for GitHub: %d PRs a batch", chunk)
+				continue
+			}
+			if len(mpart) > 0 && light/2 >= MinPage {
+				light /= 2
+				logf("mergeability batch too heavy for GitHub: %d PRs a batch", light)
+				continue
+			}
+		}
+		if err != nil && len(part) == 0 {
+			logf("base-head watch: mergeability: %v (asked again next pass)", err)
+			st.Recheck = append(st.Recheck, mergeAsk...)
+			mergeAsk = nil
 			continue
 		}
 		if err != nil {
@@ -741,6 +753,19 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 		}
 		for _, p := range prs {
 			fresh[p.Number] = p
+		}
+		if len(mpart) > 0 {
+			mergeAsk = mergeAsk[len(mpart):]
+			got, err := decodeMerge(data)
+			if err != nil {
+				return res, err
+			}
+			for _, n := range mergeChanged(&st, mpart, got) {
+				if !inFull[n] {
+					inFull[n] = true
+					reread = append(reread, n)
+				}
+			}
 		}
 	}
 

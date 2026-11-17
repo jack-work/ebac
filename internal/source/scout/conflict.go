@@ -73,16 +73,17 @@ func decodeRefs(data json.RawMessage, refs []string) (map[string]string, error) 
 	return out, nil
 }
 
-// mergeQuery reads only the mergeability of named PRs (aliases p<n>).
-func mergeQuery(repo string, prs []int) string {
-	owner, name, _ := strings.Cut(repo, "/")
-	var b strings.Builder
-	fmt.Fprintf(&b, "{repository(owner:%q, name:%q){", owner, name)
-	for _, n := range prs {
-		fmt.Fprintf(&b, "p%d: pullRequest(number:%d){number mergeable mergeStateStatus} ", n, n)
+// withMerge adds to a batchQuery (one repository block) an alias m<n> reading only the mergeability of each named
+// PR: the base-head watch rides the re-read's call instead of costing one of its own (GHE quota, 11-17).
+func withMerge(q string, prs []int) string {
+	if len(prs) == 0 || !strings.HasSuffix(q, "}}") {
+		return q
 	}
-	b.WriteString("}}")
-	return b.String()
+	var b strings.Builder
+	for _, n := range prs {
+		fmt.Fprintf(&b, "m%d: pullRequest(number:%d){number mergeable mergeStateStatus} ", n, n)
+	}
+	return q[:len(q)-2] + b.String() + "}}"
 }
 
 type mergeFacts struct {
@@ -99,8 +100,8 @@ func decodeMerge(data json.RawMessage) (map[int]mergeFacts, error) {
 		return nil, fmt.Errorf("decode mergeability: %w", err)
 	}
 	out := map[int]mergeFacts{}
-	for _, m := range r.Repository {
-		if m != nil && m.Number != 0 {
+	for alias, m := range r.Repository {
+		if strings.HasPrefix(alias, "m") && m != nil && m.Number != 0 {
 			out[m.Number] = *m
 		}
 	}
@@ -120,14 +121,13 @@ func settledConflict(mergeable, mergeState string) bool {
 	return mergeable == "CONFLICTING" || mergeState == "DIRTY"
 }
 
-// watchBases takes the base heads the search read (refs, heads; heads nil when not read: nothing moves) and reads the
-// mergeability of the PRs whose base moved, and of those still recomputing. It returns the tracked open PRs (not in
-// skip) whose settled mergeability changed: the caller re-reads them in full.
-func watchBases(st *State, repo string, refs []string, heads map[string]string, skip map[int]bool,
-	call func(string) (json.RawMessage, error), logf func(string, ...any)) ([]int, error) {
+// basesToAsk takes the base heads the search read (refs, heads; heads nil when not read: nothing moves) and returns
+// the PRs whose mergeability to read: those whose base moved, and those still recomputing; never one in skip (read
+// in full this pass anyway).
+func basesToAsk(st *State, refs []string, heads map[string]string, skip map[int]bool, logf func(string, ...any)) []int {
 	if len(refs) == 0 {
 		st.Bases, st.Recheck = nil, nil
-		return nil, nil
+		return nil
 	}
 	moved := map[string]bool{}
 	for _, r := range refs {
@@ -155,7 +155,7 @@ func watchBases(st *State, repo string, refs []string, heads map[string]string, 
 			continue
 		}
 		if skip[n] {
-			continue // read in full this pass anyway
+			continue
 		}
 		ask = append(ask, n)
 	}
@@ -168,37 +168,24 @@ func watchBases(st *State, repo string, refs []string, heads map[string]string, 
 		sort.Strings(names)
 		logf("base head moved: %s: mergeability of %d PR(s) read", strings.Join(names, ", "), len(ask))
 	}
+	st.Recheck = nil // what is asked and still recomputing goes back on it (mergeChanged)
+	return ask
+}
 
-	var changed, recheck []int
-	chunk := LightPage
-	for i := 0; i < len(ask); {
-		part := ask[i:min(i+chunk, len(ask))]
-		data, err := call(mergeQuery(repo, part))
-		if err != nil && tooHeavy(err) && chunk/2 >= MinPage {
-			chunk /= 2
-			logf("mergeability batch too heavy for GitHub: %d PRs a batch", chunk)
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("mergeability: %w", err)
-		}
-		i += len(part)
-		got, err := decodeMerge(data)
-		if err != nil {
-			return nil, err
-		}
-		for _, n := range part {
-			m, ok := got[n]
-			switch {
-			case !ok:
-				// not readable now: the next pass's search or re-read sees it
-			case m.Mergeable != "MERGEABLE" && m.Mergeable != "CONFLICTING":
-				recheck = append(recheck, n) // GitHub recomputing: ask again next pass
-			case m.Mergeable != st.PRs[n].Mergeable:
-				changed = append(changed, n)
-			}
+// mergeChanged reads the mergeability answers for ask: it returns the PRs whose settled mergeability changed (the
+// caller re-reads them in full) and puts those GitHub is still recomputing back on st.Recheck.
+func mergeChanged(st *State, ask []int, got map[int]mergeFacts) []int {
+	var changed []int
+	for _, n := range ask {
+		m, ok := got[n]
+		switch {
+		case !ok:
+			// not readable now: the next pass's search or re-read sees it
+		case m.Mergeable != "MERGEABLE" && m.Mergeable != "CONFLICTING":
+			st.Recheck = append(st.Recheck, n) // GitHub recomputing: ask again next pass
+		case m.Mergeable != st.PRs[n].Mergeable:
+			changed = append(changed, n)
 		}
 	}
-	st.Recheck = recheck
-	return changed, nil
+	return changed
 }

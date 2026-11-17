@@ -126,7 +126,7 @@ func TestLiveBaseWatchReadOnly(t *testing.T) {
 	sort.Ints(open)
 	var conflicting []int
 	for i := 0; i < len(open); i += LightPage {
-		data, err := gh.GraphQL(context.Background(), mergeQuery(critic.Watch.Repo, open[i:min(i+LightPage, len(open))]))
+		data, err := gh.GraphQL(context.Background(), withMerge(batchQuery(critic.Watch.Repo, nil, nil, false), open[i:min(i+LightPage, len(open))]))
 		if err != nil {
 			t.Fatal(err)
 		}
