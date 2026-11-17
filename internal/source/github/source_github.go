@@ -107,8 +107,9 @@ func retireGone(rep *plugin.Reply, w *model.Critic, gone []model.PRRef, errs map
 }
 
 // FullReadEvery bounds how long a PR whose fingerprint has not moved goes
-// without a full read: a comment edit moves no fingerprint.
-const FullReadEvery = 30 * time.Minute
+// without a full read: a comment edit moves no fingerprint. 2 h since the GHE
+// quota (11-17): a full read of ledger-front's 16 PRs is ~13 points.
+const FullReadEvery = 2 * time.Hour
 
 // probeFrom is the PR count from which a cheap probe (1 point for the whole
 // set) before the full read pays: a full read of one PR also costs 1 point.

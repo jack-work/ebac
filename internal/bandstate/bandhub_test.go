@@ -399,12 +399,12 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 	if calls != 1 || !has(r.State.View.Dupes, "superseded 4246") {
 		t.Fatalf("first round: %d calls, dupes %v", calls, r.State.View.Dupes)
 	}
-	r = Step(ctx, r.State, h, Config{}, now.Add(4*time.Minute), tip, desc)
+	r = Step(ctx, r.State, h, Config{}, now.Add(TipEvery-time.Minute), tip, desc)
 	if calls != 1 {
 		t.Fatalf("tips asked again within %s: %d calls", TipEvery, calls)
 	}
 	fail = true
-	r = Step(ctx, r.State, h, Config{}, now.Add(6*time.Minute), tip, desc)
+	r = Step(ctx, r.State, h, Config{}, now.Add(TipEvery+time.Minute), tip, desc)
 	if calls != 2 || r.State.TipErr == "" || !has(r.State.View.Dupes, "superseded 4246") {
 		t.Fatalf("a failed refresh must keep the old tips and say so: calls %d err %q dupes %v", calls, r.State.TipErr, r.State.View.Dupes)
 	}
@@ -439,7 +439,7 @@ func setBytes(set map[string]json.RawMessage) int {
 
 // The descent check through Step: an OLDER tip (compare: behind) is never flagged, a true descendant is; each
 // (sha, tip) pair costs one call, cached across rounds; an error is unknown (nothing flagged), not cached, and
-// retried no sooner than TipEvery; a pair no live job needs leaves the cache.
+// retried no sooner than DescRetry; a pair no live job needs leaves the cache.
 func TestStepDescent(t *testing.T) {
 	ctx := context.Background()
 	h := fixture(t)
@@ -474,17 +474,17 @@ func TestStepDescent(t *testing.T) {
 	}
 	// The forge catches up: the tip is now a descendant (asked at the next tip refresh).
 	cur, fail = newer, true
-	r = Step(ctx, r.State, h, Config{}, now.Add(6*time.Minute), tip, desc)
+	r = Step(ctx, r.State, h, Config{}, now.Add(TipEvery+time.Minute), tip, desc)
 	if has(r.State.View.Dupes, "superseded") || r.State.DescErr == "" {
 		t.Fatalf("a failed compare must be unknown and say so: dupes %v err %q", r.State.View.Dupes, r.State.DescErr)
 	}
 	before := len(calls)
 	fail = false
-	r = Step(ctx, r.State, h, Config{}, now.Add(7*time.Minute), tip, desc)
+	r = Step(ctx, r.State, h, Config{}, now.Add(TipEvery+2*time.Minute), tip, desc)
 	if len(calls) != before || calls[Pair("1c93d0cbdb78231be750c9e188777b9b47124a9d", newer)] != 1 {
 		t.Fatalf("retried inside the back-off: %v", calls)
 	}
-	r = Step(ctx, r.State, h, Config{}, now.Add(12*time.Minute), tip, desc)
+	r = Step(ctx, r.State, h, Config{}, now.Add(TipEvery+time.Minute+DescRetry+time.Minute), tip, desc)
 	if !has(r.State.View.Dupes, "superseded 4246") || r.State.DescErr != "" {
 		t.Fatalf("descendant tip not flagged after the back-off: dupes %v err %q", r.State.View.Dupes, r.State.DescErr)
 	}

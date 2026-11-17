@@ -20,8 +20,12 @@ type Config struct {
 // DefaultRepo is where the hub's branch-carrying jobs (aether.*) build from.
 const DefaultRepo = "bic/aether"
 
-// TipEvery bounds forge calls for the superseded check.
-const TipEvery = 5 * time.Minute
+// TipEvery bounds forge calls for the superseded check (one GraphQL point a
+// refresh; 15 min since the GHE quota, 11-17: a superseded flag may lag).
+const TipEvery = 15 * time.Minute
+
+// DescRetry is how long a failed descent check backs off.
+const DescRetry = 5 * time.Minute
 
 // State is what the mirror carries from one round to the next (the plugin's
 // opaque state): the view it last wrote, and the cached branch tips.
@@ -38,7 +42,7 @@ type State struct {
 	TipErr    string            `json:"tip_err,omitempty"`
 	// Desc caches descent verdicts, Pair(job sha, tip) -> tip strictly
 	// descends from sha: one forge call per new pair. An error is not a
-	// verdict: it is retried, no sooner than TipEvery after it.
+	// verdict: it is retried, no sooner than DescRetry after it.
 	Desc      map[string]bool `json:"desc,omitempty"`
 	DescErr   string          `json:"desc_err,omitempty"`
 	DescErrAt time.Time       `json:"desc_err_at,omitempty"`
@@ -198,7 +202,7 @@ func refreshTips(ctx context.Context, st *State, cfg Config, branches []string, 
 }
 
 // refreshDesc asks the forge for each pair without a verdict, keeps only the
-// pairs live jobs still need, and backs off TipEvery after an error.
+// pairs live jobs still need, and backs off DescRetry after an error.
 func refreshDesc(ctx context.Context, st *State, cfg Config, need map[string][2]string, now time.Time, desc DescFunc) {
 	kept := map[string]bool{}
 	for k := range need {
@@ -210,7 +214,7 @@ func refreshDesc(ctx context.Context, st *State, cfg Config, need map[string][2]
 	if len(st.Desc) == 0 {
 		st.Desc = nil
 	}
-	if desc == nil || (st.DescErr != "" && now.Sub(st.DescErrAt) < TipEvery) {
+	if desc == nil || (st.DescErr != "" && now.Sub(st.DescErrAt) < DescRetry) {
 		return
 	}
 	repo := cfg.Repo
