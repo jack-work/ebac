@@ -23,4 +23,15 @@ type ApproveWatch struct {
 	Principal string `json:"principal"`
 	// PingTo is the role (@form) told one line per approve.
 	PingTo string `json:"ping_to"`
+	// AskName is the asker's name in the review body and the ping
+	// ("Ahmed Kotb"); empty: the chat alias.
+	AskName string `json:"ask_name,omitempty"`
+}
+
+// Asker is who the review body says asked.
+func (w *ApproveWatch) Asker() string {
+	if w.AskName != "" {
+		return w.AskName
+	}
+	return w.ChatAlias
 }

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/brief"
@@ -13,6 +14,7 @@ import (
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/systemd"
 )
 
@@ -227,12 +229,13 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	name := fs.String("critic", "", "critic name")
 	pingEvery := fs.Duration("ping-every", -1, "COLLECT mode ping interval, e.g. 30m; 0 turns collect mode off")
 	threads, inbox, mirror := scopeFlags(fs)
+	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	_ = fs.Parse(args)
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	scoped := given["threads"] || given["inbox"] || given["mirror"]
-	if *pingEvery < 0 && !scoped {
-		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off), or for a keel critic --threads, --inbox or --mirror")
+	if *pingEvery < 0 && !scoped && !given["ask-name"] {
+		return fmt.Errorf("nothing to set: give --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, or for an approve critic --ask-name")
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
@@ -253,6 +256,19 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		if set, unset, scope, err = overlayScope(w.Reads, given, vals); err != nil {
 			return err
 		}
+	}
+	if given["ask-name"] {
+		if w.Requests == nil {
+			return fmt.Errorf("--ask-name is for approve critics; %s is %s", w.Name, w.SourceName())
+		}
+		w.Requests.AskName = strings.TrimSpace(*askName)
+		if err := approve.CheckWatch(w.Requests); err != nil {
+			return err
+		}
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		fmt.Printf("%s: approvals now cite %q's ask; takes effect on the next round\n", w.Name, w.Requests.Asker())
 	}
 	if *pingEvery >= 0 {
 		if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {

@@ -27,7 +27,7 @@ var (
 	allowed = []*regexp.Regexp{
 		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+$`),
 		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+/reviews\?per_page=100$`),
-		regexp.MustCompile(`^pr review [0-9]+ --repo bic/aether --approve --body Approved on Jack's behalf \(Figaro\), on Ahmed's ask [0-9]{10,16}\.$`),
+		regexp.MustCompile(`^pr review [0-9]+ --repo bic/aether --approve --body Approved on Jack's behalf \(Figaro\), on [A-Za-z][A-Za-z .'-]{0,60}'s ask [0-9]{10,16}\.$`),
 	}
 )
 
@@ -63,7 +63,7 @@ const (
 )
 
 var watch = model.ApproveWatch{Chat: chat, ChatAlias: "ahmed", AskFrom: ahmed, Grant: "ebac-approve.aether",
-	Principal: "sbx-cheroot-sec", PingTo: "@d407b690"}
+	Principal: "sbx-cheroot-sec", PingTo: "@d407b690", AskName: "Ahmed Kotb"}
 
 var now = time.Date(2026, 11, 12, 21, 0, 0, 0, time.UTC)
 
@@ -197,7 +197,7 @@ func TestApproveHappyPath(t *testing.T) {
 		t.Fatalf("pings %+v", out.Pings)
 	}
 	last := h.calls[len(h.calls)-2]
-	if strings.Join(last, " ") != "pr review 110001 --repo bic/aether --approve --body "+Body(msgID) {
+	if strings.Join(last, " ") != "pr review 110001 --repo bic/aether --approve --body "+Body(watch.Asker(), msgID) {
 		t.Fatalf("approve argv %q", last)
 	}
 }
@@ -238,7 +238,6 @@ func TestApproveRefusals(t *testing.T) {
 		{name: "pr huge", req: with("pr", 1e12), want: "shape: pr must be an integer"},
 		{name: "msg id letters", req: with("teams_msg_id", "17945x6486156"), want: "shape: teams_msg_id"},
 		{name: "msg id number", req: with("teams_msg_id", 1794516486156), want: "shape: teams_msg_id"},
-		{name: "chat not string", req: with("chat", 3), want: "shape: chat must be a string"},
 		{name: "grants unreadable", req: reqJSON(good()), mut: func(p *Pass) {
 			p.Grants = func() ([]Grant, error) { return nil, errors.New("open /var/lib/band-grants/grants.json: no such file") }
 		}, want: "grant: grants unreadable"},
@@ -253,7 +252,6 @@ func TestApproveRefusals(t *testing.T) {
 		{name: "grant no approver", req: reqJSON(good()), mut: grants(g("sbx-cheroot-sec", "ebac-approve.aether", live, "")), want: "is standing"},
 		{name: "repo app-studio", req: with("repo", "bic/app-studio"), want: `scope: repo "bic/app-studio" is not bic/aether`},
 		{name: "repo case", req: with("repo", "bic/Aether"), want: "scope: repo"},
-		{name: "chat alias", req: with("chat", "siddhant"), want: `scope: chat "siddhant"`},
 		{name: "pr draft", req: with("pr", 110002), want: "is a draft"},
 		{name: "pr closed", req: with("pr", 110003), want: "is closed, not open"},
 		{name: "pr missing", req: with("pr", 119999), want: "not found"},
@@ -359,7 +357,7 @@ func TestApproveAskUsedOnce(t *testing.T) {
 
 func TestApproveRecoversAPostWithoutResult(t *testing.T) {
 	h, tm := world()
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 555, State: "APPROVED", Body: Body(msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 555, State: "APPROVED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID != 555 || h.posts() != 0 {
 		t.Fatalf("recovery: %+v posts %d", r, h.posts())
@@ -465,9 +463,67 @@ func TestLiveGrantShape(t *testing.T) {
 // not a past approve, so the approve is still posted.
 func TestApproveRecoveryNeedsAnApproval(t *testing.T) {
 	h, tm := world()
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 556, State: "COMMENTED", Body: Body(msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 556, State: "COMMENTED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID == 556 || h.posts() != 1 {
 		t.Fatalf("a comment counted as the approve: %+v posts %d", r, h.posts())
+	}
+}
+
+// One inputs form, two askers: each critic decides only the requests naming
+// its own chat alias and leaves the other's alone (no result, not counted),
+// and its review body names its own asker.
+func TestApproveTwoAskersOneForm(t *testing.T) {
+	sid := good()
+	sid["chat"], sid["teams_msg_id"], sid["pr"] = "siddhant", "1794516486157", 110001
+	bad := good()
+	bad["chat"] = 3
+	reqs := map[string]json.RawMessage{"a1": reqJSON(good()), "s1": reqJSON(sid), "x1": reqJSON(bad)}
+
+	h, tm := world()
+	out, err := run(t, h, tm, reqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 1 || !out.Results["a1"].OK {
+		t.Fatalf("ahmed critic: results %+v (want a1 ok only; s1 and x1 untouched)", out.Results)
+	}
+	last := h.calls[len(h.calls)-2]
+	if !strings.HasSuffix(strings.Join(last, " "), "on Ahmed Kotb's ask "+msgID+".") || !strings.Contains(out.Pings[0].Text, "Ahmed Kotb") {
+		t.Fatalf("ahmed body %q ping %q", last, out.Pings[0].Text)
+	}
+
+	// The siddhant critic, same form: decides s1 only. Its ask check runs
+	// against its own chat, which this fake world does not hold, so s1 is
+	// refused at the ask step: that is a decision, made by the right critic.
+	h2, tm2 := world()
+	out2, err := run(t, h2, tm2, reqs, func(p *Pass) {
+		p.Watch.ChatAlias, p.Watch.AskName = "siddhant", "Siddhant Lahoti"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out2.Results["s1"]; !ok || len(out2.Results) != 1 {
+		t.Fatalf("siddhant critic: results %+v (want s1 only)", out2.Results)
+	}
+	if got := Body("Siddhant Lahoti", "1"); got != "Approved on Jack's behalf (Figaro), on Siddhant Lahoti's ask 1." {
+		t.Fatalf("body %q", got)
+	}
+	// Default asker: the alias.
+	if (&model.ApproveWatch{ChatAlias: "siddhant"}).Asker() != "siddhant" {
+		t.Fatal("default asker is not the alias")
+	}
+}
+
+func TestCheckWatchAskName(t *testing.T) {
+	w := watch
+	if err := CheckWatch(&w); err != nil {
+		t.Fatalf("good name refused: %v", err)
+	}
+	for _, bad := range []string{"Ahmed\nKotb", "<b>x</b>", "x`y`", "1abc"} {
+		w.AskName = bad
+		if err := CheckWatch(&w); err == nil || !strings.Contains(err.Error(), "ask name") {
+			t.Errorf("%q: %v", bad, err)
+		}
 	}
 }

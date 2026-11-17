@@ -27,12 +27,13 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 	grant := fs.String("grant", "ebac-approve.aether", "the band-grants credential that must be live for --principal (exact)")
 	principal := fs.String("principal", "sbx-cheroot-sec", "the band-grants principal, as stored in grants.json")
 	ping := fs.String("ping", "", "the role (@form) told one line per approve")
+	askName := fs.String("ask-name", "", "the asker's name in the review body and ping (default: --chat-alias)")
 	every := fs.Duration("every", time.Minute, "poll interval")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {
 		return err
 	}
-	aw := &model.ApproveWatch{Chat: *chat, ChatAlias: *alias, AskFrom: *from, Grant: *grant, Principal: *principal, PingTo: *ping}
+	aw := &model.ApproveWatch{Chat: *chat, ChatAlias: *alias, AskFrom: *from, Grant: *grant, Principal: *principal, PingTo: *ping, AskName: *askName}
 	if err := approve.CheckWatch(aw); err != nil {
 		return err
 	}

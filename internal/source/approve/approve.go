@@ -39,9 +39,9 @@ const (
 	MaxPerRound = 3
 )
 
-// Body is the review body, citing the ask.
-func Body(msgID string) string {
-	return fmt.Sprintf("Approved on Jack's behalf (Figaro), on Ahmed's ask %s.", msgID)
+// Body is the review body, citing the asker and the ask.
+func Body(asker, msgID string) string {
+	return fmt.Sprintf("Approved on Jack's behalf (Figaro), on %s's ask %s.", asker, msgID)
 }
 
 // Teams reads a chat's newest messages (tomb).
@@ -175,6 +175,14 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 			}
 			continue
 		}
+		// One inputs form serves several askers, one critic each: a
+		// request names its asker's chat, and only that critic decides it.
+		// Another critic's request (or one naming no chat) is left alone:
+		// no result, not counted.
+		var chat string
+		if json.Unmarshal(obj["chat"], &chat) != nil || chat != p.Watch.ChatAlias {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -205,7 +213,7 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 			used[r.MsgID] = id
 			if p.Watch.PingTo != "" {
 				out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
-					"ebac approve: %s#%d approved, review %d, on Ahmed's ask %s (request %s)", Repo, r.PR, res.ReviewID, r.MsgID, id)})
+					"ebac approve: %s#%d approved, review %d, on %s's ask %s (request %s)", Repo, r.PR, res.ReviewID, p.Watch.Asker(), r.MsgID, id)})
 			}
 		}
 	}
@@ -242,9 +250,6 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	// construction (GH.Approve is the only write).
 	if r.Repo != Repo {
 		return refuse(fmt.Sprintf("scope: repo %q is not %s", r.Repo, Repo))
-	}
-	if r.Chat != w.ChatAlias {
-		return refuse(fmt.Sprintf("scope: chat %q is not %q", r.Chat, w.ChatAlias))
 	}
 	pr, err := gh.PR(ctx, r.PR)
 	if err != nil {
@@ -293,7 +298,7 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: read reviews: %v", errTransient, err)
 	}
-	body := Body(r.MsgID)
+	body := Body(w.Asker(), r.MsgID)
 	if rv := ours(reviews, body); rv != nil {
 		// Posted in an earlier round that never wrote its result: record it.
 		return Result{OK: true, ReviewID: rv.ID}, nil

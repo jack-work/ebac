@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,9 @@ type Plugin struct {
 }
 
 // CheckWatch refuses an incomplete configuration.
+// askNameRe: the asker goes into a GHE review body verbatim.
+var askNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z .'-]{0,59}$`)
+
 func CheckWatch(w *model.ApproveWatch) error {
 	switch {
 	case w == nil:
@@ -32,6 +36,8 @@ func CheckWatch(w *model.ApproveWatch) error {
 		return fmt.Errorf("chat %q: want a Teams chat id (19:...)", w.Chat)
 	case w.ChatAlias == "":
 		return fmt.Errorf("chat alias is required")
+	case !askNameRe.MatchString(w.Asker()):
+		return fmt.Errorf("ask name %q: want a person's name (letters, space, . ' -; at most 60)", w.Asker())
 	case !strings.HasPrefix(w.AskFrom, "8:orgid:"):
 		return fmt.Errorf("ask_from %q: want a Teams sender id (8:orgid:<guid>)", w.AskFrom)
 	case w.Grant == "" || strings.ContainsAny(w.Grant, "*?"):
