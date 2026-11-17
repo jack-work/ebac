@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -202,6 +203,34 @@ func setInterval(name string, d time.Duration) error {
 	body := fmt.Sprintf("[Timer]\nOnUnitActiveSec=\nOnBootSec=60s\nOnUnitActiveSec=%ds\nRandomizedDelaySec=%ds\nAccuracySec=5s\n",
 		int(d.Seconds()), jitter)
 	return os.WriteFile(filepath.Join(dd, "interval.conf"), []byte(body), 0o644)
+}
+
+// TemplateInterval is ebac@.timer's own OnUnitActiveSec: what a critic
+// without an interval drop-in runs at.
+const TemplateInterval = 5 * time.Minute
+
+// TimerInterval is the interval a critic's timer runs at: its drop-in's
+// OnUnitActiveSec, else the template's. A critic whose every_sec was edited
+// on its form without re-arming kept the old drop-in (review-* 11-17:
+// every_sec 900, timer 5 min); reconcile compares the two.
+func TimerInterval(name string) time.Duration {
+	dir, err := unitDir()
+	if err != nil {
+		return TemplateInterval
+	}
+	b, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("ebac@%s.timer.d", name), "interval.conf"))
+	if err != nil {
+		return TemplateInterval
+	}
+	d := TemplateInterval
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "OnUnitActiveSec="); ok && v != "" {
+			if n, err := strconv.Atoi(strings.TrimSuffix(v, "s")); err == nil {
+				d = time.Duration(n) * time.Second // the last assignment wins, as in systemd
+			}
+		}
+	}
+	return d
 }
 
 func systemctl(args ...string) error {

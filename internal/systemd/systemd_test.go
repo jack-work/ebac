@@ -108,3 +108,31 @@ func TestTimerStateElapsedIsNotArmed(t *testing.T) {
 		}
 	}
 }
+
+// TimerInterval reads what the timer runs at: the template's 5 min without a drop-in (review-* 11-17: every_sec 900
+// set on the form, no drop-in rewritten, the timer stayed at 5 min), the drop-in's interval after EnableTimer.
+func TestTimerIntervalReadsTheDropIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if d := TimerInterval("review-1"); d != TemplateInterval || !strings.Contains(timerTemplate, "OnUnitActiveSec=5min\n") || TemplateInterval != 5*time.Minute {
+		t.Fatalf("no drop-in: %s (template and TemplateInterval must agree)", d)
+	}
+	w := &model.Critic{Name: "review-1", EverySec: 900}
+	if err := EnableTimer(w.Name, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if d := TimerInterval(w.Name); d != 5*time.Minute || d == w.Interval() {
+		t.Fatalf("stale drop-in reads %s", d)
+	}
+	if err := EnableTimer(w.Name, w.Interval()); err != nil {
+		t.Fatal(err)
+	}
+	if d := TimerInterval(w.Name); d != 15*time.Minute {
+		t.Fatalf("after re-arm: %s", d)
+	}
+}
