@@ -18,7 +18,7 @@ type Plugin struct {
 	// Hub, Tip and Now replace the socket client, the forge and the clock in
 	// tests; nil means the real ones.
 	Hub  *Hub
-	Tip  TipFunc
+	Tip  TipsFunc
 	Desc DescFunc
 	Now  func() time.Time
 }
@@ -62,19 +62,25 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		}
 	}
 	tip, desc := pl.Tip, pl.Desc
+	var gh *forge.GH
 	if tip == nil || desc == nil {
-		gh := forge.NewGH(req.GH, req.Host)
+		gh = forge.NewGH(req.GH, req.Host)
 		if w.Host != "" {
 			gh.Host = w.Host // the token follows the host
 		}
 		if tip == nil {
-			tip = gh.BranchTip
+			tip = gh.BranchTips
 		}
 		if desc == nil {
 			desc = gh.Descends
 		}
 	}
 	r := Step(ctx, prev, h, cfg, now(), tip, desc)
+	if gh != nil {
+		if sp := gh.Spent(); sp.All > 0 {
+			rep.Logf("%s: %s", w.Name, sp) // a round that asked the forge: what it cost
+		}
+	}
 	w.Runtime.BandHub = model.MustJSON(r.State)
 	rep.Set, rep.Unset = r.Set, r.Unset
 	if r.State.DescErr != "" {

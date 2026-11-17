@@ -380,15 +380,19 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 	now := time.UnixMilli(h.Stats.Hub.Now)
 	calls := 0
 	fail := false
-	tip := func(_ context.Context, repo, branch string) (string, error) {
-		calls++
-		if repo != DefaultRepo {
-			t.Fatalf("repo %q", repo)
+	tip := func(_ context.Context, repo string, branches []string) (map[string]string, error) {
+		calls++ // one call for every branch
+		if repo != DefaultRepo || len(branches) == 0 {
+			t.Fatalf("repo %q branches %v", repo, branches)
 		}
 		if fail {
-			return "", fmt.Errorf("HTTP 502")
+			return nil, fmt.Errorf("HTTP 502")
 		}
-		return "ffffffffffffffffffffffffffffffffffffffff", nil
+		out := map[string]string{}
+		for _, b := range branches {
+			out[b] = "ffffffffffffffffffffffffffffffffffffffff"
+		}
+		return out, nil
 	}
 	desc := func(context.Context, string, string, string) (bool, error) { return true, nil }
 	r := Step(ctx, State{}, h, Config{}, now, tip, desc)
@@ -442,7 +446,13 @@ func TestStepDescent(t *testing.T) {
 	now := time.UnixMilli(h.Stats.Hub.Now)
 	const older, newer = "0000000000000000000000000000000000000001", "0000000000000000000000000000000000000002"
 	cur := older
-	tip := func(context.Context, string, string) (string, error) { return cur, nil }
+	tip := func(_ context.Context, _ string, branches []string) (map[string]string, error) {
+		out := map[string]string{}
+		for _, b := range branches {
+			out[b] = cur
+		}
+		return out, nil
+	}
 	calls := map[string]int{}
 	fail := false
 	desc := func(_ context.Context, repo, base, head string) (bool, error) {

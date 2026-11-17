@@ -2,11 +2,13 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -109,6 +111,17 @@ func TestHelperProcess(t *testing.T) {
 			`"headRefOid":"ce1bd297dddd","createdAt":"2026-10-22T19:29:02Z","updatedAt":"2026-10-22T20:56:29Z","mergedAt":"2026-10-22T20:56:29Z"}]`)
 	case "pending":
 		os.Stdout.WriteString(pendingJSON)
+	case "refs":
+		// one aliased ref query: every branch but "gone" points at sha-<branch>.
+		repo := map[string]any{}
+		for _, m := range regexp.MustCompile(`(b\d+): ref\(qualifiedName:"refs/heads/([^"]+)"\)`).FindAllStringSubmatch(q, -1) {
+			repo[m[1]] = nil
+			if m[2] != "gone" {
+				repo[m[1]] = map[string]any{"target": map[string]any{"oid": "sha-" + m[2]}}
+			}
+		}
+		b, _ := json.Marshal(map[string]any{"data": map[string]any{"rateLimit": map[string]int{"cost": 1, "remaining": 4000}, "repository": repo}})
+		os.Stdout.Write(b)
 	case "paginate":
 		os.Stdout.WriteString(fakegql.PRs(q, func(_, cursor string) string {
 			if cursor == "" {
@@ -299,5 +312,20 @@ func TestShownArgsHideTheQuery(t *testing.T) {
 	got := strings.Join(shownArgs([]string{"api", "graphql", "-f", q, "-f", "owner=bic"}), " ")
 	if got != "api graphql -f query=<5002 B> -f owner=bic" {
 		t.Fatalf("shown %q", got)
+	}
+}
+
+// Every branch tip in ONE GraphQL call (it was one REST call a branch); a gone branch is "".
+func TestBranchTipsOneCall(t *testing.T) {
+	g := fakeGH(t, "refs")
+	tips, err := g.BranchTips(context.Background(), "bic/aether", []string{"main", "stack/x", "gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tips["main"] != "sha-main" || tips["stack/x"] != "sha-stack/x" || tips["gone"] != "" || len(tips) != 3 {
+		t.Fatalf("tips %v", tips)
+	}
+	if sp := g.Spent(); sp.All != 1 || sp.Calls != 1 || sp.Points != 1 || sp.String() != "graphql 1 call(s), 1 point(s), 4000 left; rest 0 call(s)" {
+		t.Fatalf("spend %+v %q", sp, sp)
 	}
 }

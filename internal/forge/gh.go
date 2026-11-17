@@ -129,6 +129,9 @@ func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, erro
 		// GH_ENTERPRISE_TOKEN is what gh reads for a non-github.com host.
 		env = append(env, "GH_TOKEN="+tok, "GH_ENTERPRISE_TOKEN="+tok)
 	}
+	g.spendMu.Lock()
+	g.spend.All++
+	g.spendMu.Unlock()
 	cmd := ExecCommandContext(ctx, g.Bin, args...)
 	cmd.Env = env
 	if stdin != nil {
@@ -286,16 +289,43 @@ func (g *GH) Descends(ctx context.Context, repo, base, head string) (bool, error
 	return strings.TrimSpace(string(out)) == "ahead 0", nil
 }
 
-// BranchTip is the sha a branch points at, or "" when the branch is gone.
-func (g *GH) BranchTip(ctx context.Context, repo, branch string) (string, error) {
-	out, err := g.run(ctx, []string{"api", "repos/" + repo + "/git/ref/heads/" + branch, "-q", ".object.sha"}, nil)
-	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
-			return "", nil
+// BranchTips is the sha each branch points at ("" when the branch is gone),
+// all in one aliased GraphQL query per 100 branches (1 point): it was one
+// REST call a branch (band-state: 41 every 5 min, 11-17).
+func (g *GH) BranchTips(ctx context.Context, repo string, branches []string) (map[string]string, error) {
+	owner, name, _ := strings.Cut(repo, "/")
+	out := map[string]string{}
+	const per = 100
+	for lo := 0; lo < len(branches); lo += per {
+		part := branches[lo:min(lo+per, len(branches))]
+		var b strings.Builder
+		fmt.Fprintf(&b, "query{ repository(owner:%s,name:%s){", strconv.Quote(owner), strconv.Quote(name))
+		for i, br := range part {
+			fmt.Fprintf(&b, " b%d: ref(qualifiedName:%s){ target{ oid } }", i, strconv.Quote("refs/heads/"+br))
 		}
-		return "", err
+		b.WriteString(" } }")
+		data, err := g.GraphQL(ctx, b.String())
+		if err != nil {
+			return nil, err
+		}
+		var r struct {
+			Repository map[string]*struct {
+				Target struct {
+					Oid string `json:"oid"`
+				} `json:"target"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(data, &r); err != nil {
+			return nil, fmt.Errorf("decode refs: %w", err)
+		}
+		for i, br := range part {
+			out[br] = ""
+			if x := r.Repository[fmt.Sprintf("b%d", i)]; x != nil {
+				out[br] = x.Target.Oid
+			}
+		}
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // GraphQL runs one GraphQL read and returns its data object (rateLimit

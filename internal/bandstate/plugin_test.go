@@ -25,7 +25,7 @@ func TestPluginRoundTripsItsState(t *testing.T) {
 	ctx := context.Background()
 	h := fixture(t)
 	now := time.UnixMilli(h.Stats.Hub.Now)
-	noTip := func(context.Context, string, string) (string, error) { return "", nil }
+	noTip := func(context.Context, string, []string) (map[string]string, error) { return nil, nil }
 	call := func(w model.Critic, at time.Time) *plugin.Reply {
 		t.Helper()
 		rep, err := plugin.InProc{"bandhub": Plugin{Hub: h, Tip: noTip, Now: func() time.Time { return at }}.Handle}.
@@ -106,7 +106,7 @@ func TestLiveMirrorThroughTheCore(t *testing.T) {
 	var out strings.Builder
 	poll1 := func() {
 		t.Helper()
-		noTip := func(context.Context, string, string) (string, error) { return "", nil }
+		noTip := func(context.Context, string, []string) (map[string]string, error) { return nil, nil }
 		p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: plugin.InProc{"bandhub": Plugin{Hub: h, Tip: noTip}.Handle}}
 		if err := p.Poll(ctx, w.Name); err != nil {
 			t.Fatalf("poll: %v\n%s", err, out.String())

@@ -20,7 +20,8 @@ import (
 
 // Spend is what this process has spent on GraphQL reads.
 type Spend struct {
-	Calls     int
+	All       int // every gh call (REST, GraphQL, writes)
+	Calls     int // GraphQL reads
 	Points    int
 	Remaining int // after the last call; -1 when no call has answered
 }
@@ -30,7 +31,7 @@ func (s Spend) String() string {
 	if s.Remaining >= 0 {
 		left = strconv.Itoa(s.Remaining)
 	}
-	return fmt.Sprintf("graphql %d call(s), %d point(s), %s left", s.Calls, s.Points, left)
+	return fmt.Sprintf("graphql %d call(s), %d point(s), %s left; rest %d call(s)", s.Calls, s.Points, left, s.All-s.Calls)
 }
 
 // Spent is the GraphQL spend so far.
