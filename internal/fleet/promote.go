@@ -202,8 +202,8 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		mode = model.Mode(it.Mode)
 	}
 	interval, err := time.ParseDuration(cfg.Interval)
-	if err != nil {
-		interval = 5 * time.Minute
+	if err != nil || interval <= 0 {
+		interval = model.DefaultEvery(mode)
 	}
 
 	c := &model.Critic{

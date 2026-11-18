@@ -33,7 +33,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	aria := fs.String("aria", "", "cast this existing aria into the role")
 	mint := fs.Bool("mint", false, "mint a fresh aria and cast it")
 	outfits := fs.String("outfit", "", "outfit names for a minted aria")
-	interval := fs.Duration("interval", 5*time.Minute, "heartbeat interval")
+	interval := fs.Duration("interval", 0, "heartbeat interval (default: 30m in reviewer mode, else 5m)")
 	issueRepo := fs.String("issue-repo", "", "repo for develop-mode harness bug reports")
 	maxRounds := fs.Int("max-rounds", 0, "stop after N rounds (0 = unbounded)")
 	ttl := fs.Duration("ttl", 0, "stop after this much wall time (0 = unbounded)")
@@ -64,6 +64,9 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	m := model.Mode(*mode)
 	if m != model.ModeReview && m != model.ModeDevelop && m != model.ModeReviewer {
 		return fmt.Errorf("--mode must be review, develop or reviewer, got %q", *mode)
+	}
+	if *interval <= 0 {
+		*interval = model.DefaultEvery(m)
 	}
 	if m != model.ModeReviewer && (*approve || *clone != "" || *wtRoot != "" || *notes != "") {
 		return fmt.Errorf("--approve, --clone, --worktree-root and --notes need --mode reviewer")

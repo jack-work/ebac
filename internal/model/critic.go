@@ -245,6 +245,16 @@ func (w *Critic) AddPR(r PRRef) bool {
 	return true
 }
 
+// DefaultEvery is a new PR critic's poll interval when none is given: 30 min
+// for a reviewer (a one-PR critic at 5 min cost 12 GraphQL points/h, GHE quota
+// 11-18), 5 min otherwise.
+func DefaultEvery(m Mode) time.Duration {
+	if m == ModeReviewer {
+		return 30 * time.Minute
+	}
+	return 5 * time.Minute
+}
+
 // Interval is the critic's poll interval: EverySec, else the default 5 minutes.
 func (w *Critic) Interval() time.Duration {
 	if w.EverySec > 0 {

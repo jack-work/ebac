@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -103,5 +104,12 @@ func TestClipError(t *testing.T) {
 	if len(got) > MaxLastError || !strings.HasSuffix(got, " [+41 more line(s), 1 repeating this one]") || !utf8.ValidString(got) ||
 		!strings.Contains(got, "…") {
 		t.Fatalf("clipped %d B: %q", len(got), got[max(0, len(got)-120):])
+	}
+}
+
+// A reviewer critic polls every 30 min unless told otherwise (GHE quota 11-18); every other mode keeps 5 min.
+func TestDefaultEvery(t *testing.T) {
+	if DefaultEvery(ModeReviewer) != 30*time.Minute || DefaultEvery(ModeReview) != 5*time.Minute || DefaultEvery(ModeDevelop) != 5*time.Minute {
+		t.Fatalf("reviewer %s, review %s, develop %s", DefaultEvery(ModeReviewer), DefaultEvery(ModeReview), DefaultEvery(ModeDevelop))
 	}
 }
