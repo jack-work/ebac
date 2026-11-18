@@ -48,16 +48,14 @@ func TestLeaseTTLRenewsOnlyNearTheDeadline(t *testing.T) {
 	}
 }
 
-func TestMintPatchSetsNameAndLeaseTogether(t *testing.T) {
+func TestMintPatchNamesNoSystemKey(t *testing.T) {
 	p := mintPatch("ebac-x")
-	for key, want := range map[string]string{"name": `"ebac-x"`, systemTTLKey: `"168h0m0s"`} {
-		e, ok := p.Entry(key)
-		if !ok {
-			t.Errorf("mint patch lacks %s", key)
-			continue
-		}
-		if got := string(e.New); got != want {
-			t.Errorf("%s = %s, want %s", key, got, want)
+	if e, ok := p.Entry("name"); !ok || string(e.New) != `"ebac-x"` {
+		t.Fatalf("mint patch name: %v", ok)
+	}
+	for _, key := range []string{"system", systemTTLKey} {
+		if _, ok := p.Entry(key); ok {
+			t.Errorf("mint patch names owner-held %s", key)
 		}
 	}
 }
@@ -100,6 +98,7 @@ func liveLease(t *testing.T, f *Figaro, id string) (ttlMS, expiresAt int64) {
 
 func TestLiveMintedFormCarriesARenewableLease(t *testing.T) {
 	f := liveOrSkip(t)
+	asEbacOrSkip(t)
 	ctx := context.Background()
 	id, err := f.FormNew(ctx, "ebac-livetest-lease")
 	if err != nil {

@@ -148,7 +148,14 @@ func (f *Figaro) Close() error {
 
 // ---------- forms ----------
 
+// FormNew mints a form named name with a FormLease lifetime (FormNewLease).
 func (f *Figaro) FormNew(ctx context.Context, name string) (string, error) {
+	return f.FormNewLease(ctx, name, FormLease)
+}
+
+// formCreate mints a form named name, with no lifetime: system.ttl is
+// owner-held, so FormNewLease sets it through the lifetime broker.
+func (f *Figaro) formCreate(ctx context.Context, name string) (string, error) {
 	ctx, cancel := f.bound(ctx)
 	defer cancel()
 	ang, err := f.Angelus()
