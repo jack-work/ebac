@@ -65,6 +65,7 @@ func TestValidateFormsKeelBranches(t *testing.T) {
 		"pr_number":   {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"pr_number": raw(`1`)}}, `"pr_number"`},
 		"target-aria": {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"target-aria": raw(`"x"`)}}, "owner or core key"},
 		"system":      {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"system": raw(`{}`)}}, "owner or core key"},
+		"runtime":     {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"runtime": raw(`{}`)}}, "owner or core key"},
 		"name":        {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"name": raw(`"x"`)}}, "owner or core key"},
 		"dotted":      {plugin.FormWrite{Key: "a--b", Set: map[string]json.RawMessage{"code_ready.x": raw(`1`)}}, "top-level keys only"},
 		"bad key":     {plugin.FormWrite{Key: "Work/x", Set: ok.Set}, "is not [a-z0-9-]"},
@@ -420,5 +421,13 @@ func TestLiveChildFormsThroughTheCore(t *testing.T) {
 	}
 	if _, still := load().Runtime.Children[key]; still {
 		t.Fatal("a retired child is still renewed")
+	}
+}
+
+// figaro 0.75 moved its daemon-written keys to runtime.*: a plugin sees neither system nor runtime of its inputs form.
+func TestInputKeysDropSystemAndRuntime(t *testing.T) {
+	got := inputKeys(map[string]json.RawMessage{"system": raw(`{}`), "runtime": raw(`{"studies":{}}`), "rule": raw(`1`)})
+	if len(got) != 1 || string(got["rule"]) != `1` {
+		t.Fatalf("inputs %v, want only rule", got)
 	}
 }

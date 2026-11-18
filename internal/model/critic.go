@@ -758,7 +758,7 @@ const MaxChildren = 100
 var ChildOwnerKeys = []string{"code_ready", "ready"}
 
 // ChildWriteRefused are the child-form keys no plugin may write: the owner's
-// keys and the form's own.
+// keys and the form's own (runtime: figaro 0.75's daemon-written keys).
 // pr_url and pr_number are keel CI's (K5: the PR it opened for the branch).
-var ChildWriteRefused = map[string]bool{"code_ready": true, "ready": true, "pr_url": true, "pr_number": true, "system": true,
+var ChildWriteRefused = map[string]bool{"code_ready": true, "ready": true, "pr_url": true, "pr_number": true, "system": true, "runtime": true,
 	"target-aria": true, "name": true, "kind": true, CriticKey: true}

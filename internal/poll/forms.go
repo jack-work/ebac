@@ -369,7 +369,7 @@ func (p *Poller) readBoard(ctx context.Context, w *model.Critic) (map[string]jso
 }
 
 // readInputs is the critic's inputs form for the plugin: every top-level key
-// but system.
+// but system and runtime (figaro 0.75's daemon-written keys).
 func (p *Poller) readInputs(ctx context.Context, w *model.Critic) (map[string]json.RawMessage, error) {
 	if w.InputsForm == "" {
 		return nil, nil
@@ -378,13 +378,18 @@ func (p *Poller) readInputs(ctx context.Context, w *model.Critic) (map[string]js
 	if err != nil {
 		return nil, fmt.Errorf("inputs form %s: %w", w.InputsForm, err)
 	}
+	return inputKeys(f.Keys), nil
+}
+
+// inputKeys drops the keys a plugin never reads: system and runtime.
+func inputKeys(keys map[string]json.RawMessage) map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
-	for k, v := range f.Keys {
-		if k != "system" {
+	for k, v := range keys {
+		if k != "system" && k != "runtime" {
 			out[k] = v
 		}
 	}
-	return out, nil
+	return out
 }
 
 // validateApproveForms: approve-requests writes one thing, the results of its
