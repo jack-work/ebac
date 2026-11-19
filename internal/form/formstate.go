@@ -938,6 +938,7 @@ func applyAuthority(w *model.Critic) []string {
 	least.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""
 	least.InputsForm, least.BoardForm = "", ""
 	least.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)
+	least.TeamsChat, least.Logins, least.KnownBreaks = "", nil, nil
 	_ = least.Apply(w)
 	return nil
 }

@@ -24,33 +24,18 @@ import (
 func cmdLs(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("ls")
 	asJSON := fs.Bool("j", false, "JSON")
-	live := fs.Bool("live", false, "rebuild from source instead of reading the published index")
 	_ = fs.Parse(args)
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
 	if err != nil {
 		return err
 	}
-	fig := st.Fig
-
-	var (
-		rows   []fleet.RosterRow
-		sum    fleet.RosterSummary
-		age    time.Duration
-		source = "index"
-	)
-	if *live {
-		rows, sum, err = fleet.BuildRoster(ctx, st, fig, "")
-		source = "live"
-	} else {
-		rows, sum, age, err = fleet.ReadRoster(ctx, st, fig)
-		if err != nil {
-			// Falling back is right, but doing it SILENTLY is not: an
-			// operator must never mistake a rebuild for the index.
-			fmt.Fprintf(os.Stderr, "ebac: %v; rebuilding live\n", err)
-			rows, sum, err = fleet.BuildRoster(ctx, st, fig, "")
-			source = "live (index unavailable)"
-		}
-	}
+	// Always from the forms (the thinker, 11-19): the published index lagged
+	// a set and the rounds (keel-review-keelpost showed END none and a stuck
+	// round while its form held with_role), and a stale ls reads as a lost
+	// update. The index stays for the roster form's studiers.
+	rows, sum, err := fleet.BuildRoster(ctx, st, st.Fig, "")
+	var age time.Duration
+	source := "live"
 	if err != nil {
 		return err
 	}

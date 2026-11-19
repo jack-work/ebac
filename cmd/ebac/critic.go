@@ -17,7 +17,6 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
-	"github.com/gluck/ebac/internal/source/orgapprove"
 )
 
 // ---------- add ----------
@@ -336,19 +335,10 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		if w.OrgApprove == nil {
 			return fmt.Errorf("--logins and --known-breaks are for org-approve critics; %s is %s", w.Name, w.SourceName())
 		}
-		if given["logins"] {
-			w.OrgApprove.Logins = splitList(*logins)
-		}
-		if given["known-breaks"] {
-			w.OrgApprove.KnownBreaks = splitList(*breaks)
-		}
-		if err := orgapprove.CheckWatch(w.OrgApprove); err != nil {
-			return err
-		}
-		if err := st.SaveCritic(ctx, w); err != nil {
-			return err
-		}
-		fmt.Printf("%s: %d login(s), %d known break(s); takes effect on the next round\n", w.Name, len(w.OrgApprove.Logins), len(w.OrgApprove.KnownBreaks))
+		// #11: logins and known breaks are authority (whose PRs get approval
+		// asks; which red checks count green): only ebac's trusted config.
+		_, _ = logins, breaks
+		return fmt.Errorf("%s: org-approve logins and known breaks are set in ebac's trusted config (trusted.critics.%q.authority), not by ebac set", w.Name, w.FormID)
 	}
 	if *pingEvery >= 0 {
 		if err := checkPingEvery(*pingEvery, time.Duration(w.EverySec)*time.Second); err != nil {

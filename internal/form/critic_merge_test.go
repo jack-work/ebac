@@ -100,26 +100,27 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 
 	// Control: no race. The round's change lands, nothing else moves.
 	round(45, nil)
-	if m := critic(); m["every_sec"] != float64(45) || m["write"] != nil {
+	if m := critic(); m["every_sec"] != float64(45) || m["stop"].(map[string]any)["with_role"] != nil {
 		t.Fatalf("control: critic %v", m)
 	}
 
-	// The race: the operator grants write between load and save.
+	// The race: the operator sets the critic's end (ebac set --end) between ebacd's load and save; write is
+	// authority since #11 and no longer a form field a race can carry (11-19: a set of critic.stop was lost once).
 	round(30, func() {
-		figaroSet(t, id, "critic.write", "true")
-		if critic()["write"] != true {
+		figaroSet(t, id, "critic.stop.with_role", `"@d407b690"`)
+		if critic()["stop"].(map[string]any)["with_role"] != "@d407b690" {
 			t.Fatal("the racing set did not land on the form")
 		}
 	})
 	m := critic()
-	if m["write"] != true {
-		t.Fatalf("the racing critic.write was overwritten by the save: %v", m)
+	if m["stop"].(map[string]any)["with_role"] != "@d407b690" {
+		t.Fatalf("the racing critic.stop was overwritten by the save: %v", m)
 	}
 	if m["every_sec"] != float64(30) {
 		t.Fatalf("the round's own change was lost: %v", m)
 	}
-	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 2 || !c.Write {
-		t.Fatalf("after the race: round %d write %v", c.Runtime.Round, c.Write)
+	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 2 || c.Stop.WithRole != "@d407b690" {
+		t.Fatalf("after the race: round %d with_role %q", c.Runtime.Round, c.Stop.WithRole)
 	}
 	if warn.Len() != 0 {
 		t.Fatalf("a different-field race warned: %s", warn.String())
@@ -130,19 +131,19 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	figaroSet(t, id, "critic.approve", "true")
+	figaroSet(t, id, "critic.ping_every_sec", "1800")
 	c.Runtime.Round++
 	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	if !c.Approve {
+	if c.PingEverySec != 1800 {
 		t.Fatal("the saved w did not adopt the value the merge took from the form")
 	}
 	c.EverySec = 20
 	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	if m := critic(); m["approve"] != true || m["every_sec"] != float64(20) {
+	if m := critic(); m["ping_every_sec"] != float64(1800) || m["every_sec"] != float64(20) {
 		t.Fatalf("second save of the same w lost the set (or the round's change): %v", m)
 	}
 	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 3 {
@@ -153,7 +154,7 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	round(15, func() {
 		figaroSet(t, id, "critic.every_sec", "99")
 	})
-	if m := critic(); m["every_sec"] != float64(99) || m["write"] != true {
+	if m := critic(); m["every_sec"] != float64(99) || m["stop"].(map[string]any)["with_role"] != "@d407b690" {
 		t.Fatalf("same-field race: %v", m)
 	}
 	if !strings.Contains(warn.String(), "every_sec changed on the form during the round") {

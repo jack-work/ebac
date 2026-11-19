@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/gluck/ebac/internal/livetest"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -158,5 +160,62 @@ func TestApplyEndWithRole(t *testing.T) {
 		if err := applyEnd(w, bad); err == nil || w.Stop != model.DefaultStop() {
 			t.Errorf("%q: accepted or half-applied: %v %+v", bad, err, w.Stop)
 		}
+	}
+}
+
+// ebac ls reflects an `ebac set --end` at once: it reads the forms, never a published index that lags the sets and
+// rounds (the thinker 11-19: keel-review-keelpost showed END none while its form held with_role). RED if ls goes back
+// to the index.
+func TestLiveLsShowsASetEndAtOnce(t *testing.T) {
+	if os.Getenv("EBAC_LIVE") != "1" {
+		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
+	}
+	ctx := context.Background()
+	f := figaro.NewFigaro("")
+	t.Cleanup(func() { _ = f.Close() })
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.FormNew(ctx, "ebac-livetest-ls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	livetest.Remove(t, f, id)
+	name := "livetest-ls-" + strings.TrimPrefix(id, "@")[:8]
+	w := &model.Critic{Name: name, Mode: model.ModeTeams, Source: "teams-chat", FormID: id, EverySec: 60, CreatedAt: time.Now().UTC(),
+		Chat: &model.ChatRef{ID: "48:notes", Topic: "t"}}
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	ls := func() string {
+		r, wp, _ := os.Pipe()
+		old := os.Stdout
+		os.Stdout = wp
+		err := cmdLs(ctx, globals{}, []string{"-j"})
+		wp.Close()
+		os.Stdout = old
+		b, _ := io.ReadAll(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Critics []struct{ Critic, End string } `json:"critics"`
+		}
+		_ = json.Unmarshal(b, &out)
+		for _, c := range out.Critics {
+			if c.Critic == name {
+				return c.End
+			}
+		}
+		t.Fatalf("%s not in ls:\n%s", name, b)
+		return ""
+	}
+	before := ls()
+	if err := cmdSet(ctx, globals{}, []string{"--critic", name, "--end", "until=2027-01-02"}); err != nil {
+		t.Fatal(err)
+	}
+	if after := ls(); after != "until 2027-01-02" || after == before {
+		t.Fatalf("ls END %q after set (before %q), want %q", after, before, "until 2027-01-02")
 	}
 }

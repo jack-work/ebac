@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Authority is every critic field that decides what ebac DOES on someone's
 // behalf (#11; reviews e025e175 H1, 6ae24e1e): which plugin and sandbox
@@ -23,6 +26,13 @@ type Authority struct {
 	ChatAlias  string `json:"chat_alias,omitempty"`
 	InputsForm string `json:"inputs_form,omitempty"`
 	BoardForm  string `json:"board_form,omitempty"`
+	// TeamsChat is the Teams conversation a teams critic reads with ebac's
+	// Teams credential; Logins and KnownBreaks are whose PRs an org-approve
+	// critic files approval asks for, and which red checks count as green
+	// (review 1b46af66 (3)).
+	TeamsChat   string   `json:"teams_chat,omitempty"`
+	Logins      []string `json:"logins,omitempty"`
+	KnownBreaks []string `json:"known_breaks,omitempty"`
 }
 
 // AuthorityOf reads a critic's authority fields.
@@ -33,6 +43,10 @@ func AuthorityOf(w *Critic) Authority {
 	}
 	if o := w.OrgApprove; o != nil {
 		a.Grant, a.Principal, a.Approver = o.Grant, o.Principal, o.Approver
+		a.Logins, a.KnownBreaks = slices.Clone(o.Logins), slices.Clone(o.KnownBreaks)
+	}
+	if c := w.Chat; c != nil {
+		a.TeamsChat = c.ID
 	}
 	return a
 }
@@ -73,6 +87,16 @@ func (a Authority) Apply(w *Critic) []string {
 		set("org_approve.grant", o.Grant, a.Grant, &o.Grant)
 		set("org_approve.principal", o.Principal, a.Principal, &o.Principal)
 		set("org_approve.approver", o.Approver, a.Approver, &o.Approver)
+		if !slices.Equal(o.Logins, a.Logins) {
+			ignored = append(ignored, "org_approve.logins")
+		}
+		if !slices.Equal(o.KnownBreaks, a.KnownBreaks) {
+			ignored = append(ignored, "org_approve.known_breaks")
+		}
+		o.Logins, o.KnownBreaks = slices.Clone(a.Logins), slices.Clone(a.KnownBreaks)
+	}
+	if c := w.Chat; c != nil {
+		set("chat.id", c.ID, a.TeamsChat, &c.ID)
 	}
 	return ignored
 }
@@ -85,12 +109,22 @@ func NoAuthorityNote(formID string) string {
 
 // CreationAuthority is what ebac records for a critic it creates: its source
 // and mode (reviewer mode, which posts without write, is recorded as review),
-// and nothing else. Write, approve, approval grants and outside forms come
+// and what it reads (teams chat, org-approve logins and known breaks), and
+// nothing else. Write, approve, approval grants and outside forms come
 // only from the trusted config (review f0f3a1d9 B1).
 func CreationAuthority(w *Critic) Authority {
 	mode := w.Mode
 	if mode == ModeReviewer {
 		mode = ModeReview
 	}
-	return Authority{Source: w.Source, Mode: mode}
+	a := Authority{Source: w.Source, Mode: mode}
+	// What a critic reads (not what it may do): set by whoever creates it, as
+	// add-teams and add-org-approve always could; a later form edit is ignored.
+	if c := w.Chat; c != nil {
+		a.TeamsChat = c.ID
+	}
+	if o := w.OrgApprove; o != nil {
+		a.Logins, a.KnownBreaks = slices.Clone(o.Logins), slices.Clone(o.KnownBreaks)
+	}
+	return a
 }
