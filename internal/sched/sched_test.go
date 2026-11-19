@@ -205,7 +205,16 @@ func TestThePoolBoundsConcurrentRounds(t *testing.T) {
 			f.ch(n) <- nil
 			done++
 		}
-		waitFor(t, "rounds drained", func() bool { return f.running.Load() == 0 })
+		// Drained = the SCHEDULER has released every slot, not just the fake's counter: the fake's round returns
+		// before the scheduler's finish frees the slot, and a Tick in between would start nothing.
+		waitFor(t, "rounds drained", func() bool {
+			for _, e := range s.Snapshot() {
+				if e.Running {
+					return false
+				}
+			}
+			return true
+		})
 	}
 	s.Wait()
 	if m := f.maxRun.Load(); m != 2 {
