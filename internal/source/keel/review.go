@@ -13,8 +13,8 @@ import (
 //	verdict.<role>      {"verdict": "pass"|"changes"|"comment", "rev": "<sha>", "at": "<RFC3339>"}   written by each reviewer
 //	review_state        written by the critic (below)
 //
-// review_state is "pass" only when every required reviewer's verdict is pass
-// at the doc's current revision and no thread on the doc is open; "changes"
+// review_state is "pass" only when the doc's current revision is known, every
+// required reviewer's verdict is pass at it, and no thread on the doc is open; "changes"
 // when any required reviewer says changes at the current revision; else
 // "waiting", naming what is missing. Required reviewers are review.reviewers,
 // else every role with a verdict.
@@ -40,8 +40,8 @@ type ReviewState struct {
 	State string `json:"state"`         // pass | changes | waiting
 	Doc   string `json:"doc"`           // the reviewed path
 	Rev   string `json:"rev,omitempty"` // the doc's current revision ("" = unknown)
-	// RevChecked is false when the doc's revision could not be learned:
-	// verdicts are then taken at face value.
+	// RevChecked is false when the doc's revision could not be learned: the
+	// state is then never pass (fails closed), whatever the verdicts say.
 	RevChecked bool     `json:"rev_checked"`
 	Open       int      `json:"open"`                 // open threads on the doc
 	Missing    []string `json:"missing,omitempty"`    // required reviewers with no verdict
@@ -86,7 +86,7 @@ func reviewState(cfg ReviewConfig, verdicts map[string]Verdict, index map[string
 	switch {
 	case len(st.ChangesBy) > 0:
 		st.State = "changes"
-	case len(required) > 0 && st.Open == 0 && len(st.Missing)+len(st.Stale)+len(st.Pending)+len(st.Invalid) == 0:
+	case st.RevChecked && len(required) > 0 && st.Open == 0 && len(st.Missing)+len(st.Stale)+len(st.Pending)+len(st.Invalid) == 0:
 		st.State = "pass"
 	default:
 		st.State = "waiting"

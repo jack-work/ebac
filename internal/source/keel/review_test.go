@@ -37,8 +37,8 @@ func TestReviewStateArms(t *testing.T) {
 			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Stale: []string{"reviewer"}}},
 		{"invalid verdict", map[string]Verdict{"reviewer": {Verdict: "lgtm", Rev: "r2"}, "warden": pass}, closed, "r2",
 			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Invalid: []string{"reviewer"}}},
-		{"rev unknown: face value", map[string]Verdict{"reviewer": {Verdict: "pass", Rev: "r1"}, "warden": pass}, closed, "",
-			ReviewState{State: "pass", Doc: "d.md"}},
+		{"rev unknown fails closed", map[string]Verdict{"reviewer": pass, "warden": pass}, closed, "",
+			ReviewState{State: "waiting", Doc: "d.md"}},
 	}
 	for _, c := range cases {
 		if got := reviewState(cfg, c.verdicts, c.index, c.rev); !reflect.DeepEqual(got, c.want) {
@@ -48,6 +48,9 @@ func TestReviewStateArms(t *testing.T) {
 	// No reviewers named: every role with a verdict is required; none at all waits.
 	if got := reviewState(ReviewConfig{Doc: "d.md"}, map[string]Verdict{"reviewer": pass}, closed, "r2"); got.State != "pass" {
 		t.Errorf("implicit pool: %+v", got)
+	}
+	if got := reviewState(ReviewConfig{Doc: "d.md"}, map[string]Verdict{"reviewer": pass}, closed, ""); got.State != "waiting" || got.RevChecked {
+		t.Errorf("pass verdict, unknown rev: %+v, want waiting", got)
 	}
 	if got := reviewState(ReviewConfig{Doc: "d.md"}, nil, closed, "r2"); got.State != "waiting" {
 		t.Errorf("no verdicts: %+v", got)
@@ -93,13 +96,13 @@ func TestDocRevAsksKeelsLogForThePathOnMain(t *testing.T) {
 
 func TestReviewRoundWritesOnlyOnChangeAndKeepsTheOpenCount(t *testing.T) {
 	old := DocRev
-	DocRev = func(context.Context, *Client, string, string) (string, error) { return "", nil }
+	DocRev = func(context.Context, *Client, string, string) (string, error) { return "r9", nil }
 	defer func() { DocRev = old }()
 	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
 	st := &model.KeelState{}
 	keys := map[string]json.RawMessage{
 		ReviewKey:  json.RawMessage(`{"doc":"d.md"}`),
-		VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass"}}`),
+		VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r9"}}`),
 	}
 	idx := map[string]IndexEntry{"a": {Path: "d.md"}}
 	rep := &plugin.Reply{}

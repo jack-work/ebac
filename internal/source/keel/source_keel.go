@@ -471,7 +471,7 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string, keys m
 
 // DocRev is the reviewed doc's current revision: the last commit on main
 // touching it (keel's log filtered by path). A doc with no commit yet is "":
-// verdicts are then taken without a revision check, and review_state says so.
+// review_state then never passes (rev_checked false).
 var DocRev = func(ctx context.Context, cl *Client, repo, doc string) (string, error) {
 	cs, err := cl.LogPath(ctx, repo, "main", doc, 1)
 	if err != nil {
