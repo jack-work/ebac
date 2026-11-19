@@ -200,6 +200,9 @@ type Critic struct {
 	Notes string `json:"notes,omitempty"`
 
 	FigaroSock string `json:"figaro_socket,omitempty"`
+	// FormIgnored names the form-stored fields the trusted configuration
+	// replaced (Trusted.Apply): ebac ls flags them.
+	FormIgnored []string `json:"-"`
 
 	// Source names the upstream this critic translates (source.go); empty
 	// means github-pr.

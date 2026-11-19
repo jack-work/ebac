@@ -182,3 +182,11 @@ func TestBeatFromArms(t *testing.T) {
 		}
 	}
 }
+
+// A critic whose form carried values the trusted config replaced is flagged by name in ebac ls. RED if the flag goes.
+func TestIgnoredFormConfigIsFlagged(t *testing.T) {
+	w := &model.Critic{Name: "keel-x", FormIgnored: []string{"keel.url", "keel.token_cmd"}}
+	if got := health(w, RosterRow{Seat: "abc"}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil); got != "form config ignored: keel.url,keel.token_cmd" {
+		t.Fatalf("%q", got)
+	}
+}
