@@ -49,4 +49,3 @@ func TestFormTokenCmdIsNeverExecuted(t *testing.T) {
 		t.Fatalf("control: a trusted token command did not run: %v", err)
 	}
 }
-
