@@ -34,7 +34,7 @@ var AlertPaths = []string{"author_watch.alert_role", "keel.alert_role", "release
 
 // NotRolePaths are the @-valued configuration fields that are not role
 // addresses.
-var NotRolePaths = []string{"board_form", "inputs_form"}
+var NotRolePaths = []string{"board_form", "inputs_form", "runtime.end_warned_for"} // the last is a time, not an address
 
 // Change is one address rewritten (or, on a dry run, to be).
 type Change struct {
