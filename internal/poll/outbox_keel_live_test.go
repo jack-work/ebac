@@ -72,7 +72,7 @@ func TestLiveHandWrittenKeelPostIsRefusedAtTheFlush(t *testing.T) {
 	ctx := context.Background()
 	st, w, snap := liveCritic(t, f, true)
 	w.Mode, w.Source, w.Keel = model.ModeKeel, "keel-threads", &model.KeelRef{Repo: "notes/captains-log"}
-	if err := st.Save(ctx, w, snap, nil); err != nil {
+	if err := st.SaveRecordingForTest(ctx, w, snap, nil); err != nil {
 		t.Fatal(err)
 	}
 	cw := &countWriter{}
@@ -84,7 +84,7 @@ func TestLiveHandWrittenKeelPostIsRefusedAtTheFlush(t *testing.T) {
 	writePost(t, st, w, "hand", model.Post{PR: "notes/captains-log", ReplyTo: "t1", Body: "claimed",
 		ByAria: holderAria, ByRole: "reviewer", ByRoleForm: poolForm})
 	acks := p.FlushOutbox(ctx, w, snap)
-	if err := st.Save(ctx, w, snap, acks); err != nil {
+	if err := st.SaveRecordingForTest(ctx, w, snap, acks); err != nil {
 		t.Fatal(err)
 	}
 	got := readPost(t, f, w, "hand")

@@ -111,7 +111,7 @@ func TestLiveLongMergedPRLeavesTheForm(t *testing.T) {
 		}
 		pre.PRs[p.Key] = p
 	}
-	if err := st.Save(ctx, w, pre, nil); err != nil {
+	if err := st.SaveRecordingForTest(ctx, w, pre, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The form's heads and the detail on disk (threads live there).

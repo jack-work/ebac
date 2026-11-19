@@ -108,7 +108,7 @@ func liveCritic(t *testing.T, f *figaro.Figaro, write bool) (*form.Store, *model
 	w.Runtime.Round = 7
 	snap.Critic, snap.Round, snap.TakenAt, snap.Complete = w.Name, 7, time.Now().UTC().Truncate(time.Second), true
 	snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments = []*model.Comment{{ID: "C1", Author: "friend", Body: "first", CreatedAt: "2026-10-20T01:00:00Z"}}
-	if err := st.Save(ctx, w, snap, nil); err != nil {
+	if err := st.SaveRecordingForTest(ctx, w, snap, nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	return st, w, snap
@@ -129,7 +129,7 @@ func TestLiveSaveIsOnePatchThatKeepsSeatKeys(t *testing.T) {
 	snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments = append(snap.PRs["acme/widget#1"].Threads["PRRT_1"].Comments,
 		&model.Comment{ID: "C2", Author: "amy", Body: "second", CreatedAt: "2026-10-20T02:00:00Z"})
 	w.Runtime.Round = 8
-	if err := st.Save(ctx, w, snap, nil); err != nil {
+	if err := st.SaveRecordingForTest(ctx, w, snap, nil); err != nil {
 		t.Fatal(err)
 	}
 	c, _ := f.Node(ctx, w.FormID)
@@ -215,7 +215,7 @@ func TestLiveOutboxPostsOnceAcksAndRetries(t *testing.T) {
 	round := func(scenario string) {
 		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
 		acks := p.FlushOutbox(ctx, w, snap)
-		if err := st.Save(ctx, w, snap, acks); err != nil {
+		if err := st.SaveRecordingForTest(ctx, w, snap, acks); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -287,7 +287,7 @@ func TestLiveOutboxResolvesThreads(t *testing.T) {
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
 		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
-		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
+		if err := st.SaveRecordingForTest(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -355,7 +355,7 @@ func TestLiveOutboxReactsToTheFinding(t *testing.T) {
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
 		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
-		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
+		if err := st.SaveRecordingForTest(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -401,7 +401,7 @@ func TestLiveOutboxNeverCallsAPendingReplySent(t *testing.T) {
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack"}
 	round := func(scenario string) {
 		p.Plugins = plugin.InProc{"gh": github.Plugin{GH: forgetest.FakeGH(t, scenario)}.Handle}
-		if err := st.Save(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
+		if err := st.SaveRecordingForTest(ctx, w, snap, p.FlushOutbox(ctx, w, snap)); err != nil {
 			t.Fatal(err)
 		}
 	}

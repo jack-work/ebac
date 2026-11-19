@@ -1000,20 +1000,24 @@ func (s *Store) CreateCritic(ctx context.Context, w *model.Critic) error {
 }
 
 // SaveCriticRecordingForTest records w's authority AS GIVEN (not the least
-// authority CreateCritic records) when it has no record yet, then saves it.
+// authority CreateCritic records; overwriting, so a test may change it),
+// then saves it.
 // Live tests only: they make critics whose write/approve the test needs;
 // production creates critics only through CreateCritic.
 func (s *Store) SaveCriticRecordingForTest(ctx context.Context, w *model.Critic) error {
+	return s.SaveRecordingForTest(ctx, w, nil, nil)
+}
+
+// SaveRecordingForTest is Save with SaveCriticRecordingForTest's record.
+func (s *Store) SaveRecordingForTest(ctx context.Context, w *model.Critic, snap *model.Snapshot, receipts Receipts) error {
 	if p, ok := authorityPath(w.FormID); ok {
-		if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-				return err
-			}
-			b, _ := json.Marshal(model.AuthorityOf(w))
-			if err := os.WriteFile(p, b, 0o600); err != nil {
-				return err
-			}
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			return err
+		}
+		b, _ := json.Marshal(model.AuthorityOf(w))
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			return err
 		}
 	}
-	return s.SaveCritic(ctx, w)
+	return s.Save(ctx, w, snap, receipts)
 }

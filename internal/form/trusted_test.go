@@ -69,7 +69,7 @@ func TestAuthorityComesFromConfigOrCreationRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !w.NoAuthority || w.Write || w.Approve || w.OrgApprove.Approver != "" || w.OrgApprove.Grant != "" {
+	if !w.NoAuthority || w.Write || w.Approve || w.OrgApprove.Approver != "" || w.OrgApprove.Grant != "" || w.Source != "" || w.Mode != "" {
 		t.Fatalf("no authority: %+v %+v", w, w.OrgApprove)
 	}
 	// A creation record (as SaveRound writes it for a new critic) is what is read back, not the form.
