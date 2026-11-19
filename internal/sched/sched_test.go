@@ -437,3 +437,37 @@ func TestEndsAreEnforcedBeforeScheduling(t *testing.T) {
 		t.Fatal("control: the live critic is not scheduled")
 	}
 }
+
+// A with-role critic ends only when its role is gone; an unreadable role ends nothing; a present role keeps it. RED if
+// an unreadable role ends a standing critic, or a retired role does not end it.
+func TestWithRoleEnds(t *testing.T) {
+	c := newClock()
+	mk := func(name, role string) *model.Critic {
+		w := critic(name, time.Minute)
+		w.Stop = model.StopConditions{WithRole: role}
+		return w
+	}
+	s := sched(c, ledger(t, c), newFake(), mk("held", "@held"), mk("retired", "@gone"), mk("unknown", "@err"))
+	var ended []endCall
+	s.End = func(_ context.Context, w *model.Critic, reason string) error {
+		ended = append(ended, endCall{w.Name, reason})
+		w.Runtime.Archived = true
+		return nil
+	}
+	s.Role = func(_ context.Context, id string) (bool, string, error) {
+		switch id {
+		case "@gone":
+			return false, "retired: its form is gone", nil
+		case "@err":
+			return false, "", fmt.Errorf("role %s unreadable: connection closed", id)
+		}
+		return true, "", nil
+	}
+	s.Tick(context.Background())
+	if len(ended) != 1 || ended[0] != (endCall{"retired", "role @gone retired: its form is gone"}) {
+		t.Fatalf("ended %+v, want only retired", ended)
+	}
+	if _, ok := s.Snapshot()["unknown"]; !ok {
+		t.Fatal("a critic whose role is unreadable was not kept scheduled")
+	}
+}

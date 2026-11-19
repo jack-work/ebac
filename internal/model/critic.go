@@ -33,15 +33,23 @@ type StopConditions struct {
 	// CreatedAt) unless its owner renews it (ebac set --renew); 0 = never.
 	ExpiresAfterSec int        `json:"expires_after_sec,omitempty"`
 	RenewedAt       *time.Time `json:"renewed_at,omitempty"`
+	// WithRole is a STANDING end: the critic lives while this role form is in
+	// the roster and ends when the role is retired (its form gone) or absorbed
+	// (moved-to set). No calendar expiry; only for critics on a roster role.
+	WithRole string `json:"with_role,omitempty"`
 	// MaxConsecutiveFailures stops a critic that cannot reach GitHub, so a
 	// dead credential does not generate an infinite error log.
 	MaxConsecutiveFailures int `json:"max_consecutive_failures"`
 }
 
+// DefaultStop is the TRANSIENT default for a critic created without --end
+// (reviews, PR and thread watches; the Boss 11-19): it ends when every PR is
+// closed plus 6 h, and in any case 7 days after creation unless renewed.
 func DefaultStop() StopConditions {
 	return StopConditions{
 		UntilAllClosed:         true,
 		ArchiveGraceSec:        6 * 3600,
+		ExpiresAfterSec:        7 * 86400,
 		MaxConsecutiveFailures: 20,
 	}
 }
@@ -632,6 +640,9 @@ func (w *Critic) EndLabel() string {
 		return "purge " + at.UTC().Format("2006-01-02")
 	}
 	var parts []string
+	if r := w.Stop.WithRole; r != "" {
+		parts = append(parts, "with-role "+shortID(r))
+	}
 	if d := w.Stop.Deadline; d != nil {
 		parts = append(parts, "until "+d.UTC().Format("2006-01-02"))
 	}
@@ -897,3 +908,11 @@ var ChildOwnerKeys = []string{"code_ready", "ready"}
 // pr_url and pr_number are keel CI's (K5: the PR it opened for the branch).
 var ChildWriteRefused = map[string]bool{"code_ready": true, "ready": true, "pr_url": true, "pr_number": true, "system": true, "runtime": true,
 	"target-aria": true, "name": true, "kind": true, CriticKey: true}
+
+// shortID is a form address cut to @ and 8 hex.
+func shortID(id string) string {
+	if len(id) > 9 {
+		return id[:9]
+	}
+	return id
+}

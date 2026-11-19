@@ -27,6 +27,7 @@ var RolePaths = []string{
 	"keel_branches.reviewer",
 	"approve_requests.ping_to",
 	"org_approve.ping_to",
+	"stop.with_role", // a with-role end follows its role when the role moves (repoint --all-from)
 }
 
 // AlertPaths are the alert-role fields (ebac repoint --critic N --alert @new).

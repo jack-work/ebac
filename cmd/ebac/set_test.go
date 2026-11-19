@@ -141,3 +141,22 @@ func TestApplyEnd(t *testing.T) {
 		}
 	}
 }
+
+// with-role: the critic's alert role by default, or the given role; alone only (a standing critic has no calendar
+// end); a critic without an alert role must name one. RED if with-role combines with another end or loses its role.
+func TestApplyEndWithRole(t *testing.T) {
+	alerted := &model.Critic{Name: "author-chiqun", Author: &model.AuthorRef{AlertRole: "@fd3ede9b"}, Stop: model.DefaultStop()}
+	if err := applyEnd(alerted, "with-role"); err != nil || alerted.Stop.WithRole != "@fd3ede9b" || alerted.Stop.ExpiresAfterSec != 0 || alerted.Stop.UntilAllClosed {
+		t.Fatalf("default role: %v %+v", err, alerted.Stop)
+	}
+	seat := &model.Critic{Name: "sec-chiqun-dm", Stop: model.DefaultStop()}
+	if err := applyEnd(seat, "with-role=@96b0034f"); err != nil || seat.Stop.WithRole != "@96b0034f" {
+		t.Fatalf("given role: %v %+v", err, seat.Stop)
+	}
+	for _, bad := range []string{"with-role", "with-role,expires=30d", "expires=30d,with-role=@x", "with-role=nope"} {
+		w := &model.Critic{Name: "sec-x", Stop: model.DefaultStop()}
+		if err := applyEnd(w, bad); err == nil || w.Stop != model.DefaultStop() {
+			t.Errorf("%q: accepted or half-applied: %v %+v", bad, err, w.Stop)
+		}
+	}
+}

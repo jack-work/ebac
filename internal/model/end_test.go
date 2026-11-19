@@ -111,3 +111,22 @@ func TestEndLabel(t *testing.T) {
 		}
 	}
 }
+
+// The transient default (no --end): all PRs closed + 6 h, and 7 d from creation, renewable. RED if a number moves.
+func TestDefaultStopIsTransient(t *testing.T) {
+	s := DefaultStop()
+	if !s.UntilAllClosed || s.ArchiveGraceSec != 6*3600 || s.ExpiresAfterSec != 7*86400 || s.WithRole != "" || s.Deadline != nil {
+		t.Fatalf("default %+v", s)
+	}
+	w := &Critic{CreatedAt: t0, Stop: s}
+	if got := w.EndReason(t0.Add(7 * 24 * time.Hour)); got != "expired: 168h0m0s since created" {
+		t.Fatalf("a defaulted critic at 7 d: %q", got)
+	}
+}
+
+func TestEndLabelWithRole(t *testing.T) {
+	w := &Critic{Stop: StopConditions{WithRole: "@fd3ede9ba8849a0d8477befcb40bfa95"}}
+	if got := w.EndLabel(); got != "with-role @fd3ede9b" {
+		t.Fatalf("%q", got)
+	}
+}

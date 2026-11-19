@@ -71,6 +71,9 @@ type Scheduler struct {
 	// expiry. nil: ends are not enforced (tests of the schedule alone).
 	End  func(ctx context.Context, w *model.Critic, reason string) error
 	Warn func(ctx context.Context, w *model.Critic, at time.Time) error
+	// Role says whether a with-role critic's role is still in the roster
+	// (fleet.RoleStanding); an error means unknown, and nothing ends.
+	Role func(ctx context.Context, id string) (present bool, why string, err error)
 
 	mu       sync.Mutex
 	entries  map[string]*Entry
@@ -168,6 +171,20 @@ func (s *Scheduler) ends(ctx context.Context, ws []*model.Critic, now time.Time)
 				}
 			}
 		case w.Runtime.Stopped:
+		case w.Stop.WithRole != "":
+			if s.Role == nil {
+				continue
+			}
+			present, why, err := s.Role(ctx, w.Stop.WithRole)
+			if err != nil {
+				fmt.Fprintf(s.Out, "%s: with-role end not judged: %v\n", w.Name, err)
+				continue
+			}
+			if !present {
+				if err := s.End(ctx, w, "role "+w.Stop.WithRole+" "+why); err != nil {
+					fmt.Fprintf(s.Out, "%s: %v\n", w.Name, err)
+				}
+			}
 		default:
 			if reason := w.EndReason(now); reason != "" {
 				if err := s.End(ctx, w, reason); err != nil {

@@ -143,6 +143,9 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 			p := base
 			return p.End(ctx, w, reason)
 		},
+		Role: func(ctx context.Context, id string) (bool, string, error) {
+			return fleet.RoleStanding(ctx, st.Fig.Form, id)
+		},
 		Warn: func(ctx context.Context, w *model.Critic, at time.Time) error {
 			p := base
 			return p.WarnEnd(ctx, w, at)

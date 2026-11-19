@@ -11,6 +11,7 @@ import (
 
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
@@ -235,7 +236,7 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	logins := fs.String("logins", "", "org-approve critic: the org's GHE logins, comma-separated (replaces the list)")
 	breaks := fs.String("known-breaks", "", "org-approve critic: check names allowed red (main-wide known breaks), comma-separated; \"\" clears")
-	end := fs.String("end", "", "the critic's end, replacing it: until=2026-12-01 | all-closed[:6h] | expires=30d (comma-joined: the earliest wins); no critic lives forever")
+	end := fs.String("end", "", "the critic's end, replacing it: until=2026-12-01 | all-closed[:6h] | expires=30d (comma-joined: the earliest wins) | with-role[=@role] (standing, alone); no critic lives forever")
 	renew := fs.Bool("renew", false, "restart an expires_after end from now")
 	purgeAt := fs.String("purge-at", "", "an archived critic: when its forms are killed (2026-11-26 or RFC3339)")
 	_ = fs.Parse(args)
@@ -271,6 +272,11 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		if given["end"] {
 			if err := applyEnd(w, *end); err != nil {
 				return err
+			}
+			if r := w.Stop.WithRole; r != "" {
+				if err := fleet.IsRosterRole(ctx, st.Fig.Form, r); err != nil {
+					return fmt.Errorf("--end with-role refused: %w", err)
+				}
 			}
 		}
 		if *renew {
@@ -571,7 +577,7 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 // change nothing.
 func applyEnd(w *model.Critic, spec string) error {
 	st := w.Stop
-	st.Deadline, st.ExpiresAfterSec, st.RenewedAt, st.UntilAllClosed = nil, 0, nil, false
+	st.Deadline, st.ExpiresAfterSec, st.RenewedAt, st.UntilAllClosed, st.WithRole = nil, 0, nil, false, ""
 	items := strings.Split(spec, ",")
 	if strings.TrimSpace(spec) == "" {
 		return fmt.Errorf("--end: empty: give until=<date>, all-closed[:grace] or expires=<D>")
@@ -579,6 +585,18 @@ func applyEnd(w *model.Critic, spec string) error {
 	for _, it := range items {
 		it = strings.TrimSpace(it)
 		switch {
+		case it == "with-role" || strings.HasPrefix(it, "with-role="):
+			if len(items) != 1 {
+				return fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")
+			}
+			role, given := strings.CutPrefix(it, "with-role=")
+			if !given {
+				role = w.AlertTarget()
+			}
+			if !strings.HasPrefix(role, "@") {
+				return fmt.Errorf("--end with-role: %s has no alert role; give with-role=@<roster role>", w.Name)
+			}
+			st.WithRole = role
 		case it == "none":
 			return fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")
 		case strings.HasPrefix(it, "until="):
@@ -603,7 +621,7 @@ func applyEnd(w *model.Critic, spec string) error {
 			}
 			st.ExpiresAfterSec = int(d.Seconds())
 		default:
-			return fmt.Errorf("--end %q: want until=<date>, all-closed[:grace] or expires=<D>", it)
+			return fmt.Errorf("--end %q: want until=<date>, all-closed[:grace], expires=<D> or with-role[=@role]", it)
 		}
 	}
 	w.Stop = st
