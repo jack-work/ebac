@@ -112,3 +112,34 @@ func TestSetEvery(t *testing.T) {
 		}
 	}
 }
+
+// --end replaces the critic's end; each spec arm sets exactly its field; bad specs change nothing. RED if an arm sets
+// the wrong field, none is accepted beside another end, or a bad spec half-applies.
+func TestApplyEnd(t *testing.T) {
+	d := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		spec  string
+		check func(model.StopConditions) bool
+	}{
+		{"until=2026-12-01", func(s model.StopConditions) bool {
+			return s.Deadline != nil && s.Deadline.Equal(d) && s.ExpiresAfterSec == 0 && !s.UntilAllClosed
+		}},
+		{"expires=30d", func(s model.StopConditions) bool { return s.ExpiresAfterSec == 30*86400 && s.Deadline == nil }},
+		{"all-closed:2d", func(s model.StopConditions) bool { return s.UntilAllClosed && s.ArchiveGraceSec == 172800 }},
+		{"all-closed:2d,expires=30d", func(s model.StopConditions) bool { return s.UntilAllClosed && s.ExpiresAfterSec == 30*86400 }},
+		{"none", func(s model.StopConditions) bool {
+			return s.Deadline == nil && s.ExpiresAfterSec == 0 && !s.UntilAllClosed
+		}},
+	} {
+		w := &model.Critic{Stop: model.DefaultStop()}
+		if err := applyEnd(w, c.spec); err != nil || !c.check(w.Stop) {
+			t.Errorf("%s: err %v stop %+v", c.spec, err, w.Stop)
+		}
+	}
+	for _, bad := range []string{"", "none,expires=30d", "expires=30m", "until=tomorrow", "all-closed:x", "forever"} {
+		w := &model.Critic{Stop: model.DefaultStop()}
+		if err := applyEnd(w, bad); err == nil || w.Stop != model.DefaultStop() {
+			t.Errorf("%q: accepted or half-applied: %v %+v", bad, err, w.Stop)
+		}
+	}
+}

@@ -378,3 +378,62 @@ func keys(m map[string]Entry) []string {
 	}
 	return out
 }
+
+type endCall struct{ name, reason string }
+
+// Ends are enforced before scheduling: a reached end is ended once (and never reserved), an ended critic has its
+// kills retried, an archived critic at its purge date is purged, a running critic is left for the next listing, and
+// an expiry inside 72 h is warned. RED if any arm goes.
+func TestEndsAreEnforcedBeforeScheduling(t *testing.T) {
+	c := newClock()
+	now := c.now()
+	past := now.Add(-time.Second)
+	reached := critic("reached", time.Minute)
+	reached.Stop.Deadline = &past
+	ended := critic("ended", time.Minute)
+	ended.Runtime.Archived, ended.Runtime.EndedAt = true, &past
+	purge := critic("purge", time.Minute)
+	purge.Runtime.Archived, purge.Runtime.ArchivedAt = true, now.Add(-8*24*time.Hour)
+	young := critic("young-archive", time.Minute)
+	young.Runtime.Archived, young.Runtime.ArchivedAt = true, now.Add(-time.Hour)
+	warn := critic("warn", time.Minute)
+	warn.CreatedAt, warn.Stop.ExpiresAfterSec = now.Add(-28*24*time.Hour), 30*86400
+	live := critic("live", time.Minute)
+	f := newFake()
+	s := sched(c, ledger(t, c), f, reached, ended, purge, young, warn, live)
+	var calls []endCall
+	var warned []string
+	s.End = func(_ context.Context, w *model.Critic, reason string) error {
+		calls = append(calls, endCall{w.Name, reason})
+		if reason != "" && w.Runtime.EndedAt == nil {
+			w.Runtime.Archived, w.Runtime.EndedAt = true, &now
+		}
+		return nil
+	}
+	s.Warn = func(_ context.Context, w *model.Critic, at time.Time) error {
+		warned = append(warned, w.Name)
+		return nil
+	}
+	s.Tick(context.Background())
+	got := map[string]string{}
+	for _, e := range calls {
+		got[e.name] = e.reason
+	}
+	if len(calls) != 3 || got["reached"] != "until "+past.UTC().Format(time.RFC3339)+" passed" || got["ended"] != "" ||
+		got["purge"] != "purge: archived "+purge.Runtime.ArchivedAt.UTC().Format(time.RFC3339) {
+		t.Fatalf("end calls %+v", calls)
+	}
+	if _, ok := got["young-archive"]; ok {
+		t.Fatal("an archive inside its 7 d was purged")
+	}
+	if len(warned) != 1 || warned[0] != "warn" {
+		t.Fatalf("warned %v, want [warn]", warned)
+	}
+	snap := s.Snapshot()
+	if _, ok := snap["reached"]; ok {
+		t.Fatal("an ended critic was scheduled")
+	}
+	if _, ok := snap["live"]; !ok {
+		t.Fatal("control: the live critic is not scheduled")
+	}
+}

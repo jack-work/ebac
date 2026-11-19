@@ -66,6 +66,11 @@ type Scheduler struct {
 	// Deadline gives a round its context (nil: RoundTimeout from now);
 	// tests cancel it by hand instead of waiting on a clock.
 	Deadline func(ctx context.Context) (context.Context, context.CancelFunc)
+	// End ends a critic whose end is reached (reason), or retries the kills
+	// of one already ended (reason ""); Warn sends the advance warning of an
+	// expiry. nil: ends are not enforced (tests of the schedule alone).
+	End  func(ctx context.Context, w *model.Critic, reason string) error
+	Warn func(ctx context.Context, w *model.Critic, at time.Time) error
 
 	mu       sync.Mutex
 	entries  map[string]*Entry
@@ -108,6 +113,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 		if err != nil {
 			fmt.Fprintf(s.Out, "ebacd: list critics: %v\n", err)
 		} else {
+			s.ends(ctx, ws, now)
 			s.sync(ws, now)
 		}
 	}
@@ -131,6 +137,50 @@ func (s *Scheduler) Tick(ctx context.Context) {
 		s.slots++
 		s.inflight.Add(1)
 		go s.round(ctx, name, g)
+	}
+}
+
+// ends enforces every critic's end before it is scheduled: a critic whose end
+// is reached is ended (and leaves the schedule), one ended earlier whose forms
+// are not all gone has its kills retried, and an expiry inside the warning
+// window is announced once. A critic whose round is running is left for the
+// next listing.
+func (s *Scheduler) ends(ctx context.Context, ws []*model.Critic, now time.Time) {
+	if s.End == nil {
+		return
+	}
+	for _, w := range ws {
+		s.mu.Lock()
+		running := s.entries[w.Name] != nil && s.entries[w.Name].Running
+		s.mu.Unlock()
+		if running {
+			continue
+		}
+		switch {
+		case w.Runtime.EndedAt != nil:
+			if err := s.End(ctx, w, ""); err != nil {
+				fmt.Fprintf(s.Out, "%s: %v\n", w.Name, err)
+			}
+		case w.Runtime.Archived:
+			if at, due := w.PurgeDue(); due && !now.Before(at) {
+				if err := s.End(ctx, w, "purge: archived "+w.Runtime.ArchivedAt.UTC().Format(time.RFC3339)); err != nil {
+					fmt.Fprintf(s.Out, "%s: %v\n", w.Name, err)
+				}
+			}
+		case w.Runtime.Stopped:
+		default:
+			if reason := w.EndReason(now); reason != "" {
+				if err := s.End(ctx, w, reason); err != nil {
+					fmt.Fprintf(s.Out, "%s: %v\n", w.Name, err)
+				}
+				continue
+			}
+			if at, due := w.EndWarning(now); due && s.Warn != nil {
+				if err := s.Warn(ctx, w, at); err != nil {
+					fmt.Fprintf(s.Out, "%s: end warning: %v\n", w.Name, err)
+				}
+			}
+		}
 	}
 }
 

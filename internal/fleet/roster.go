@@ -35,12 +35,14 @@ type RosterRow struct {
 	Round      int    `json:"round"`
 	LastPolled string `json:"last_polled,omitempty"`
 	Every      string `json:"every"` // the interval ebacd polls it at
+	End        string `json:"end"`   // every end it has, or its purge date once archived
 	Health     string `json:"health"`
 	Pending    int    `json:"pending_delivery,omitempty"`
 }
 
 type RosterSummary struct {
 	Critics     int    `json:"critics"`
+	Archived    int    `json:"archived,omitempty"` // archived critics still listed: each goes at its purge date
 	PRs         int    `json:"prs"`
 	OpenPRs     int    `json:"open_prs"`
 	Unresolved  int    `json:"unresolved_threads"`
@@ -84,6 +86,10 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 	now := time.Now()
 	for _, w := range critics {
 		if w.Runtime.Archived {
+			// Shown until its purge: nothing lives indefinitely, and the date says when it goes.
+			rows = append(rows, RosterRow{Critic: w.Name, Form: w.FormID, Mode: modeLabel(w), Round: w.Runtime.Round,
+				Every: "-", End: w.EndLabel(), Health: "archived: " + model.FirstLine(w.Runtime.StopReason)})
+			sum.Archived++
 			continue
 		}
 		row := RosterRow{
@@ -95,6 +101,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 			row.LastPolled = w.Runtime.LastPolled.UTC().Format(time.RFC3339)
 		}
 		row.Every = w.Interval().String()
+		row.End = w.EndLabel()
 
 		// Seat health is the SAME question the selfcheck asks, asked the
 		// same way. Two instruments that disagree about one fact are worse
@@ -140,7 +147,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 		sum.Unhealthy++
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Critic < rows[j].Critic })
-	sum.Critics = len(rows)
+	sum.Critics = len(rows) - sum.Archived // live (and broken) critics; archived ones are listed until purged
 	sum.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	return rows, sum, nil
 }

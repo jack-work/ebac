@@ -9,17 +9,17 @@ B7-torn-empty	internal/budget/budget.go	155	lv.Tokens, lv.Wake = 0, 0	lv.Tokens,
 B8-save	internal/budget/budget.go	348	\t_ = os.Rename(tmp, l.path)		./internal/budget	TestLedgerPersists
 B10-reset-hour	internal/budget/budget.go	281	\t\t\t\tlv.ResetAt = now.Add(time.Hour)		./internal/budget	TestSettleRecords
 B11-remaining-guard	internal/budget/budget.go	277	\t\tif s.Remaining >= 0 {	\t\tif true {	./internal/budget	TestSettleRecords
-S1-running	internal/sched/sched.go	185	if !e.Running && !e.Next.After(now) {	if !e.Next.After(now) {	./internal/sched	TestACriticNeverRunsTwiceAtOnce
-S2-pool	internal/sched/sched.go	118	if s.slots >= s.Pool {	if false {	./internal/sched	TestThePoolBounds
-S3-reserve-est	internal/sched/sched.go	122	s.Ledger.Reserve(e.Cred, e.Class, e.Est)	s.Ledger.Reserve(e.Cred, e.Class, nil)	./internal/sched	TestAShortBucket
-S5-hung-slot	internal/sched/sched.go	235	\t\ts.slots--\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	\t\ts.slots -= 0\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	./internal/sched	TestAHungRound
-S6-settle	internal/sched/sched.go	249	\ts.Ledger.Settle(g, sp)		./internal/sched	TestARoundSettles
-S7-stopped	internal/sched/sched.go	146	if w.Runtime.Stopped || w.Runtime.Archived {	if false {	./internal/sched	TestStoppedArchived
-S8-cred	internal/sched/sched.go	315	return "github:" + host	return ""	./internal/sched	TestCredentialAndClass
-S9-class-approve	internal/sched/sched.go	325	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":	case "teams-chat", "keel-threads":	./internal/sched	TestCredentialAndClass
-S10-est	internal/sched/sched.go	278	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
-P1-lock-held	internal/poll/poll.go	94	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
-P2-onspend	internal/poll/poll.go	63	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
+S1-running	internal/sched/sched.go	235	if !e.Running && !e.Next.After(now) {	if !e.Next.After(now) {	./internal/sched	TestACriticNeverRunsTwiceAtOnce
+S2-pool	internal/sched/sched.go	124	if s.slots >= s.Pool {	if false {	./internal/sched	TestThePoolBounds
+S3-reserve-est	internal/sched/sched.go	128	s.Ledger.Reserve(e.Cred, e.Class, e.Est)	s.Ledger.Reserve(e.Cred, e.Class, nil)	./internal/sched	TestAShortBucket
+S5-hung-slot	internal/sched/sched.go	285	\t\ts.slots--\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	\t\ts.slots -= 0\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	./internal/sched	TestAHungRound
+S6-settle	internal/sched/sched.go	299	\ts.Ledger.Settle(g, sp)		./internal/sched	TestARoundSettles
+S7-stopped	internal/sched/sched.go	196	if w.Runtime.Stopped || w.Runtime.Archived {	if false {	./internal/sched	TestStoppedArchived
+S8-cred	internal/sched/sched.go	365	return "github:" + host	return ""	./internal/sched	TestCredentialAndClass
+S9-class-approve	internal/sched/sched.go	375	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":	case "teams-chat", "keel-threads":	./internal/sched	TestCredentialAndClass
+S10-est	internal/sched/sched.go	328	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
+P1-lock-held	internal/poll/poll.go	99	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
+P2-onspend	internal/poll/poll.go	68	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
 F1-rest	internal/forge/gql.go	39	if rest := s.All - s.Calls; rest > 0 {	if rest := s.All; rest > 0 {	./internal/forge	TestSpendBudgetWireBytes
 F2-resetAt-query	internal/forge/gql.go	76	" rateLimit{cost remaining resetAt} "	" rateLimit{cost remaining} "	./internal/forge	TestWithRateLimitAsksTheReset
 F3-resetAt-parse	internal/forge/gql.go	104	\t\tg.spend.ResetAt = rl.ResetAt		./internal/forge	TestBranchTipsOneCall
@@ -37,15 +37,27 @@ W1-wake-draw	internal/budget/budget.go	226	if fits && lv.Wake >= e {	if false {	
 W2-wake-wait	internal/budget/budget.go	235	\t\t\t\tw = min(w, fill(e-lv.Wake, wr))\n	\t\t\t\tw = min(w, fill(e-lv.Wake, wr)+time.Hour)\n	./internal/budget	TestReserveTable
 W3-settle-wake	internal/budget/budget.go	288	\t\tif g.Wake[name] {	\t\tif false {	./internal/budget	TestSettleChargesThePoolTheGrantDrewOn
 W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = math.Min(wb+100, lv.Wake+dt*wr/3600)	./internal/budget	TestRefillFillsBothPools
-O1-cadence	internal/sched/sched.go	176	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
-O2-overdue-spread	internal/sched/sched.go	178	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
-H1-late-from-beat	internal/fleet/roster.go	309	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
-H2-stale-bound	internal/fleet/roster.go	318	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
-H3-no-beat	internal/fleet/roster.go	185	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
+O1-cadence	internal/sched/sched.go	226	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
+O2-overdue-spread	internal/sched/sched.go	228	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
+H1-late-from-beat	internal/fleet/roster.go	316	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
+H2-stale-bound	internal/fleet/roster.go	325	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
+H3-no-beat	internal/fleet/roster.go	192	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
 Y4-exit1-none	internal/systemd/systemd.go	284	ee.ExitCode() == 1	ee.ExitCode() == 99	./internal/systemd	TestRetireWithNoTimersLeft
-R2-latefactor	internal/fleet/roster.go	300	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
-U1-unreadable-arm	internal/fleet/roster.go	183	\tcase beatErr != nil:	\tcase false:	./internal/fleet	TestHeartbeatUnreadableIsNotMissing
-U2-read-error	internal/fleet/roster.go	344	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-U3-two-forms	internal/fleet/roster.go	340	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-U4-no-beat	internal/fleet/roster.go	355	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+R2-latefactor	internal/fleet/roster.go	307	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
+U1-unreadable-arm	internal/fleet/roster.go	190	\tcase beatErr != nil:	\tcase false:	./internal/fleet	TestHeartbeatUnreadableIsNotMissing
+U2-read-error	internal/fleet/roster.go	351	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U3-two-forms	internal/fleet/roster.go	347	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U4-no-beat	internal/fleet/roster.go	362	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 T1-clears-seat	internal/form/formstate.go	673	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
+E1-until-boundary	internal/model/critic.go	559	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
+E2-renew	internal/model/critic.go	549	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
+E3-allclosed-needs-prs	internal/model/critic.go	569	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
+E4-warn-once	internal/model/critic.go	583	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
+E5-warn-window	internal/model/critic.go	540	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
+E6-purge-default	internal/model/critic.go	591	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
+E7-ended-no-repurge	internal/model/critic.go	596	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
+E8-sched-end	internal/sched/sched.go	172	\t\t\tif reason := w.EndReason(now); reason != "" {	\t\t\tif reason := ""; reason != "" {	./internal/sched	TestEndsAreEnforced
+E9-sched-purge	internal/sched/sched.go	165	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
+E10-sched-retry	internal/sched/sched.go	160	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
+E11-kill-order	internal/poll/poll.go	790	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
+E12-applyend-none-alone	cmd/ebac/critic.go	581	\t\t\tif len(items) != 1 {	\t\t\tif false {	./cmd/ebac	TestApplyEnd

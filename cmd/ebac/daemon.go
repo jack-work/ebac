@@ -139,6 +139,14 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 			p.OnSpend = settle
 			return p.Poll(ctx, name)
 		},
+		End: func(ctx context.Context, w *model.Critic, reason string) error {
+			p := base
+			return p.End(ctx, w, reason)
+		},
+		Warn: func(ctx context.Context, w *model.Critic, at time.Time) error {
+			p := base
+			return p.WarnEnd(ctx, w, at)
+		},
 		Ledger:       ledger,
 		Now:          time.Now,
 		Jitter:       func(d time.Duration) time.Duration { return time.Duration(rand.Int64N(int64(d) + 1)) },

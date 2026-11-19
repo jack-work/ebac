@@ -40,7 +40,9 @@ type Poller struct {
 	// Send and Holder replace delivery's figaro send and seat check in tests
 	// (nil: the real ones), so a delivery cadence can be counted without
 	// waking an aria.
-	Send   func(ctx context.Context, target, msg string) error
+	Send func(ctx context.Context, target, msg string) error
+	// Kill replaces the broker kill of a form in tests (nil: the broker).
+	Kill   func(ctx context.Context, id string) error
 	Holder func(ctx context.Context, target string) bool
 	// BackoffDir holds the per-critic figaro backoff files ("" = no backoff,
 	// as in tests); PauseFile overrides the bounce pause path ("" = PauseFile).
@@ -686,71 +688,121 @@ func MergeEvents(pending, fresh []model.Event) []model.Event {
 	return out
 }
 
-// maybeArchive retires a critic whose PRs are all finished. The grace period
-// exists because the most interesting comment on a PR often arrives just
-// after it merges.
+// MaybeArchive keeps a PR critic's AllClosedSince: set when every PR is
+// closed or merged, cleared when one reopens. It archives nothing itself:
+// ebacd ends every critic through one path (End), and the all-closed end
+// is one of its reasons (model.Critic.EndReason).
 func (p *Poller) MaybeArchive(ctx context.Context, w *model.Critic, snap *model.Snapshot) error {
-	if !w.Stop.UntilAllClosed && !w.Runtime.Stopped {
+	if !w.Stop.UntilAllClosed || snap == nil || len(snap.PRs) == 0 {
 		return nil
 	}
-	if snap != nil && len(snap.PRs) > 0 {
-		allClosed := true
-		for _, pr := range snap.PRs {
-			if !pr.Closed() {
-				allClosed = false
-				break
-			}
-		}
-		if !allClosed {
-			if w.Runtime.AllClosedSince != nil {
-				w.Runtime.AllClosedSince = nil
-				_ = p.Store.SaveCritic(ctx, w)
-			}
-			return nil
-		}
-		if w.Runtime.AllClosedSince == nil {
-			now := time.Now().UTC()
-			w.Runtime.AllClosedSince = &now
-			_ = p.Store.SaveCritic(ctx, w)
-			fmt.Fprintf(p.Out, "%s: all PRs closed; grace period %s begins\n",
-				w.Name, time.Duration(w.Stop.ArchiveGraceSec)*time.Second)
-			return nil
-		}
-		grace := time.Duration(w.Stop.ArchiveGraceSec) * time.Second
-		if time.Since(*w.Runtime.AllClosedSince) < grace {
-			return nil
-		}
-		if w.Runtime.StopReason == "" {
-			w.Runtime.StopReason = "all PRs closed or merged"
-		}
-	} else if !w.Runtime.Stopped {
-		return nil
-	}
-
-	w.Runtime.Archived = true
-	w.Runtime.ArchivedAt = time.Now().UTC()
-	w.Runtime.Stopped = true
-
-	// Tell the seat it is over, once, before the form goes away.
-	if p.RoleHasHolder(ctx, w.FormID) {
-		msg := fmt.Sprintf("ebac %s is closing: %s.\nFinal state: %s\nNo further heartbeats will arrive for this critic. "+
-			"If you were holding findings for it, report them to the operator now.",
-			w.Name, w.Runtime.StopReason, summariseFinal(snap))
-		if err := p.Fig.Send(ctx, w.FormID, msg); err != nil {
-			fmt.Fprintf(p.Out, "%s: could not deliver closing notice: %v\n", w.Name, err)
+	allClosed := true
+	for _, pr := range snap.PRs {
+		if !pr.Closed() {
+			allClosed = false
+			break
 		}
 	}
-	dir, err := p.Store.Archive(ctx, w, snap)
-	if err != nil {
-		return fmt.Errorf("archive %s: %w", w.Name, err)
+	switch {
+	case !allClosed && w.Runtime.AllClosedSince != nil:
+		w.Runtime.AllClosedSince = nil
+		return p.Store.SaveCritic(ctx, w)
+	case allClosed && w.Runtime.AllClosedSince == nil:
+		now := time.Now().UTC()
+		w.Runtime.AllClosedSince = &now
+		fmt.Fprintf(p.Out, "%s: all PRs closed; it ends after a %s grace\n", w.Name, time.Duration(w.Stop.ArchiveGraceSec)*time.Second)
+		return p.Store.SaveCritic(ctx, w)
 	}
-	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return fmt.Errorf("archive %s: %w", w.Name, err)
-	}
-	fmt.Fprintf(p.Out, "%s: ARCHIVED to %s (%s)\n", w.Name, dir, w.Runtime.StopReason)
-	// ebacd schedules no archived critic; the form is left standing for
-	// whoever still wants to read it, and its lease runs out.
 	return nil
+}
+
+// EndNotify is told of every critic's end and every advance warning, beside
+// the critic's own seat or alert role (ebac-steward, 11-19).
+var EndNotify = "@6fa9788ad194a43d9fe2e32d96b12a83"
+
+// notifyEnd sends one line to the critic's seat or alert role and to EndNotify.
+func (p *Poller) notifyEnd(ctx context.Context, w *model.Critic, msg string) {
+	targets := []string{}
+	if t := w.AlertTarget(); t != "" {
+		targets = append(targets, t)
+	}
+	if EndNotify != "" {
+		targets = append(targets, EndNotify)
+	}
+	send := p.Send
+	if send == nil {
+		send = p.Fig.Send
+	}
+	for _, t := range targets {
+		if err := send(ctx, t, msg); err != nil {
+			fmt.Fprintf(p.Out, "%s: could not notify %s: %v\n", w.Name, t, err)
+		}
+	}
+}
+
+// End ends a critic for reason: one closing line to its seat or alert role
+// and to EndNotify, the archive on disk, the critic marked archived, then its
+// forms killed through the lifetime broker, children first and the role form
+// last. Called again for a critic already ended (EndedAt set), it only retries
+// the kills that failed: the critic is never polled once archived.
+func (p *Poller) End(ctx context.Context, w *model.Critic, reason string) error {
+	if w.Runtime.EndedAt == nil && w.Runtime.Archived {
+		// Already archived (by hand, or before ends existed): its purge date
+		// came. Nothing to tell or archive again; record the end, then kill.
+		now := time.Now().UTC()
+		w.Runtime.EndedAt = &now
+		if err := p.Store.SaveCritic(ctx, w); err != nil {
+			return fmt.Errorf("purge %s: %w", w.Name, err)
+		}
+		fmt.Fprintf(p.Out, "%s: PURGED (%s)\n", w.Name, reason)
+	}
+	if w.Runtime.EndedAt == nil {
+		now := time.Now().UTC()
+		snap, _ := p.Store.LoadSnapshot(ctx, w.Name)
+		w.Runtime.Archived, w.Runtime.Stopped = true, true
+		w.Runtime.ArchivedAt, w.Runtime.EndedAt = now, &now
+		w.Runtime.StopReason = "ended: " + reason
+		p.notifyEnd(ctx, w, fmt.Sprintf("ebac %s ended (%s); its forms are removed. Final state: %s", w.Name, reason, summariseFinal(snap)))
+		dir, err := p.Store.Archive(ctx, w, snap)
+		if err != nil {
+			return fmt.Errorf("end %s: archive: %w", w.Name, err)
+		}
+		if err := p.Store.SaveCritic(ctx, w); err != nil {
+			return fmt.Errorf("end %s: %w", w.Name, err)
+		}
+		fmt.Fprintf(p.Out, "%s: ENDED (%s), archived to %s\n", w.Name, reason, dir)
+	}
+	kill := p.Kill
+	if kill == nil {
+		kill = p.Fig.BrokerKill
+	}
+	keys := make([]string, 0, len(w.Runtime.Children))
+	for k := range w.Runtime.Children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var failed []string
+	for _, k := range keys {
+		if err := kill(ctx, w.Runtime.Children[k]); err != nil {
+			failed = append(failed, err.Error())
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("end %s: %d child form(s) not removed (retried at the next listing): %s", w.Name, len(failed), strings.Join(failed, "; "))
+	}
+	if err := kill(ctx, w.FormID); err != nil {
+		return fmt.Errorf("end %s: role form %s not removed (retried at the next listing): %w", w.Name, w.FormID, err)
+	}
+	fmt.Fprintf(p.Out, "%s: forms removed (%d child, role %s)\n", w.Name, len(keys), w.FormID)
+	return nil
+}
+
+// WarnEnd sends the one advance warning of an expiry at at, and records it.
+func (p *Poller) WarnEnd(ctx context.Context, w *model.Critic, at time.Time) error {
+	p.notifyEnd(ctx, w, fmt.Sprintf("ebac %s expires %s (in %s): renew it with `ebac set --critic %s --renew`, or let it end.",
+		w.Name, at.UTC().Format(time.RFC3339), time.Until(at).Round(time.Hour), w.Name))
+	w.Runtime.EndWarnedFor = &at
+	return p.Store.SaveCritic(ctx, w)
 }
 
 func summariseFinal(snap *model.Snapshot) string {

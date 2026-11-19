@@ -64,10 +64,10 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "CRITIC\tMODE\tSEAT\tPRS\tOPEN\tUNRES\tROUND\tEVERY\tHEALTH")
+	fmt.Fprintln(tw, "CRITIC\tMODE\tSEAT\tPRS\tOPEN\tUNRES\tROUND\tEVERY\tEND\tHEALTH")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n",
-			r.Critic, r.Mode, r.Seat, r.PRs, r.Open, r.Unresolved, r.Round, r.Every, r.Health)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n",
+			r.Critic, r.Mode, r.Seat, r.PRs, r.Open, r.Unresolved, r.Round, r.Every, r.End, r.Health)
 	}
 	tw.Flush()
 	fmt.Printf("\n%d critic(s), %d PRs (%d open), %d unresolved threads, %d awaiting a reply\n",

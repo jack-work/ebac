@@ -235,11 +235,15 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	logins := fs.String("logins", "", "org-approve critic: the org's GHE logins, comma-separated (replaces the list)")
 	breaks := fs.String("known-breaks", "", "org-approve critic: check names allowed red (main-wide known breaks), comma-separated; \"\" clears")
+	end := fs.String("end", "", "the critic's end, replacing it: until=2026-12-01 | all-closed[:6h] | expires=30d | none (comma-joined: the earliest wins)")
+	renew := fs.Bool("renew", false, "restart an expires_after end from now")
+	purgeAt := fs.String("purge-at", "", "an archived critic: when its forms are killed (2026-11-26 or RFC3339)")
 	_ = fs.Parse(args)
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	scoped := given["threads"] || given["inbox"] || given["mirror"]
-	if *pingEvery < 0 && !scoped && !given["ask-name"] && !given["every"] && !given["logins"] && !given["known-breaks"] {
+	ends := given["end"] || given["renew"] || given["purge-at"]
+	if *pingEvery < 0 && !scoped && !ends && !given["ask-name"] && !given["every"] && !given["logins"] && !given["known-breaks"] {
 		return fmt.Errorf("nothing to set: give --every D, --ping-every D (0 turns collect mode off), for a keel critic --threads, --inbox or --mirror, for an approve critic --ask-name, or for an org-approve critic --logins or --known-breaks")
 	}
 	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
@@ -261,6 +265,34 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		if set, unset, scope, err = overlayScope(w.Reads, given, vals); err != nil {
 			return err
 		}
+	}
+	if ends {
+		now := time.Now().UTC()
+		if given["end"] {
+			if err := applyEnd(w, *end); err != nil {
+				return err
+			}
+		}
+		if *renew {
+			if w.Stop.ExpiresAfterSec <= 0 {
+				return fmt.Errorf("%s has no expires_after end to renew (ebac set --end expires=30d)", w.Name)
+			}
+			w.Stop.RenewedAt = &now
+		}
+		if given["purge-at"] {
+			if !w.Runtime.Archived {
+				return fmt.Errorf("--purge-at is for an archived critic; %s is live (give it an end: --end)", w.Name)
+			}
+			t, err := parseWhen(*purgeAt)
+			if err != nil {
+				return fmt.Errorf("--purge-at %q: %w", *purgeAt, err)
+			}
+			w.Runtime.PurgeAt = &t
+		}
+		if err := st.SaveCritic(ctx, w); err != nil {
+			return err
+		}
+		fmt.Printf("%s: end %s\n", w.Name, w.EndLabel())
 	}
 	if given["every"] {
 		ping := time.Duration(w.PingEverySec) * time.Second
@@ -531,4 +563,57 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	}
 	fmt.Printf("%s: acked round %d\n", w.Name, *round)
 	return nil
+}
+
+// applyEnd replaces a critic's end with spec: comma-joined until=<date>,
+// all-closed[:<grace>], expires=<D>, or none alone. Bad specs change nothing.
+func applyEnd(w *model.Critic, spec string) error {
+	st := w.Stop
+	st.Deadline, st.ExpiresAfterSec, st.RenewedAt, st.UntilAllClosed = nil, 0, nil, false
+	items := strings.Split(spec, ",")
+	if strings.TrimSpace(spec) == "" {
+		return fmt.Errorf("--end: empty (give none to clear)")
+	}
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		switch {
+		case it == "none":
+			if len(items) != 1 {
+				return fmt.Errorf("--end: none stands alone")
+			}
+		case strings.HasPrefix(it, "until="):
+			t, err := parseWhen(strings.TrimPrefix(it, "until="))
+			if err != nil {
+				return fmt.Errorf("--end %s: %w", it, err)
+			}
+			st.Deadline = &t
+		case it == "all-closed" || strings.HasPrefix(it, "all-closed:"):
+			st.UntilAllClosed = true
+			if g, ok := strings.CutPrefix(it, "all-closed:"); ok {
+				d, err := parseDays(g)
+				if err != nil || d < 0 {
+					return fmt.Errorf("--end %s: grace: %v", it, err)
+				}
+				st.ArchiveGraceSec = int(d.Seconds())
+			}
+		case strings.HasPrefix(it, "expires="):
+			d, err := parseDays(strings.TrimPrefix(it, "expires="))
+			if err != nil || d < time.Hour {
+				return fmt.Errorf("--end %s: want a duration of at least 1h, e.g. 30d", it)
+			}
+			st.ExpiresAfterSec = int(d.Seconds())
+		default:
+			return fmt.Errorf("--end %q: want until=<date>, all-closed[:grace], expires=<D> or none", it)
+		}
+	}
+	w.Stop = st
+	return nil
+}
+
+// parseWhen reads a date (2026-12-01, midnight UTC) or an RFC3339 time.
+func parseWhen(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }

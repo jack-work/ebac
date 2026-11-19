@@ -25,9 +25,14 @@ type StopConditions struct {
 	// ArchiveGraceSec keeps polling after the last PR closes, so a
 	// post-merge comment still reaches the seat.
 	ArchiveGraceSec int `json:"archive_grace_sec"`
-	// MaxRounds and Deadline are hard stops; 0 / zero-time mean unbounded.
-	MaxRounds int        `json:"max_rounds,omitempty"`
-	Deadline  *time.Time `json:"deadline,omitempty"`
+	// MaxRounds is a hard stop; 0 means unbounded.
+	MaxRounds int `json:"max_rounds,omitempty"`
+	// Deadline ENDS the critic at that moment (ebac set --end until=...).
+	Deadline *time.Time `json:"deadline,omitempty"`
+	// ExpiresAfterSec ENDS the critic this long after RenewedAt (else
+	// CreatedAt) unless its owner renews it (ebac set --renew); 0 = never.
+	ExpiresAfterSec int        `json:"expires_after_sec,omitempty"`
+	RenewedAt       *time.Time `json:"renewed_at,omitempty"`
 	// MaxConsecutiveFailures stops a critic that cannot reach GitHub, so a
 	// dead credential does not generate an infinite error log.
 	MaxConsecutiveFailures int `json:"max_consecutive_failures"`
@@ -42,6 +47,17 @@ func DefaultStop() StopConditions {
 }
 
 type Runtime struct {
+	// EndedAt: ebacd ended the critic (archived; its forms are killed, the
+	// kills retried until the role form is gone). EndWarnedFor is the expiry
+	// an advance warning was sent for (a renewal moves the expiry, so a new
+	// warning is due).
+	EndedAt      *time.Time `json:"ended_at,omitempty"`
+	EndWarnedFor *time.Time `json:"end_warned_for,omitempty"`
+	// PurgeAt is when an archived critic whose forms still stand (archived by
+	// hand, or before ends existed) is purged: its forms killed. nil = its
+	// ArchivedAt + DefaultPurgeAfter.
+	PurgeAt *time.Time `json:"purge_at,omitempty"`
+
 	Round               int       `json:"round"`
 	LastPolled          time.Time `json:"last_polled"`
 	LastSuccess         time.Time `json:"last_success"`
@@ -537,13 +553,111 @@ type KeelState struct {
 	ScopeErr string     `json:"scope_error,omitempty"`
 }
 
+// EndWarnBefore: an expires_after end is announced this long ahead, once per
+// expiry, so its owner can renew it in time.
+const EndWarnBefore = 3 * 24 * time.Hour
+
+// ExpiresAt is when an expires_after end falls (false: no such end).
+func (w *Critic) ExpiresAt() (time.Time, bool) {
+	if w.Stop.ExpiresAfterSec <= 0 {
+		return time.Time{}, false
+	}
+	base := w.CreatedAt
+	if w.Stop.RenewedAt != nil {
+		base = *w.Stop.RenewedAt
+	}
+	return base.Add(time.Duration(w.Stop.ExpiresAfterSec) * time.Second), true
+}
+
+// EndReason says why the critic has reached its end at now, or "". Every
+// critic, whatever its source: a deadline (until), an expiry (expires_after,
+// renewable), or every PR closed plus the grace (critics that hold PRs; the
+// PR round keeps AllClosedSince). ebacd ends it: archive, then its forms go.
+func (w *Critic) EndReason(now time.Time) string {
+	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {
+		return "until " + d.UTC().Format(time.RFC3339) + " passed"
+	}
+	if at, ok := w.ExpiresAt(); ok && !now.Before(at) {
+		since := "created"
+		if w.Stop.RenewedAt != nil {
+			since = "renewed"
+		}
+		return fmt.Sprintf("expired: %s since %s", time.Duration(w.Stop.ExpiresAfterSec)*time.Second, since)
+	}
+	if w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil &&
+		now.Sub(*w.Runtime.AllClosedSince) >= time.Duration(w.Stop.ArchiveGraceSec)*time.Second {
+		return "all PRs closed + " + (time.Duration(w.Stop.ArchiveGraceSec) * time.Second).String() + " grace"
+	}
+	return ""
+}
+
+// EndWarning says whether an advance warning of the expiry is due now: inside
+// EndWarnBefore of it, not ended yet, not warned for this expiry.
+func (w *Critic) EndWarning(now time.Time) (time.Time, bool) {
+	at, ok := w.ExpiresAt()
+	if !ok || !now.Before(at) || at.Sub(now) > EndWarnBefore {
+		return time.Time{}, false
+	}
+	if f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {
+		return time.Time{}, false
+	}
+	return at, true
+}
+
+// DefaultPurgeAfter: an archived critic's forms are killed this long after it
+// was archived, unless purge_at says otherwise (nothing lives indefinitely).
+const DefaultPurgeAfter = 7 * 24 * time.Hour
+
+// PurgeDue says when an archived critic, not yet ended, is purged (false: not
+// archived, or already ended). An archive with no recorded time is due now.
+func (w *Critic) PurgeDue() (time.Time, bool) {
+	if !w.Runtime.Archived || w.Runtime.EndedAt != nil {
+		return time.Time{}, false
+	}
+	if p := w.Runtime.PurgeAt; p != nil {
+		return *p, true
+	}
+	if w.Runtime.ArchivedAt.IsZero() {
+		return time.Time{}, true
+	}
+	return w.Runtime.ArchivedAt.Add(DefaultPurgeAfter), true
+}
+
+// EndLabel is the critic's end for ebac ls: every end it has, short; "none".
+func (w *Critic) EndLabel() string {
+	if at, ok := w.PurgeDue(); ok {
+		if at.IsZero() {
+			return "purge now"
+		}
+		return "purge " + at.UTC().Format("2006-01-02")
+	}
+	var parts []string
+	if d := w.Stop.Deadline; d != nil {
+		parts = append(parts, "until "+d.UTC().Format("2006-01-02"))
+	}
+	if at, ok := w.ExpiresAt(); ok {
+		parts = append(parts, "exp "+at.UTC().Format("2006-01-02"))
+	}
+	if w.Stop.UntilAllClosed && len(w.PRs) > 0 {
+		parts = append(parts, "closed+"+shortDur(time.Duration(w.Stop.ArchiveGraceSec)*time.Second))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
+}
+
+func shortDur(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return d.String()
+}
+
 // HardStop says why a critic must stop before it spends an upstream call, or "".
 func (w *Critic) HardStop() string {
 	if w.Stop.MaxRounds > 0 && w.Runtime.Round > w.Stop.MaxRounds {
 		return fmt.Sprintf("max rounds (%d) reached", w.Stop.MaxRounds)
-	}
-	if w.Stop.Deadline != nil && time.Now().After(*w.Stop.Deadline) {
-		return "deadline " + w.Stop.Deadline.UTC().Format(time.RFC3339) + " passed"
 	}
 	if w.Stop.MaxConsecutiveFailures > 0 && w.Runtime.ConsecutiveFailures >= w.Stop.MaxConsecutiveFailures {
 		return fmt.Sprintf("%d consecutive failures (last: %s)", w.Runtime.ConsecutiveFailures, w.Runtime.LastError)
