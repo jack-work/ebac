@@ -224,7 +224,7 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 var SourceKeys = map[string][]string{
 	"github-pr":         nil,
 	"github-author":     {"authored", model.AuthorFilterErr},
-	"keel-threads":      {"threads", "blind", model.KeelScopeErr},
+	"keel-threads":      {"threads", "blind", model.KeelScopeErr, "review_state", "review_error"},
 	"teams-chat":        {"blind", "inbox_fetch"},
 	model.SourceBandHub: {"queues", "nodes", "node_load", "dupes", "updated", "live"}, // live: unset only (dropped key)
 	"github-releases":   {"releases"},

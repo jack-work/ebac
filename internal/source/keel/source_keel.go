@@ -465,7 +465,64 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string, keys m
 	case r.index != nil:
 		rep.SetKey("threads", sc.indexValue(r.index))
 	}
+	reviewRound(ctx, cl, rep, w, st, keys, r.index)
 	return rep
+}
+
+// DocRev is the reviewed doc's current revision: the last commit touching
+// it. "" with no error means keel cannot say (no per-path log on this door):
+// verdicts are then taken without a revision check, and review_state says so.
+var DocRev = func(ctx context.Context, cl *Client, repo, doc string) (string, error) { return "", nil }
+
+// reviewRound writes review_state when a review is configured and its state
+// changed; a bad review key goes to review_error.
+func reviewRound(ctx context.Context, cl *Client, rep *plugin.Reply, w *model.Critic, st *model.KeelState,
+	keys map[string]json.RawMessage, index map[string]IndexEntry) {
+	cfg, verdicts, ok, err := readReview(keys)
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	if errText != st.ReviewErr {
+		if errText == "" {
+			rep.Unset = append(rep.Unset, "review_error")
+		} else {
+			rep.SetKey("review_error", errText)
+		}
+		st.ReviewErr = errText
+	}
+	if !ok {
+		if st.ReviewLast != "" {
+			rep.Unset = append(rep.Unset, ReviewStateKey)
+			st.ReviewLast, st.ReviewDoc, st.ReviewOpen = "", "", 0
+		}
+		return
+	}
+	if index != nil {
+		st.ReviewDoc, st.ReviewOpen = cfg.Doc, 0
+		for _, e := range index {
+			if e.Path == cfg.Doc && !e.Resolved {
+				st.ReviewOpen++
+			}
+		}
+	} else if st.ReviewDoc != cfg.Doc {
+		return // the doc changed and nothing was fetched: wait for the next fetch
+	}
+	rev, rerr := DocRev(ctx, cl, w.Keel.Repo, cfg.Doc)
+	if rerr != nil {
+		rep.Logf("%s: review rev of %s: %v", w.Name, cfg.Doc, rerr)
+		return // keep the last state rather than drop the rev check
+	}
+	open := map[string]IndexEntry{}
+	for i := 0; i < st.ReviewOpen; i++ {
+		open[fmt.Sprint(i)] = IndexEntry{Path: cfg.Doc}
+	}
+	rs := reviewState(cfg, verdicts, open, rev)
+	b, _ := json.Marshal(rs)
+	if string(b) != st.ReviewLast {
+		rep.SetKey(ReviewStateKey, rs)
+		st.ReviewLast = string(b)
+	}
 }
 
 func keelBrief(w *model.Critic, events []model.Event) string {
