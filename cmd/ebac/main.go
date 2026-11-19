@@ -113,7 +113,7 @@ it with figaro set and ebac reads it every round. add-* writes the source's defa
   the last rule must be {"default": true, "action": ...}. A set that does not parse is never applied: the last good
   set stays in force and the form key trigger_error says why. ebac show prints the set in force.
 
-Global flags: --gh <path> --socket <angelus.sock> --host <ghe host>
+Global flags: --gh <path> --socket <angelus.sock | unix:/path | wss://host/door> (default $EBAC_FIGARO, else the local socket; a wss door reads its token from the command in $EBAC_FIGARO_BEARER_CMD) --host <ghe host>
 `
 
 type globals struct {

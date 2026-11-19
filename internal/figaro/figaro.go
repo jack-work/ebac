@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +13,7 @@ import (
 	"github.com/jack-work/figaro/api/message"
 	"github.com/jack-work/figaro/api/rpc"
 
+	"github.com/gluck/ebac/internal/figclient"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/jack-work/figaro/api/transport"
 	"github.com/jack-work/figaro/sdk"
@@ -51,7 +49,8 @@ func onePatch(key string, raw json.RawMessage) message.Patch {
 // turn loop and a form has none". So Send resolves target-aria itself, per
 // call, which preserves late binding exactly as the CLI does it.
 type Figaro struct {
-	sock    string
+	ep      transport.Endpoint
+	epErr   error
 	Timeout time.Duration
 
 	mu    sync.Mutex
@@ -59,26 +58,16 @@ type Figaro struct {
 	nodes map[string]*sdk.Aria
 }
 
-// NewFigaro takes a socket path. An empty string discovers it.
-func NewFigaro(sock string) *Figaro {
-	if sock == "" {
-		sock = AngelusSocket()
-	}
-	return &Figaro{sock: sock, Timeout: CallTimeout, nodes: map[string]*sdk.Aria{}}
+// NewFigaro takes the daemon's endpoint spec (figclient.Endpoint): a socket
+// path, unix:/path or wss://host/door; empty discovers it. A bad spec fails
+// the first call.
+func NewFigaro(spec string) *Figaro {
+	ep, err := figclient.Endpoint(spec)
+	return &Figaro{ep: ep, epErr: err, Timeout: CallTimeout, nodes: map[string]*sdk.Aria{}}
 }
 
-// AngelusSocket finds the daemon. XDG_RUNTIME_DIR is the real source; the
-// /run/user fallback exists because a systemd user unit does not always
-// inherit it.
-func AngelusSocket() string {
-	if s := os.Getenv("FIGARO_SOCKET"); s != "" {
-		return s
-	}
-	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		return filepath.Join(d, "figaro", "angelus.sock")
-	}
-	return filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "figaro", "angelus.sock")
-}
+// AngelusSocket is the local daemon's socket (figclient.LocalSocket).
+func AngelusSocket() string { return figclient.LocalSocket() }
 
 func (f *Figaro) Angelus() (*sdk.Angelus, error) {
 	f.mu.Lock()
@@ -86,9 +75,12 @@ func (f *Figaro) Angelus() (*sdk.Angelus, error) {
 	if f.ang != nil {
 		return f.ang, nil
 	}
-	a, err := sdk.DialAngelus(transport.UnixEndpoint(f.sock))
+	if f.epErr != nil {
+		return nil, f.epErr
+	}
+	a, err := sdk.DialAngelus(f.ep)
 	if err != nil {
-		return nil, fmt.Errorf("dial angelus at %s: %w (is the daemon running?)", f.sock, err)
+		return nil, fmt.Errorf("dial angelus at %s: %w (is the daemon running?)", figclient.Describe(f.ep), err)
 	}
 	f.ang = a
 	return a, nil
@@ -98,7 +90,7 @@ func (f *Figaro) Angelus() (*sdk.Angelus, error) {
 // through the daemon's one door with the id carried in the params. The daemon
 // no longer hands out a per-aria endpoint, so there is nothing to dial but this.
 func (f *Figaro) Addr(id string) sdk.Addr {
-	return sdk.Addr{Door: transport.UnixEndpoint(f.sock), ID: id}
+	return sdk.Addr{Door: f.ep, ID: id}
 }
 
 // node dials one aria or form, caching the connection for the process.
