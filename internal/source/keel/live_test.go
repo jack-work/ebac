@@ -3,6 +3,7 @@ package keel
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -44,7 +45,7 @@ func TestLiveKeelRoundsBaselineAnswerBlindGone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keel-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: ref()}
 	if err := st.SaveCritic(ctx, w); err != nil {
@@ -165,7 +166,7 @@ func TestLiveKeelFeedRoundsBaselineAnswerCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keelfeed-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: feedRef()}
 	if err := st.SaveCritic(ctx, w); err != nil {

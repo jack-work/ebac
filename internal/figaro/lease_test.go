@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"testing"
 	"time"
 )
@@ -105,7 +106,7 @@ func TestLiveMintedFormCarriesARenewableLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 
 	ttl, exp := liveLease(t, f, id)
 	if ttl != FormLease.Milliseconds() {

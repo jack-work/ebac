@@ -2,6 +2,7 @@ package teams
 
 import (
 	"context"
+	"github.com/gluck/ebac/internal/livetest"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func TestLiveBlindRecoveryKeepsTheCritic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	root := t.TempDir()
 	store := func() *form.Store {
 		st, err := form.NewStore(f)

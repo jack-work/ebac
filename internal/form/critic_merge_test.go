@@ -3,6 +3,7 @@ package form
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	name := "livetest-cas-" + strings.TrimPrefix(id, "@")[:8]
 	w := &model.Critic{Name: name, FormID: id, Source: "keel-threads", CreatedAt: time.Now().UTC(), EverySec: 60,
 		Keel: &model.KeelRef{Repo: "notes/x"}}

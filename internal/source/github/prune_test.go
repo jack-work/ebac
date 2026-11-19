@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -97,7 +98,7 @@ func TestLiveLongMergedPRLeavesTheForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	gh := forgetest.FakeGH(t, "prs-closed")
 	w := &model.Critic{Name: "livetest-prune-" + strings.TrimPrefix(id, "@")[:8], FormID: id, Mode: model.ModeReview,
 		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), Stop: model.DefaultStop()}

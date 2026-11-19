@@ -3,6 +3,7 @@ package bandstate
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func TestLiveMirrorThroughTheCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := mirror()
 	w.Name, w.FormID, w.CreatedAt = "livetest-bandstate-"+strings.TrimPrefix(id, "@")[:8], id, time.Now().UTC()
 	if err := st.SaveCritic(ctx, &w); err != nil {

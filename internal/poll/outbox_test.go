@@ -3,6 +3,7 @@ package poll
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,7 +100,7 @@ func liveCritic(t *testing.T, f *figaro.Figaro, write bool) (*form.Store, *model
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w, snap := outboxCritic()
 	w.Name = "livetest-" + strings.TrimPrefix(id, "@")[:8]
 	w.Write = write

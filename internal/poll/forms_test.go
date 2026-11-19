@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"os/user"
 	"strconv"
@@ -134,7 +135,7 @@ func TestLiveScoutFormsThroughTheCore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		return id
 	}
 	critForm, boardForm, inputsForm := mint("ebac-livetest-scout"), mint("livetest-board"), mint("livetest-inputs")
@@ -288,7 +289,7 @@ func TestLiveChildFormsThroughTheCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, critForm) })
+	livetest.Remove(t, f, critForm)
 	name := "livetest-kb-" + strings.TrimPrefix(critForm, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceKeelBranches, FormID: critForm, EverySec: 120, CreatedAt: time.Now().UTC(),
 		Branches: &model.KeelBranches{Repo: "aether/aether"}}

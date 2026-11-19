@@ -2,6 +2,7 @@ package figaro
 
 import (
 	"context"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"sync"
@@ -36,13 +37,13 @@ func TestLiveRoleSendReachesTheHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint aria: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, aria) })
+	livetest.Remove(t, f, aria)
 
 	role, err := f.FormNew(ctx, "ebac-livetest-role")
 	if err != nil {
 		t.Fatalf("mint role: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, role) })
+	livetest.Remove(t, f, role)
 
 	// Before the cast the role holds nobody, and Send must SAY so rather
 	// than silently succeeding into the void.
@@ -71,7 +72,7 @@ func TestLiveConditionalWriteRefusesAStaleBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 
 	// Positive control on the primitive itself: a write at a version that
 	// has already moved must be refused, or the retry loop above it is
@@ -107,7 +108,7 @@ func TestLiveConcurrentWritersDoNotLoseKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 
 	const writers = 8
 	var wg sync.WaitGroup

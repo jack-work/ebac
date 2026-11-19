@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func TestLiveAckIsOneWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	name := "livetest-ack-" + strings.TrimPrefix(id, "@")[:8]
 	w := &model.Critic{Name: name, Mode: model.ModeTeams, Source: "teams-chat", FormID: id, EverySec: 60, CreatedAt: time.Now().UTC(),
 		Chat: &model.ChatRef{ID: "48:notes", Topic: "t"}}

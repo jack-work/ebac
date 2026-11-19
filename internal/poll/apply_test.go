@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/gluck/ebac/internal/livetest"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestLiveCoreAppliesAPluginReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-apply-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: &model.ChatRef{ID: "19:x", Topic: "t"}}
 	if err := st.SaveCritic(ctx, w); err != nil {
@@ -195,7 +196,7 @@ func TestLiveAPluginCannotWriteTheSeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keys-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: &model.KeelRef{Repo: "notes/x"}}
 	if err := st.SaveCritic(ctx, w); err != nil {
@@ -257,7 +258,7 @@ func TestLiveRosterRoundReadsTheStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-roster-" + strings.TrimPrefix(id, "@")[:8], Source: model.SourceRoster,
 		CreatedAt: time.Now().UTC(), FormID: id}
 	if err := st.SaveCritic(ctx, w); err != nil {

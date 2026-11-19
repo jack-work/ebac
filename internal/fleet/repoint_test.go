@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"reflect"
 	"regexp"
@@ -177,7 +178,7 @@ func TestLiveRepoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		return id
 	}
 	me := os.Getenv("EBAC_LIVE_HOLDER") // an aria to hold the scratch roles (nothing is sent to them)

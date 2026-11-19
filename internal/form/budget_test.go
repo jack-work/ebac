@@ -3,6 +3,7 @@ package form
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestLiveBudgetGuardControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	fill := func(total int) error {
 		return st.Commit(ctx, id, func(cur map[string]json.RawMessage, _ EbacState) (map[string]json.RawMessage, []string) {
 			base := 0

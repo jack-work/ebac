@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,7 +128,7 @@ func TestLiveScoutStateLivesOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	name := "livetest-local-" + strings.TrimPrefix(id, "@")[:8]
 	onForm := func() string { // the scout member on the live form, "" when absent
 		t.Helper()

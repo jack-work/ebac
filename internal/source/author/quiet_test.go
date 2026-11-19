@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +158,7 @@ func TestLiveAuthorPushesWriteNothingStudied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := authorWatch()
 	w.Name, w.FormID, w.CreatedAt = "livetest-aquiet-"+strings.TrimPrefix(id, "@")[:8], id, time.Now().UTC()
 	if err := st.SaveCritic(ctx, &w); err != nil {

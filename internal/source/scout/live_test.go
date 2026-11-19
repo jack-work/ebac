@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		for k, v := range keys {
 			if err := f.SetJSON(ctx, id, k, v); err != nil {
 				t.Fatal(err)
@@ -163,7 +164,7 @@ func TestLiveIssueChangeRecordedForOwner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		return id
 	}
 	inputs, board, role := mint("livetest-scout-inputs"), mint("livetest-board"), mint("ebac-livetest-scout-s5")

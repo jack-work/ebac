@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-author-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeAuthor, Source: "github-author",
 		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), FormID: id,
 		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Now().Add(-time.Hour), Repos: []string{"bic/aether"}}}
@@ -329,7 +330,7 @@ func TestLiveAuthoredFormPrunedOnFirstRound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-authprune-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeAuthor, Source: "github-author",
 		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), FormID: id,
 		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Repos: []string{"bic/aether"}}}

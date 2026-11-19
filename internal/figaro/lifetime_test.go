@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"net"
 	"os"
 	"os/user"
@@ -125,12 +126,12 @@ func TestLiveMintAsksTheBrokerForItsLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, a) })
+	livetest.Remove(t, f, a)
 	b, err := f.FormNewLease(ctx, "ebac-livetest-broker-b", 48*time.Hour)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, b) })
+	livetest.Remove(t, f, b)
 	want := []map[string]any{{"form": a, "key": "system.ttl", "value": "168h0m0s"}, {"form": b, "key": "system.ttl", "value": "48h0m0s"}}
 	if len(*got) != 2 {
 		t.Fatalf("broker got %v, want %v", *got, want)

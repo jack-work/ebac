@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"os/exec"
 	"sort"
@@ -225,7 +226,7 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-teams-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
 	if err := st.SaveCritic(ctx, w); err != nil {
@@ -443,7 +444,7 @@ func TestLiveTeamsTriggerMigrationAndFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-trigger-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
 	if err := st.SaveCritic(ctx, w); err != nil {
@@ -547,7 +548,7 @@ func TestLiveTeamsCollectModeCollectsWithoutPinging(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		w := &model.Critic{Name: "livetest-" + c.name + "-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 			CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat(), PingEverySec: c.ping}
 		w.Runtime.LastPing = time.Now().UTC() // a ping just went out: the next is 30 minutes away
@@ -684,7 +685,7 @@ func TestLiveTeamsRoundWritesOnlyNewLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-leaves-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
 	if err := st.SaveCritic(ctx, w); err != nil {

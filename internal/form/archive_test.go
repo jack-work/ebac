@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/livetest"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func TestLiveArchivedFormIsNotRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+	livetest.Remove(t, f, id)
 	st := &Store{Root: t.TempDir(), Fig: f, formOf: map[string]string{}}
 	w := &model.Critic{Name: name, FormID: id}
 	if err := st.SaveCritic(ctx, w); err != nil {

@@ -3,6 +3,7 @@ package poll
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -73,7 +74,7 @@ func TestLiveApproveResultsThroughTheCore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.FormRemove(ctx, id) })
+		livetest.Remove(t, f, id)
 		return id
 	}
 	critForm, inputsForm := mint("ebac-livetest-approve"), mint("livetest-approve-requests")

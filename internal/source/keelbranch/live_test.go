@@ -3,6 +3,7 @@ package keelbranch
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/internal/livetest"
 	"os"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func TestLiveKeelBranchesThroughTheCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.FormRemove(ctx, role) })
+	livetest.Remove(t, f, role)
 	name := "livetest-kb-" + strings.TrimPrefix(role, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceKeelBranches, FormID: role, EverySec: 120, CreatedAt: time.Now().UTC(),
 		Branches: &model.KeelBranches{Repo: "aether/aether", Reviewer: reviewer}}
