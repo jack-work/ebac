@@ -114,3 +114,21 @@ func TestIndependentFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// The bound is far above live depth (29 measured): a 64-fork chain still
+// counts; pinned with a literal, not relative to MaxHops.
+func TestMaxHopsAdmitsA64ForkChain(t *testing.T) {
+	d := dir()
+	prev := id(1)
+	for i := 0; i < 64; i++ {
+		n := id(500 + i)
+		d.Parent[n] = prev
+		prev = n
+	}
+	if _, ok, why := d.MayPost(id(500+63), "reviewer"); !ok {
+		t.Fatalf("64 forks down refused: %s", why)
+	}
+	if ok, why := d.Independent(id(500+63), id(9)); !ok {
+		t.Fatalf("64 forks below an unrelated root not independent: %s", why)
+	}
+}

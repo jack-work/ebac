@@ -299,7 +299,10 @@ hands between the flush's check and the write; (5) between rounds the form shows
 (a hand edit lasts until the next round, about a minute); (6) a seat with ebac's uid or root can read the stamp
 key; (7) DENIAL, by design: any seat can mint a second live form with a role's name, and that role then resolves to
 nothing (ambiguous, refused) for posts, reviews and verdicts until the extra form is gone; ebac fails closed rather
-than guess which form is the role.
+than guess which form is the role; (8) "fork of the holder" follows the listing's `parent`, which is the DRAWN
+tree, not fork lineage: a promote or a succession re-draw changes who counts as a fork, so a succeeded
+predecessor drawn under its successor still passes the post check for the successor's roles, and a true fork of
+the author drawn above it reads as independent. Verdicts are unaffected (they need the exact holder).
 
 ## Layout
 

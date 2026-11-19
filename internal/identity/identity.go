@@ -110,7 +110,7 @@ type answer int
 const (
 	no answer = iota
 	yes
-	unknown // a reaped link, a loop or the hop bound: neither yes nor no
+	unknown // an unlisted link, a loop or the hop bound: neither yes nor no
 )
 
 // descends walks parent links from a; yes when it reaches anc, no when it
