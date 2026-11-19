@@ -3,8 +3,8 @@ B1-keep	internal/budget/budget.go	240	need + l.cfg.keep(cl)*sb - lv.Tokens	need 
 B2-clamp	internal/budget/budget.go	223	need := math.Min(e, sb)	need := e	./internal/budget	TestReserveTable
 B3-floor-lt	internal/budget/budget.go	214	lv.Remaining < lim.Floor	lv.Remaining <= lim.Floor	./internal/budget	TestFloor
 B4-floor-gone	internal/budget/budget.go	214	lim.Floor > 0 && lv.Remaining >= 0 && lv.Remaining < lim.Floor && lv.ResetAt.After(now)	false	./internal/budget	TestFloor
-B5-refill-cap	internal/budget/budget.go	176	lv.Tokens = math.Min(sb, lv.Tokens+dt*sr/3600)	lv.Tokens = lv.Tokens + dt*sr/3600	./internal/budget	TestRefill
-B6-settle-diff	internal/budget/budget.go	291	\t\t\tlv.Tokens += g.Est[name] - got[name]	\t\t\tlv.Tokens -= got[name]	./internal/budget	TestSettleChargesWhatWasSpent
+B5-refill-cap	internal/budget/budget.go	176	lv.Tokens = math.Min(sb, lv.Tokens+dt*sr/3600)	lv.Tokens = math.Min(sb+100, lv.Tokens+dt*sr/3600)	./internal/budget	TestRefill
+B6-settle-diff	internal/budget/budget.go	291	\t\t\tlv.Tokens += g.Est[name] - got[name]	\t\t\tlv.Tokens -= got[name]	./internal/budget	TestSettleChargesThePoolTheGrantDrewOn
 B7-torn-empty	internal/budget/budget.go	155	lv.Tokens, lv.Wake = 0, 0	lv.Tokens, lv.Wake = lv.Tokens, lv.Wake	./internal/budget	TestLedgerPersists
 B8-save	internal/budget/budget.go	348	\t_ = os.Rename(tmp, l.path)		./internal/budget	TestLedgerPersists
 B10-reset-hour	internal/budget/budget.go	281	\t\t\t\tlv.ResetAt = now.Add(time.Hour)		./internal/budget	TestSettleRecords
@@ -36,8 +36,8 @@ G2-bound	cmd/ebac/daemon.go	88	\tif g.fails >= MaxListFailures {	\tif false {	./
 G3-success-resets	cmd/ebac/daemon.go	81	\t\tg.fails = 0\n		./cmd/ebac	TestFigaroGuard
 Y3-continue	internal/systemd/systemd.go	299	\t\t\terrs = append(errs, err.Error())\n\t\t}\n\t\tif err := RemoveTimerDropIns	\t\t\treturn retired, err\n\t\t}\n\t\tif err := RemoveTimerDropIns	./internal/systemd	TestRetireCriticTimers
 W1-wake-draw	internal/budget/budget.go	226	if fits && lv.Wake >= e {	if false {	./internal/budget	TestReserveTable
-W2-wake-wait	internal/budget/budget.go	235	\t\t\t\tw = min(w, fill(e-lv.Wake, wr))\n		./internal/budget	TestReserveTable
+W2-wake-wait	internal/budget/budget.go	235	\t\t\t\tw = min(w, fill(e-lv.Wake, wr))\n	\t\t\t\tw = min(w, fill(e-lv.Wake, wr)+time.Hour)\n	./internal/budget	TestReserveTable
 W3-settle-wake	internal/budget/budget.go	288	\t\tif g.Wake[name] {	\t\tif false {	./internal/budget	TestSettleChargesThePoolTheGrantDrewOn
-W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = lv.Wake + dt*wr/3600	./internal/budget	TestRefillFillsBothPools
+W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = math.Min(wb+100, lv.Wake+dt*wr/3600)	./internal/budget	TestRefillFillsBothPools
 O1-cadence	internal/sched/sched.go	176	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
 O2-overdue-spread	internal/sched/sched.go	178	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
