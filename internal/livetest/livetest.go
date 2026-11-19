@@ -13,6 +13,10 @@ type Remover interface {
 	FormRemove(ctx context.Context, id string) error
 }
 
+// RemoveDeadline bounds one form removal: 2 min, since a full live run (~8 min) loads the daemon enough that 30 s
+// timed out (11-19).
+const RemoveDeadline = 2 * time.Minute
+
 // Remove ends the forms a live test made when the test ends, passed or FAILED (t.Cleanup runs either way): a
 // critic's role form gone, nothing lists, polls or re-arms it (11-19: livetest-* critics left by failed runs were
 // re-armed by reconcile and polled Teams). Each removal has its own deadline, never the test's context (a cancelled
@@ -22,7 +26,7 @@ func Remove(t testing.TB, f Remover, ids ...string) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, id := range ids {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), RemoveDeadline)
 			err := f.FormRemove(ctx, id)
 			cancel()
 			if err != nil && !gone(err) {
