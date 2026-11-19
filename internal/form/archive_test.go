@@ -15,14 +15,14 @@ import (
 	"github.com/jack-work/figaro/api/rpc"
 )
 
-// 2026-11-05: 28 archived critic forms were alive, 17 past lease, because
-// every enumeration read them (a read renews keepalive) and their target-aria
-// held the old seats alive.
-func TestRetireKeysRenamesAndFreesTheSeat(t *testing.T) {
+// An archived critic's form is renamed out of enumeration, keeps kind, and the archive patch NEVER names target-aria:
+// figaro 0.77 refuses a write to it from anyone but the role's owner, and the refusal failed the whole patch (rm
+// --purge, 11-19). RED if retireKeys removes target-aria again, or stops renaming.
+func TestRetireKeysRenamesAndNeverTouchesTheSeat(t *testing.T) {
 	cur := map[string]json.RawMessage{"name": model.MustJSON("ebac-x"), "target-aria": model.MustJSON("abc"), "kind": model.MustJSON(criticKind)}
 	w := &model.Critic{Name: "x"}
 
-	// Control: a live critic keeps its name and its seat.
+	// Control: a live critic keeps its name.
 	set := map[string]json.RawMessage{}
 	if rm := retireKeys(w, cur, set); rm != nil || set["name"] != nil {
 		t.Fatalf("live critic retired: remove=%v set=%v", rm, set)
@@ -34,15 +34,11 @@ func TestRetireKeysRenamesAndFreesTheSeat(t *testing.T) {
 	if string(set["name"]) != `"ebac-archived-x"` {
 		t.Fatalf("name = %s", set["name"])
 	}
-	if len(rm) != 1 || rm[0] != "target-aria" {
-		t.Fatalf("remove = %v; want target-aria", rm)
+	if rm != nil {
+		t.Fatalf("remove = %v; the archive patch must not touch target-aria", rm)
 	}
-	if set["kind"] == nil {
-		t.Fatal("kind dropped; it stays for history")
-	}
-	delete(cur, "target-aria")
-	if rm := retireKeys(w, cur, map[string]json.RawMessage{}); rm != nil {
-		t.Fatalf("removing an absent target-aria: %v", rm)
+	if _, touched := set["target-aria"]; touched || set["kind"] == nil {
+		t.Fatalf("set %v: target-aria must be absent, kind kept", set)
 	}
 }
 
@@ -123,7 +119,7 @@ func TestLiveArchivedFormIsNotRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if keys["name"] != model.ArchivedFormPrefix+name || keys["target-aria"] != nil || keys["kind"] != criticKind {
+	if keys["name"] != model.ArchivedFormPrefix+name || keys["target-aria"] != "0000livetest0000" || keys["kind"] != criticKind {
 		t.Fatalf("archived form: name=%v target-aria=%v kind=%v", keys["name"], keys["target-aria"], keys["kind"])
 	}
 	if audit, found := enumerate(); found || strings.Contains(audit, id) {

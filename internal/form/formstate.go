@@ -663,16 +663,14 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	return nil
 }
 
-// retireKeys renames an archived critic's form out of enumeration and frees
-// its seat (a role's target-aria holds that aria alive); kind stays, for
-// history. It returns the keys to remove; a live critic is left as is.
+// retireKeys renames an archived critic's form out of enumeration; kind
+// stays, for history. It removes NOTHING: target-aria is protected since
+// figaro 0.77 (only the role's owner may write it), so clearing it refused
+// the whole archive patch and `ebac rm --purge` failed (11-19); the form's
+// end (its broker kill, or its lease) frees the seat instead.
 func retireKeys(w *model.Critic, cur, set map[string]json.RawMessage) []string {
-	if !w.Runtime.Archived {
-		return nil
-	}
-	set["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)
-	if _, ok := cur["target-aria"]; ok {
-		return []string{"target-aria"}
+	if w.Runtime.Archived {
+		set["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)
 	}
 	return nil
 }

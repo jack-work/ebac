@@ -48,3 +48,4 @@ U1-unreadable-arm	internal/fleet/roster.go	183	\tcase beatErr != nil:	\tcase fal
 U2-read-error	internal/fleet/roster.go	344	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U3-two-forms	internal/fleet/roster.go	340	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U4-no-beat	internal/fleet/roster.go	355	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+T1-clears-seat	internal/form/formstate.go	673	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
