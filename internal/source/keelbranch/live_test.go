@@ -40,7 +40,7 @@ func TestLiveKeelBranchesThroughTheCore(t *testing.T) {
 	name := "livetest-kb-" + strings.TrimPrefix(role, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceKeelBranches, FormID: role, EverySec: 120, CreatedAt: time.Now().UTC(),
 		Branches: &model.KeelBranches{Repo: "aether/aether", Reviewer: reviewer}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	wd := newWorld(t)

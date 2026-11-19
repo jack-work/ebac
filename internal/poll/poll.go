@@ -141,8 +141,8 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 		}
 		return err
 	}
-	if w.NoAuthority {
-		return fmt.Errorf("%s: %s", w.Name, model.NoAuthorityNote(w.FormID))
+	if err := refuseNoAuthority(w); err != nil {
+		return err
 	}
 	if w.Runtime.Archived {
 		fmt.Fprintf(p.Out, "%s: archived, nothing to do\n", name)
@@ -832,4 +832,13 @@ func joinMax(parts []string, n int) string {
 		return fmt.Sprint(parts)
 	}
 	return fmt.Sprintf("%v (+%d more)", parts[:n], len(parts)-n)
+}
+
+// refuseNoAuthority stops a round of a critic with no trusted authority
+// before any plugin runs (#11).
+func refuseNoAuthority(w *model.Critic) error {
+	if w.NoAuthority {
+		return fmt.Errorf("%s: %s", w.Name, model.NoAuthorityNote(w.FormID))
+	}
+	return nil
 }

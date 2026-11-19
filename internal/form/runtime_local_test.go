@@ -147,7 +147,7 @@ func TestLiveScoutStateLivesOnDisk(t *testing.T) {
 	w := &model.Critic{Name: name, FormID: id, Source: "keel-threads", CreatedAt: time.Now().UTC(), EverySec: 60,
 		Keel: &model.KeelRef{Repo: "notes/x"}}
 	w.Runtime.Scout = json.RawMessage(`{"cursor":"a"}`)
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	if got := onForm(); got != "" {
@@ -190,7 +190,7 @@ func TestLiveScoutStateLivesOnDisk(t *testing.T) {
 	if string(c.Runtime.Scout) != `{"cursor":"m"}` {
 		t.Fatalf("migration load: %s", c.Runtime.Scout)
 	}
-	if err := st.SaveCritic(ctx, c); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	if got := onForm(); got != "" {
@@ -221,7 +221,7 @@ func TestLiveScoutStateLivesOnDisk(t *testing.T) {
 	bad := *c
 	bad.Name = name + "-renamed"
 	bad.Runtime.Scout = json.RawMessage(`{"cursor":"ahead"}`)
-	if err := st.SaveCritic(ctx, &bad); err == nil {
+	if err := st.SaveCriticRecordingForTest(ctx, &bad); err == nil {
 		t.Fatal("control: the renaming save was not refused, the order check proves nothing")
 	}
 	if got := string(st.readLocal(id)); got != `{"cursor":"m"}` {

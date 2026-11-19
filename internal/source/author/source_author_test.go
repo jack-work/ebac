@@ -134,7 +134,7 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	w := &model.Critic{Name: "livetest-author-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeAuthor, Source: "github-author",
 		Host: "microsoft.ghe.com", CreatedAt: time.Now().UTC(), FormID: id,
 		Author: &model.AuthorRef{Login: "Chiqun-Zhang", Since: time.Now().Add(-time.Hour), Repos: []string{"bic/aether"}}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
@@ -161,7 +161,7 @@ func TestLiveAuthorWatchRoundsAndWindowEnd(t *testing.T) {
 	}
 	past := time.Now().Add(-time.Minute)
 	c.Author.Until = &past
-	if err := st.SaveCritic(ctx, c); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Poll(ctx, w.Name); err != nil {
@@ -346,7 +346,7 @@ func TestLiveAuthoredFormPrunedOnFirstRound(t *testing.T) {
 		old[k] = forge.AuthoredPR{Repo: "bic/aether", Number: 70000 + i, Title: strings.Repeat("t", 80), State: "OPEN"}
 	}
 	w.Runtime.LastSuccess = time.Now().UTC()
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Commit(ctx, id, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {

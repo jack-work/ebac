@@ -63,7 +63,7 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	name := "livetest-cas-" + strings.TrimPrefix(id, "@")[:8]
 	w := &model.Critic{Name: name, FormID: id, Source: "keel-threads", CreatedAt: time.Now().UTC(), EverySec: 60,
 		Keel: &model.KeelRef{Repo: "notes/x"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	critic := func() map[string]any {
@@ -92,7 +92,7 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 		}
 		c.EverySec = every
 		c.Runtime.Round++
-		if err := st.SaveCritic(ctx, c); err != nil {
+		if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 			t.Fatalf("save: %v", err)
 		}
 		return c
@@ -132,14 +132,14 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	}
 	figaroSet(t, id, "critic.approve", "true")
 	c.Runtime.Round++
-	if err := st.SaveCritic(ctx, c); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	if !c.Approve {
 		t.Fatal("the saved w did not adopt the value the merge took from the form")
 	}
 	c.EverySec = 20
-	if err := st.SaveCritic(ctx, c); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	if m := critic(); m["approve"] != true || m["every_sec"] != float64(20) {

@@ -36,7 +36,7 @@ func TestLiveAckIsOneWrite(t *testing.T) {
 	name := "livetest-ack-" + strings.TrimPrefix(id, "@")[:8]
 	w := &model.Critic{Name: name, Mode: model.ModeTeams, Source: "teams-chat", FormID: id, EverySec: 60, CreatedAt: time.Now().UTC(),
 		Chat: &model.ChatRef{ID: "48:notes", Topic: "t"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	version := func() uint64 {

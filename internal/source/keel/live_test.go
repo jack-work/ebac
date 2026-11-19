@@ -48,7 +48,7 @@ func TestLiveKeelRoundsBaselineAnswerBlindGone(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keel-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: ref()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
@@ -169,7 +169,7 @@ func TestLiveKeelFeedRoundsBaselineAnswerCursor(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keelfeed-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: feedRef()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder

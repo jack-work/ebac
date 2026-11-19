@@ -82,3 +82,15 @@ func (a Authority) Apply(w *Critic) []string {
 func NoAuthorityNote(formID string) string {
 	return fmt.Sprintf("no trusted authority for %s: not run (add it to ebac's trusted config)", formID)
 }
+
+// CreationAuthority is what ebac records for a critic it creates: its source
+// and mode (reviewer mode, which posts without write, is recorded as review),
+// and nothing else. Write, approve, approval grants and outside forms come
+// only from the trusted config (review f0f3a1d9 B1).
+func CreationAuthority(w *Critic) Authority {
+	mode := w.Mode
+	if mode == ModeReviewer {
+		mode = ModeReview
+	}
+	return Authority{Source: w.Source, Mode: mode}
+}

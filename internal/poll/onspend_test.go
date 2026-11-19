@@ -54,3 +54,14 @@ func TestAuthorizeReadsTheOverlaidWrite(t *testing.T) {
 		t.Fatalf("read-only critic authorized: %q", why)
 	}
 }
+
+// Poll of a critic with no trusted authority is refused before any plugin call (review f0f3a1d9 M2).
+func TestPollRefusesNoAuthority(t *testing.T) {
+	w := &model.Critic{Name: "x", FormID: "@f", NoAuthority: true}
+	if err := refuseNoAuthority(w); err == nil || !strings.Contains(err.Error(), "no trusted authority for @f") {
+		t.Fatalf("%v", err)
+	}
+	if err := refuseNoAuthority(&model.Critic{Name: "y"}); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+}

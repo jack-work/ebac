@@ -55,7 +55,7 @@ func TestLiveSetPingEvery(t *testing.T) {
 	name := "livetest-set-" + strings.TrimPrefix(id, "@")[:8]
 	w := &model.Critic{Name: name, Mode: model.ModeTeams, Source: "teams-chat", FormID: id, EverySec: 60, CreatedAt: time.Now().UTC(),
 		Chat: &model.ChatRef{ID: "48:notes", Topic: "t"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	if err := cmdSet(ctx, globals{}, []string{"--critic", name, "--ping-every", "30m"}); err != nil {

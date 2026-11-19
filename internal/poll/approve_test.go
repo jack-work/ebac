@@ -88,7 +88,7 @@ func TestLiveApproveResultsThroughTheCore(t *testing.T) {
 	w := &model.Critic{Name: name, Source: model.SourceApprove, FormID: critForm, InputsForm: inputsForm,
 		Requests: &model.ApproveWatch{Chat: "19:x", ChatAlias: "ahmed", AskFrom: "8:orgid:x", Grant: "g", Principal: "p"},
 		EverySec: 60, CreatedAt: time.Now().UTC()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var reply plugin.Reply

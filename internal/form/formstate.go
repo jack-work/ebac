@@ -580,11 +580,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	} else {
 		local = s.readPRsLocal(w.FormID)
 	}
-	creating := false
 	err = s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
-		if _, had := cur[model.CriticKey]; !had {
-			creating = true // this save creates the critic: ebac records its authority (#11)
-		}
 		merged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])
 		if merr != nil {
 			merged, c = cfgRaw, nil // an unreadable form critic: ours is the only sound one
@@ -647,11 +643,6 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	})
 	if err != nil {
 		return err
-	}
-	if creating {
-		if err := s.RegisterAuthority(w); err != nil && !errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("critic %s created but its authority not recorded (it will not run): %w", w.Name, err)
-		}
 	}
 	// After the form, never before: the file is never ahead of the entries
 	// the form holds. A failed write does not fail the round: the file stays
@@ -946,6 +937,7 @@ func applyAuthority(w *model.Critic) []string {
 	least.Write, least.Approve = false, false
 	least.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""
 	least.InputsForm, least.BoardForm = "", ""
+	least.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)
 	_ = least.Apply(w)
 	return nil
 }
@@ -974,9 +966,12 @@ func readAuthority(formID string) (model.Authority, bool) {
 	return a, true
 }
 
-// RegisterAuthority records a critic's authority as ebac creates it (the
-// add-* commands, before the first save). It never overwrites a record: a
-// critic's authority is changed in the trusted config, not by a re-add.
+// RegisterAuthority records a NEW critic's authority, only from the explicit
+// creation paths (ebac add-*, queue promote: CreateCritic), never inferred
+// from a form. It records the LEAST authority (model.CreationAuthority: no
+// write, no approve, no approval settings, never reviewer mode): every seat
+// can run ebac add through the sudo door (review f0f3a1d9 B1), so anything
+// more comes only from the trusted config. It never overwrites a record.
 func (s *Store) RegisterAuthority(w *model.Critic) error {
 	p, ok := authorityPath(w.FormID)
 	if !ok {
@@ -985,7 +980,7 @@ func (s *Store) RegisterAuthority(w *model.Critic) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	b, _ := json.Marshal(model.AuthorityOf(w))
+	b, _ := json.Marshal(model.CreationAuthority(w))
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("authority record for %s: %w", w.FormID, err)
@@ -993,4 +988,32 @@ func (s *Store) RegisterAuthority(w *model.Critic) error {
 	defer f.Close()
 	_, err = f.Write(b)
 	return err
+}
+
+// CreateCritic is the one creation path: it records the new critic's least
+// authority, then saves it.
+func (s *Store) CreateCritic(ctx context.Context, w *model.Critic) error {
+	if err := s.RegisterAuthority(w); err != nil {
+		return err
+	}
+	return s.SaveCritic(ctx, w)
+}
+
+// SaveCriticRecordingForTest records w's authority AS GIVEN (not the least
+// authority CreateCritic records) when it has no record yet, then saves it.
+// Live tests only: they make critics whose write/approve the test needs;
+// production creates critics only through CreateCritic.
+func (s *Store) SaveCriticRecordingForTest(ctx context.Context, w *model.Critic) error {
+	if p, ok := authorityPath(w.FormID); ok {
+		if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				return err
+			}
+			b, _ := json.Marshal(model.AuthorityOf(w))
+			if err := os.WriteFile(p, b, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	return s.SaveCritic(ctx, w)
 }

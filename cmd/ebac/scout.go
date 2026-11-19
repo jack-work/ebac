@@ -88,7 +88,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("mint role form: %w", err)
 	}
 	w.FormID = formID
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.CreateCritic(ctx, w); err != nil {
 		return err
 	}
 	fmt.Printf("scout %q: role %s, %s in %s, board %s (read-only), inputs %s, every %s\n", *name, formID,

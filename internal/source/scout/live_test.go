@@ -53,7 +53,7 @@ func TestLiveScoutThroughTheCore(t *testing.T) {
 	name := "livetest-scout-" + strings.TrimPrefix(role, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceScout, Host: "microsoft.ghe.com", FormID: role, CreatedAt: time.Now().UTC(),
 		EverySec: 120, BoardForm: board, InputsForm: inputs, Scout: &wd.watch}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	now := wd.now
@@ -173,7 +173,7 @@ func TestLiveIssueChangeRecordedForOwner(t *testing.T) {
 	w := &model.Critic{Name: name, Source: model.SourceScout, Host: "microsoft.ghe.com", FormID: role, CreatedAt: time.Now().UTC(),
 		EverySec: 120, BoardForm: board, InputsForm: inputs, Scout: &wd.watch}
 	w.Runtime.Scout = model.MustJSON(wd.st)
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	now := wd.now

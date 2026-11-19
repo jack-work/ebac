@@ -53,7 +53,7 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("mint role form: %w", err)
 	}
 	w.FormID = formID
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.CreateCritic(ctx, w); err != nil {
 		return err
 	}
 	fmt.Printf("approve-requests %q: role %s, requests %s, %s for %s, ask in %s from %s, every %s\n",

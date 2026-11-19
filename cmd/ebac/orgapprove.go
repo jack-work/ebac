@@ -53,7 +53,7 @@ func cmdAddOrgApprove(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("mint role form: %w", err)
 	}
 	w.FormID = formID
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.CreateCritic(ctx, w); err != nil {
 		return err
 	}
 	fmt.Printf("org-approve %q: role %s, board %s, %d login(s), taps = %s for %s approved by %s, every %s\n",

@@ -196,7 +196,7 @@ func TestLiveRepoint(t *testing.T) {
 		id := mint("ebac-" + name)
 		w := &model.Critic{Name: name + "-" + strings.TrimPrefix(id, "@")[:8], FormID: id, CreatedAt: time.Now().UTC(), EverySec: 120}
 		mod(w)
-		if err := st.SaveCritic(ctx, w); err != nil {
+		if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 			t.Fatal(err)
 		}
 		return w

@@ -39,7 +39,7 @@ func TestLiveBrokenCriticIsAnError(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: name, Mode: model.ModeTeams, Source: "teams-chat", FormID: id, EverySec: 60, CreatedAt: time.Now().UTC(),
 		Chat: &model.ChatRef{ID: "19:x@thread.v2"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	p := &poll.Poller{Store: st, Fig: f, Out: &strings.Builder{}, Plugins: plugin.InProc{}}

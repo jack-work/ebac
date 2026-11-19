@@ -229,7 +229,7 @@ func TestLiveTeamsRoundsBaselineNewsAndGone(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-teams-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
@@ -447,7 +447,7 @@ func TestLiveTeamsTriggerMigrationAndFallback(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-trigger-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	// What a pre-trigger binary left on the form: chat.quiet in the critic config.
@@ -552,7 +552,7 @@ func TestLiveTeamsCollectModeCollectsWithoutPinging(t *testing.T) {
 		w := &model.Critic{Name: "livetest-" + c.name + "-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 			CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat(), PingEverySec: c.ping}
 		w.Runtime.LastPing = time.Now().UTC() // a ping just went out: the next is 30 minutes away
-		if err := st.SaveCritic(ctx, w); err != nil {
+		if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 			t.Fatal(err)
 		}
 		round := func(scenario string) {
@@ -688,7 +688,7 @@ func TestLiveTeamsRoundWritesOnlyNewLeaves(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-leaves-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: testChat()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder

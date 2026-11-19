@@ -34,7 +34,7 @@ func TestLiveCoreAppliesAPluginReply(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-apply-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, Chat: &model.ChatRef{ID: "19:x", Topic: "t"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	rules := `[{"from":"spam","action":"drop"},{"contains":"urgent","action":"wake"},{"default":true,"action":"record"}]`
@@ -199,7 +199,7 @@ func TestLiveAPluginCannotWriteTheSeat(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-keys-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeKeel, Source: "keel-threads",
 		CreatedAt: time.Now().UTC(), FormID: id, Keel: &model.KeelRef{Repo: "notes/x"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	hijack := false
@@ -261,7 +261,7 @@ func TestLiveRosterRoundReadsTheStore(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := &model.Critic{Name: "livetest-roster-" + strings.TrimPrefix(id, "@")[:8], Source: model.SourceRoster,
 		CreatedAt: time.Now().UTC(), FormID: id}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var seen int

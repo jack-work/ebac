@@ -14,7 +14,6 @@ S2-pool	internal/sched/sched.go	130	if s.slots >= s.Pool {	if false {	./internal
 S3-reserve-est	internal/sched/sched.go	134	s.Ledger.Reserve(e.Cred, e.Class, e.Est)	s.Ledger.Reserve(e.Cred, e.Class, nil)	./internal/sched	TestAShortBucket
 S5-hung-slot	internal/sched/sched.go	315	\t\ts.slots--\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	\t\ts.slots -= 0\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	./internal/sched	TestAHungRound
 S6-settle	internal/sched/sched.go	329	\ts.Ledger.Settle(g, sp)		./internal/sched	TestARoundSettles
-S7-stopped	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived {	if false {	./internal/sched	TestStoppedArchived
 S8-cred	internal/sched/sched.go	395	return "github:" + host	return ""	./internal/sched	TestCredentialAndClass
 S9-class-approve	internal/sched/sched.go	405	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":	case "teams-chat", "keel-threads":	./internal/sched	TestCredentialAndClass
 S10-est	internal/sched/sched.go	358	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
@@ -39,30 +38,30 @@ W3-settle-wake	internal/budget/budget.go	288	\t\tif g.Wake[name] {	\t\tif false 
 W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = math.Min(wb+100, lv.Wake+dt*wr/3600)	./internal/budget	TestRefillFillsBothPools
 O1-cadence	internal/sched/sched.go	256	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
 O2-overdue-spread	internal/sched/sched.go	258	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
-H1-late-from-beat	internal/fleet/roster.go	318	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
-H2-stale-bound	internal/fleet/roster.go	327	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
-H3-no-beat	internal/fleet/roster.go	194	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
+H1-late-from-beat	internal/fleet/roster.go	320	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
+H2-stale-bound	internal/fleet/roster.go	329	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
+H3-no-beat	internal/fleet/roster.go	196	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
 Y4-exit1-none	internal/systemd/systemd.go	284	ee.ExitCode() == 1	ee.ExitCode() == 99	./internal/systemd	TestRetireWithNoTimersLeft
-R2-latefactor	internal/fleet/roster.go	309	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
-U1-unreadable-arm	internal/fleet/roster.go	192	\tcase beatErr != nil:	\tcase false:	./internal/fleet	TestHeartbeatUnreadableIsNotMissing
-U2-read-error	internal/fleet/roster.go	353	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-U3-two-forms	internal/fleet/roster.go	349	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-U4-no-beat	internal/fleet/roster.go	364	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-T1-clears-seat	internal/form/formstate.go	675	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
-E1-until-boundary	internal/model/critic.go	590	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
-E2-renew	internal/model/critic.go	580	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
-E3-allclosed-needs-prs	internal/model/critic.go	600	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
-E4-warn-once	internal/model/critic.go	614	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
-E5-warn-window	internal/model/critic.go	571	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
-E6-purge-default	internal/model/critic.go	622	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
-E7-ended-no-repurge	internal/model/critic.go	627	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
+R2-latefactor	internal/fleet/roster.go	311	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
+U1-unreadable-arm	internal/fleet/roster.go	194	\tcase beatErr != nil:	\tcase false:	./internal/fleet	TestHeartbeatUnreadableIsNotMissing
+U2-read-error	internal/fleet/roster.go	355	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U3-two-forms	internal/fleet/roster.go	351	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U4-no-beat	internal/fleet/roster.go	366	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+T1-clears-seat	internal/form/formstate.go	676	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
+E1-until-boundary	internal/model/critic.go	593	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
+E2-renew	internal/model/critic.go	583	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
+E3-allclosed-needs-prs	internal/model/critic.go	603	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
+E4-warn-once	internal/model/critic.go	617	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
+E5-warn-window	internal/model/critic.go	574	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
+E6-purge-default	internal/model/critic.go	625	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
+E7-ended-no-repurge	internal/model/critic.go	630	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
 E8-sched-end	internal/sched/sched.go	202	\t\t\tif reason := w.EndReason(now); reason != "" {	\t\t\tif reason := ""; reason != "" {	./internal/sched	TestEndsAreEnforced
 E9-sched-purge	internal/sched/sched.go	171	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
 E10-sched-retry	internal/sched/sched.go	166	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
-E11-kill-order	internal/poll/poll.go	796	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
-E12-none-refused	cmd/ebac/critic.go	601	\t\t\treturn fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")	\t\t\tcontinue	./cmd/ebac	TestApplyEnd
+E11-kill-order	internal/poll/poll.go	799	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
+E12-none-refused	cmd/ebac/critic.go	603	\t\t\treturn fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")	\t\t\tcontinue	./cmd/ebac	TestApplyEnd
 R3-default-7d	internal/model/critic.go	52	\t\tExpiresAfterSec:        7 * 86400,	\t\tExpiresAfterSec:        8 * 86400,	./internal/model	TestDefaultStopIsTransient
-R8-withrole-alone	cmd/ebac/critic.go	590	\t\t\t\treturn fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")	\t\t\t\t_ = 0	./cmd/ebac	TestApplyEndWithRole
+R8-withrole-alone	cmd/ebac/critic.go	592	\t\t\t\treturn fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")	\t\t\t\t_ = 0	./cmd/ebac	TestApplyEndWithRole
 R6-needs-target-aria	internal/fleet/role.go	69	\tif f["target-aria"] == nil {	\tif f["target-aria"] == "never" {	./internal/fleet	TestIsRosterRole
 R4-unreadable-not-retired	internal/fleet/role.go	42	\t\t\treturn "", false, "", fmt.Errorf("role %s unreadable: %w", cur, err)	\t\t\treturn cur, true, "unreadable", nil	./internal/fleet	TestFollowRole
 R5-follow-moved-to	internal/fleet/role.go	45	\t\tif to == "" {\n\t\t\treturn cur, false, "", nil\n\t\t}\n\t\tcur = to	\t\tif to == "" || true {\n\t\t\treturn cur, false, "", nil\n\t\t}\n\t\tcur = to	./internal/fleet	TestFollowRole|TestIsRosterRole
@@ -88,27 +87,33 @@ P4-main-calls-gate	cmd/ebac/main.go	152	\tif err := mainGate(); err != nil {	\ti
 H1-harness-post	internal/brief/project.go	72	[--event COMMENT|APPROVE] --body-file - < <file>`	[--event COMMENT|APPROVE] --body-file <file>`	./cmd/ebac	TestTaughtCommandsPassTheDoor
 H3-issue	internal/brief/project.go	87	--title '<title>' --body-file - < <path>	--title '<title>' --body-file <path>	./cmd/ebac	TestTaughtCommandsPassTheDoor
 H2-review-brief	internal/brief/brief.go	316	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file - < <file>	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file <file>	./cmd/ebac	TestTaughtCommandsPassTheDoor
-T1-keel-from-form	internal/model/trusted.go	101	\t\tk.URL, k.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./internal/model	TestTrustedApply
+T1-keel-from-form	internal/model/trusted.go	104	\t\tk.URL, k.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./internal/model	TestTrustedApply
 T2-overlay-called	internal/form/formstate.go	319	\tw.FormIgnored = TrustedConfig().Apply(&w)\n		./internal/source/keel	TestFormTokenCmdIsNeverExecuted
-T3-host-allowlist	internal/model/trusted.go	90	\tif w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	\tif false && w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	./internal/model	TestTrustedApply
-T4-fail-closed	internal/form/formstate.go	903	\t\t\tt = model.DefaultTrusted()\n	\t\t\tt = model.Trusted{Critics: map[string]model.TrustedCritic{"x": {}}}\n	./internal/form	TestTrustedConfigFailsClosed
-T5-ls-flag	internal/fleet/roster.go	190	\tcase len(w.FormIgnored) > 0:\n\t\treturn model.IgnoredNote(w.FormIgnored)\n		./internal/fleet	TestIgnoredFormConfigIsFlagged
-T6-branches-from-form	internal/model/trusted.go	106	\t\tb.URL, b.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./internal/model	TestTrustedApply
-T7-notes-from-form	internal/model/trusted.go	117	\tw.Notes = tc.Notes\n		./internal/model	TestTrustedApply
-K1-keyed-by-name	internal/model/trusted.go	97	\ttc := t.Critics[w.FormID]	\ttc := t.Critics[w.Name]	./internal/model	TestTrustedApply
-K2-releases-api	internal/model/trusted.go	124	\t\trw.API = "" // the public api.github.com (review 5fd38 #3)	\t\t_ = rw	./internal/model	TestTrustedApply
-K3-save-strips	internal/form/formstate.go	683	\tmodel.Strip(c) // the trusted fields never go back onto the seat-readable form\n		./internal/form	TestSaveNever
-K4-adopt-reapplies	internal/form/formstate.go	881	\tfresh.FormIgnored = TrustedConfig().Apply(&fresh)\n		./internal/form	TestSaveNever
-K5-band-socket	internal/model/trusted.go	120	\t\tb.Socket = t.BandHubSocket\n		./internal/model	TestTrustedApply
+T3-host-allowlist	internal/model/trusted.go	93	\tif w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	\tif false && w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	./internal/model	TestTrustedApply
+T4-fail-closed	internal/form/formstate.go	905	\t\t\tt = model.DefaultTrusted()\n	\t\t\tt = model.Trusted{Critics: map[string]model.TrustedCritic{"x": {}}}\n	./internal/form	TestTrustedConfigFailsClosed
+T5-ls-flag	internal/fleet/roster.go	192	\tcase len(w.FormIgnored) > 0:\n\t\treturn model.IgnoredNote(w.FormIgnored)\n		./internal/fleet	TestIgnoredFormConfigIsFlagged
+T6-branches-from-form	internal/model/trusted.go	109	\t\tb.URL, b.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./internal/model	TestTrustedApply
+T7-notes-from-form	internal/model/trusted.go	120	\tw.Notes = tc.Notes\n		./internal/model	TestTrustedApply
+K1-keyed-by-name	internal/model/trusted.go	100	\ttc := t.Critics[w.FormID]	\ttc := t.Critics[w.Name]	./internal/model	TestTrustedApply
+K2-releases-api	internal/model/trusted.go	127	\t\trw.API = "" // the public api.github.com (review 5fd38 #3)	\t\t_ = rw	./internal/model	TestTrustedApply
+K3-save-strips	internal/form/formstate.go	684	\tmodel.Strip(c) // the trusted fields never go back onto the seat-readable form\n		./internal/form	TestSaveNever
+K4-adopt-reapplies	internal/form/formstate.go	882	\tfresh.FormIgnored = TrustedConfig().Apply(&fresh)\n		./internal/form	TestSaveNever
+K5-band-socket	internal/model/trusted.go	123	\t\tb.Socket = t.BandHubSocket\n		./internal/model	TestTrustedApply
 A1-authority-overlay	internal/form/formstate.go	320	\tw.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)\n		./internal/form	TestAuthorityComesFrom
-A2-least-write	internal/form/formstate.go	946	\tleast.Write, least.Approve = false, false\n		./internal/form	TestAuthorityComesFrom
-A3-least-grants	internal/form/formstate.go	947	\tleast.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""\n		./internal/form	TestAuthorityComesFrom
-A4-record-once	internal/form/formstate.go	989	os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600	os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600	./internal/form	TestAuthorityComesFrom
-A5-config-first	internal/form/formstate.go	938	\tif a := TrustedConfig().Critics[w.FormID].Authority; a != nil {\n\t\treturn a.Apply(w)\n\t}\n		./internal/form	TestAuthorityComesFrom
+A2-least-write	internal/form/formstate.go	937	\tleast.Write, least.Approve = false, false\n		./internal/form	TestAuthorityComesFrom
+A3-least-grants	internal/form/formstate.go	938	\tleast.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""\n		./internal/form	TestAuthorityComesFrom
+A4-record-once	internal/form/formstate.go	984	os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600	os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600	./internal/form	TestAuthorityComesFrom
+A5-config-first	internal/form/formstate.go	929	\tif a := TrustedConfig().Critics[w.FormID].Authority; a != nil {\n\t\treturn a.Apply(w)\n\t}\n		./internal/form	TestAuthorityComesFrom
 A6-sched-skip	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {	if w.Runtime.Stopped || w.Runtime.Archived {	./internal/sched	TestNoAuthority
 A7-ls-flag	internal/fleet/roster.go	190	\tcase w.NoAuthority:\n\t\treturn model.NoAuthorityNote(w.FormID)\n		./internal/fleet	TestNoAuthority
 A8-apply-write	internal/model/authority.go	61	\tsetb("write", w.Write, a.Write, &w.Write)\n		./internal/model	TestAuthorityApply
 A9-apply-source	internal/model/authority.go	56	\tset("source", w.Source, a.Source, &w.Source)\n		./internal/model	TestAuthorityApply
 A10-apply-approver	internal/model/authority.go	75	\t\tset("org_approve.approver", o.Approver, a.Approver, &o.Approver)\n		./internal/model	TestAuthorityApply
-S1-missing-once	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif true {	./internal/poll	TestMissingStampKey
-S2-other-always	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif !stampKeyMissingLogged.Swap(true) {	./internal/poll	TestMissingStampKey
+S1-missing-once	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif !errors.Is(err, os.ErrNotExist) || true {	./internal/poll	TestMissingStampKey
+S2-other-always	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif errors.Is(err, os.ErrNotExist) && !stampKeyMissingLogged.Swap(true) {	./internal/poll	TestMissingStampKey
+A11-creation-least	internal/model/authority.go	95	\treturn Authority{Source: w.Source, Mode: mode}	\treturn AuthorityOf(w)	./internal/model	TestCreationAuthority
+A12-least-source-mode	internal/form/formstate.go	940	\tleast.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)\n		./internal/form	TestAuthorityComesFrom
+A13-adopt-authority	internal/form/formstate.go	883	\tfresh.FormIgnored = append(fresh.FormIgnored, applyAuthority(&fresh)...)\n		./internal/form	TestAdoptWrittenReappliesAuthority
+A14-poll-refuses	internal/poll/poll.go	840	\tif w.NoAuthority {\n\t\treturn fmt.Errorf("%s: %s", w.Name, model.NoAuthorityNote(w.FormID))\n\t}	\t_ = model.NoAuthorityNote	./internal/poll	TestPollRefusesNoAuthority
+A15-record-uses-creation	internal/form/formstate.go	983	\tb, _ := json.Marshal(model.CreationAuthority(w))	\tb, _ := json.Marshal(model.AuthorityOf(w))	./internal/form	TestAuthorityComesFrom
+S7-stopped	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {	if w.NoAuthority {	./internal/sched	TestStoppedArchived

@@ -161,7 +161,7 @@ func TestLiveAuthorPushesWriteNothingStudied(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := authorWatch()
 	w.Name, w.FormID, w.CreatedAt = "livetest-aquiet-"+strings.TrimPrefix(id, "@")[:8], id, time.Now().UTC()
-	if err := st.SaveCritic(ctx, &w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, &w); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SeedTrigger(ctx, &w); err != nil {

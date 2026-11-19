@@ -154,7 +154,7 @@ func TestLiveScoutFormsThroughTheCore(t *testing.T) {
 	name := "livetest-scout-" + strings.TrimPrefix(critForm, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceScout, FormID: critForm, BoardForm: boardForm, InputsForm: inputsForm,
 		Scout: &model.ScoutWatch{Repo: "bic/aether", Authors: []string{"x"}}, EverySec: 120, CreatedAt: time.Now().UTC()}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var reply plugin.Reply
@@ -293,7 +293,7 @@ func TestLiveChildFormsThroughTheCore(t *testing.T) {
 	name := "livetest-kb-" + strings.TrimPrefix(critForm, "@")[:8]
 	w := &model.Critic{Name: name, Source: model.SourceKeelBranches, FormID: critForm, EverySec: 120, CreatedAt: time.Now().UTC(),
 		Branches: &model.KeelBranches{Repo: "aether/aether"}}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	var reply plugin.Reply

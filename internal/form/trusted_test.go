@@ -74,7 +74,7 @@ func TestAuthorityComesFromConfigOrCreationRecord(t *testing.T) {
 	}
 	// A creation record (as SaveRound writes it for a new critic) is what is read back, not the form.
 	s := &Store{}
-	if err := s.RegisterAuthority(&model.Critic{FormID: "@f1", Source: "teams-chat", Mode: model.ModeTeams}); err != nil {
+	if err := s.RegisterAuthority(&model.Critic{FormID: "@f1", Source: "teams-chat", Mode: model.ModeTeams, Write: true, Approve: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RegisterAuthority(&model.Critic{FormID: "@f1", Source: "org-approve", Write: true}); err == nil {
@@ -94,5 +94,21 @@ func TestAuthorityComesFromConfigOrCreationRecord(t *testing.T) {
 	w, _ = critic(seat).Critic()
 	if w.Source != "keel-threads" || !w.Write || w.Approve {
 		t.Fatalf("config: %+v", w)
+	}
+}
+
+// adoptWritten re-applies the authority: a seat's mid-round write=true in the written key does not reach the
+// critic (review f0f3a1d9 M1). RED if adoptWritten stops overlaying authority.
+func TestAdoptWrittenReappliesAuthority(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	_ = os.WriteFile(p, []byte(`{"trusted":{"critics":{"@f2":{"authority":{"source":"keel-threads","mode":"keel"}}}}}`), 0o600)
+	ResetTrusted(p)
+	t.Cleanup(func() { ResetTrusted(model.TrustedConfigPath) })
+	w := &model.Critic{Name: "k", FormID: "@f2", Source: "keel-threads", Mode: model.ModeKeel}
+	seat, _ := json.Marshal(map[string]any{"name": "k", "source": "org-approve", "mode": "reviewer", "write": true})
+	adoptWritten(w, seat)
+	if w.Write || w.Source != "keel-threads" || w.Mode != model.ModeKeel {
+		t.Fatalf("adopted %+v", w)
 	}
 }

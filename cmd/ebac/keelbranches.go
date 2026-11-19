@@ -55,7 +55,7 @@ func cmdAddKeelBranches(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("mint role form: %w", err)
 	}
 	w.FormID = formID
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.CreateCritic(ctx, w); err != nil {
 		return err
 	}
 	fmt.Printf("keel branches %q: role %s, %s %s<owner>/<topic> against %s, reviewer %s, every %s\n", *name, formID, *repo, *prefix, *base, *reviewer, *every)

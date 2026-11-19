@@ -83,7 +83,7 @@ func TestLiveArchivedFormIsNotRead(t *testing.T) {
 	livetest.Remove(t, f, id)
 	st := &Store{Root: t.TempDir(), Fig: f, formOf: map[string]string{}}
 	w := &model.Critic{Name: name, FormID: id}
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if err := f.SetJSON(ctx, id, "target-aria", "0000livetest0000"); err != nil {
@@ -112,7 +112,7 @@ func TestLiveArchivedFormIsNotRead(t *testing.T) {
 	}
 
 	w.Runtime.Archived = true
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	keys, err := f.Form(ctx, id)

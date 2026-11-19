@@ -35,7 +35,7 @@ func TestLiveBlindRecoveryKeepsTheCritic(t *testing.T) {
 	}
 	w := &model.Critic{Name: "livetest-wipe-" + strings.TrimPrefix(id, "@")[:8], Mode: model.ModeTeams, Source: "teams-chat",
 		CreatedAt: time.Now().UTC(), FormID: id, EverySec: 60, Chat: testChat()}
-	if err := store().SaveCritic(ctx, w); err != nil {
+	if err := store().SaveCriticRecordingForTest(ctx, w); err != nil {
 		t.Fatal(err)
 	}
 	if err := store().SeedTrigger(ctx, w); err != nil {

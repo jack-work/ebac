@@ -277,7 +277,7 @@ func TestLiveFilterKeysThroughTheCore(t *testing.T) {
 	livetest.Remove(t, f, id)
 	w := authorWatch()
 	w.Name, w.FormID, w.CreatedAt = "livetest-authorf-"+strings.TrimPrefix(id, "@")[:8], id, time.Now().UTC()
-	if err := st.SaveCritic(ctx, &w); err != nil {
+	if err := st.SaveCriticRecordingForTest(ctx, &w); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.SetJSON(ctx, id, model.AuthorPathsKey, chiqunPaths); err != nil {

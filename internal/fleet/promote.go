@@ -216,7 +216,7 @@ func (p *Promoter) createCritic(ctx context.Context, cfg QueueConfig, it QueueIt
 		return "", fmt.Errorf("mint role: %w", err)
 	}
 	c.FormID = formID
-	if err := p.Store.SaveCritic(ctx, c); err != nil {
+	if err := p.Store.CreateCritic(ctx, c); err != nil {
 		return "", err
 	}
 	if err := p.Store.SeedTrigger(ctx, c); err != nil {

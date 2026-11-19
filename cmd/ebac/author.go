@@ -89,7 +89,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 		return fmt.Errorf("mint role form: %w", err)
 	}
 	w.FormID = formID
-	if err := st.SaveCritic(ctx, w); err != nil {
+	if err := st.CreateCritic(ctx, w); err != nil {
 		return err
 	}
 	if err := st.SeedTrigger(ctx, w); err != nil {
