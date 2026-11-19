@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -106,9 +107,30 @@ func (f *Figaro) RenewLease(ctx context.Context, id string) (bool, error) {
 		if !due {
 			return false, nil
 		}
-		return true, f.setLease(ctx, id, ttl)
+		return f.renewTo(ctx, id, ttl), nil
 	}
 	return false, fmt.Errorf("renew %s: %w", id, ErrFormGone)
+}
+
+// BrokerMaxTTL is the longest system.ttl the lifetime broker sets.
+const BrokerMaxTTL = 30 * 24 * time.Hour
+
+// overCap remembers the forms already said to be past the broker's cap: one line per form per process.
+var overCap sync.Map
+
+// renewTo asks the broker for the ttl a renewal needs, and whether it asked. The daemon measures ttl from the
+// form's FIRST ttl write and an unset does not move that stamp (proved live 11-19), so a form older than
+// BrokerMaxTTL-FormLease needs more than the broker sets (ebac-roster: 892h, refused every run). Such a form lives
+// on figaro's keepalive (a form read daily stays): the renewal is skipped, said once per form.
+func (f *Figaro) renewTo(ctx context.Context, id string, ttl time.Duration) bool {
+	if ttl > BrokerMaxTTL {
+		if _, said := overCap.LoadOrStore(id, true); !said {
+			fmt.Fprintf(lifetimeLog, "ebac: lease %s: needs ttl %s, over the broker's %s (ttl counts from its first write): not renewed; it lives on keepalive\n", id, ttl.Round(time.Hour), BrokerMaxTTL)
+		}
+		return false
+	}
+	_ = f.setLease(ctx, id, ttl)
+	return true
 }
 
 // LifetimeSock is the figaro-lifetime-broker's socket (interim for
@@ -128,14 +150,30 @@ var (
 // ignored: the lease is a week long precisely so that a bad hour costs
 // nothing, and figaro's keepalive still holds a form that is read.
 func (f *Figaro) setLease(ctx context.Context, id string, ttl time.Duration) error {
-	if err := f.lifetime(ctx, id, systemTTLKey, ttl.String()); err != nil && !lifetimeWarned.Swap(true) {
+	v := ttl.String()
+	if err := f.lifetime(ctx, id, systemTTLKey, &v); err != nil && !lifetimeWarned.Swap(true) {
 		fmt.Fprintf(lifetimeLog, "ebac: lifetime broker %s: %v (further broker failures are not logged)\n", LifetimeSock, err)
 	}
 	return nil
 }
 
-// lifetime sends one request to the broker and reads its one-line answer.
-func (f *Figaro) lifetime(ctx context.Context, id, key, value string) error {
+// lifetime sets (or, with a nil value, unsets) a lifetime key through the broker.
+func (f *Figaro) lifetime(ctx context.Context, id, key string, value *string) error {
+	shown := "null"
+	if value != nil {
+		shown = *value
+	}
+	if err := f.broker(ctx, map[string]any{"form": id, "key": key, "value": value}); err != nil {
+		return fmt.Errorf("%s %s=%s %w", id, key, shown, err)
+	}
+	return nil
+}
+
+// errBrokerRefused is the broker answering no (as opposed to no answer).
+var errBrokerRefused = errors.New("refused")
+
+// broker sends one request to the broker and reads its one-line answer.
+func (f *Figaro) broker(ctx context.Context, req map[string]any) error {
 	ctx, cancel := f.bound(ctx)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", LifetimeSock)
@@ -146,11 +184,11 @@ func (f *Figaro) lifetime(ctx context.Context, id, key, value string) error {
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
-	req, _ := json.Marshal(map[string]string{"form": id, "key": key, "value": value})
-	if _, err := conn.Write(append(req, '\n')); err != nil {
+	line, _ := json.Marshal(req)
+	if _, err := conn.Write(append(line, '\n')); err != nil {
 		return err
 	}
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	ans, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil {
 		return fmt.Errorf("read answer: %w", err)
 	}
@@ -158,11 +196,36 @@ func (f *Figaro) lifetime(ctx context.Context, id, key, value string) error {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(line, &res); err != nil {
-		return fmt.Errorf("answer %.200q: %w", line, err)
+	if err := json.Unmarshal(ans, &res); err != nil {
+		return fmt.Errorf("answer %.200q: %w", ans, err)
 	}
 	if !res.OK {
-		return fmt.Errorf("%s %s=%s refused: %s", id, key, value, res.Error)
+		return fmt.Errorf("%w: %s", errBrokerRefused, res.Error)
+	}
+	return nil
+}
+
+// formGone is how BrokerKill re-checks a form before asking again (tests replace it).
+var formGone = func(ctx context.Context, f *Figaro, id string) bool {
+	_, err := f.Form(ctx, id)
+	return errors.Is(err, ErrFormGone)
+}
+
+// BrokerKill removes one of ebac's own forms through the lifetime broker (op kill, MQ 19453; uid ebac holds no kill
+// grant of its own). One form, never its children. Under load the answer can be late while the kill still applies,
+// so a failed ask re-checks the form before asking once more: gone is done. A refusal is final.
+func (f *Figaro) BrokerKill(ctx context.Context, id string) error {
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = f.broker(ctx, map[string]any{"form": id, "op": "kill"}); err == nil || errors.Is(err, errBrokerRefused) {
+			break
+		}
+		if formGone(ctx, f, id) {
+			return nil
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("kill %s: %w", id, err)
 	}
 	return nil
 }
@@ -205,19 +268,14 @@ func (f *Figaro) RenewLeases(ctx context.Context, ids []string, lease time.Durat
 	for _, id := range ids {
 		want[id] = true
 	}
-	var first error
 	now := time.Now()
 	for _, r := range resp.Figaros {
 		if !want[r.ID] {
 			continue
 		}
-		ttl, due := leaseTTLFor(now, r.TTLMS, r.ExpiresAt, lease)
-		if !due {
-			continue
-		}
-		if err := f.setLease(ctx, r.ID, ttl); err != nil && first == nil {
-			first = fmt.Errorf("renew %s: %w", r.ID, err)
+		if ttl, due := leaseTTLFor(now, r.TTLMS, r.ExpiresAt, lease); due {
+			f.renewTo(ctx, r.ID, ttl)
 		}
 	}
-	return first
+	return nil
 }

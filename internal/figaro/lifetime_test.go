@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -142,5 +143,57 @@ func TestLiveMintAsksTheBrokerForItsLifetime(t *testing.T) {
 				t.Errorf("request %d: %s = %v, want %v", i, k, (*got)[i][k], v)
 			}
 		}
+	}
+}
+
+// BrokerKill asks op kill for one form; a lost answer re-checks the form first (the kill may have applied) and asks
+// again only while it still stands; a refusal is final.
+func TestBrokerKill(t *testing.T) {
+	f := NewFigaro("")
+	stillThere := true
+	old := formGone
+	formGone = func(context.Context, *Figaro, string) bool { return !stillThere }
+	t.Cleanup(func() { formGone = old })
+
+	got := fakeBroker(t, `{"ok": true}`)
+	if err := f.BrokerKill(context.Background(), "@0123abcd"); err != nil || len(*got) != 1 || (*got)[0]["op"] != "kill" || (*got)[0]["form"] != "@0123abcd" {
+		t.Fatalf("kill: %v, broker got %v", err, *got)
+	}
+
+	got = fakeBroker(t, ``) // the answer is lost (load) but the kill applied
+	stillThere = false
+	if err := f.BrokerKill(context.Background(), "@0123abcd"); err != nil || len(*got) != 1 {
+		t.Fatalf("lost answer, form gone: %v, %d asks (want done after one)", err, len(*got))
+	}
+
+	got = fakeBroker(t, ``) // lost answer, the form still stands: asked again, once
+	stillThere = true
+	if err := f.BrokerKill(context.Background(), "@0123abcd"); err == nil || len(*got) != 2 {
+		t.Fatalf("lost answer, form stands: %v, %d asks (want 2 and an error)", err, len(*got))
+	}
+
+	got = fakeBroker(t, `{"ok": false, "error": "not an ebac form"}`)
+	if err := f.BrokerKill(context.Background(), "@0123abcd"); err == nil || len(*got) != 1 || !strings.Contains(err.Error(), "not an ebac form") {
+		t.Fatalf("refusal: %v, %d asks (want 1, final)", err, len(*got))
+	}
+}
+
+// A renewal past the broker's cap (an old form: ttl counts from its first write) asks nothing and says so once per
+// form; one within the cap asks.
+func TestRenewalOverTheBrokerCapSkipsAndSaysOnce(t *testing.T) {
+	got := fakeBroker(t, `{"ok": true}`)
+	warn := captureWarn(t)
+	overCap = sync.Map{}
+	f := NewFigaro("")
+	for i := 0; i < 3; i++ {
+		if f.renewTo(context.Background(), "@0123abcd", 892*time.Hour) {
+			t.Fatal("a renewal over the cap asked the broker")
+		}
+	}
+	if len(*got) != 0 || strings.Count(warn.String(), "@0123abcd") != 1 || !strings.Contains(warn.String(), "keepalive") {
+		t.Fatalf("over the cap: broker got %v, said %q (want nothing asked, said once)", *got, warn)
+	}
+	if !f.renewTo(context.Background(), "@0123abcd", 200*time.Hour) || len(*got) != 1 || (*got)[0]["value"] != "200h0m0s" {
+		t.Fatalf("within the cap: broker got %v", *got)
 	}
 }

@@ -512,14 +512,9 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	if *purge {
-		fig := st.Fig
-		if err := fig.FormRemove(ctx, w.FormID); err != nil {
-			if purgeRefused(err) {
-				// figaro grants uid ebac no kill (GO-20261104-ebac-narrow): the operator removes the form as themselves.
-				fmt.Printf("role form %s not removed: ebac holds no kill grant; remove it as its owner: figaro kill %s\n", w.FormID, w.FormID)
-			} else {
-				fmt.Fprintf(os.Stderr, "ebac: could not remove form %s: %v\n", w.FormID, err)
-			}
+		// uid ebac holds no kill grant (GO-20261104-ebac-narrow): the lifetime broker removes ebac's own forms.
+		if err := st.Fig.BrokerKill(ctx, w.FormID); err != nil {
+			fmt.Fprintf(os.Stderr, "ebac: role form %s not removed: %v; it lapses with its lease (or: figaro kill %s)\n", w.FormID, err, w.FormID)
 		} else {
 			fmt.Printf("removed role form %s\n", w.FormID)
 		}
@@ -582,6 +577,3 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 	fmt.Printf("%s: acked round %d\n", w.Name, *round)
 	return nil
 }
-
-// purgeRefused reports figaro's authz refusal of the kill (see figaro.IsRefused).
-func purgeRefused(err error) bool { return figaro.IsRefused(err) }
