@@ -71,3 +71,10 @@ F1-absorbed-not-ended	internal/sched/sched.go	189	\t\t\tcase cur != w.Stop.WithR
 F2-hop-bound	internal/fleet/role.go	30	\t\tif hop > MaxRoleHops {	\t\tif hop > 100*MaxRoleHops {	./internal/fleet	TestFollowRole
 F3-cycle	internal/fleet/role.go	27	\t\tif seen[cur] {	\t\tif seen[cur] && false {	./internal/fleet	TestFollowRole
 F4-absorbed-refused-at-set	internal/fleet/role.go	62	\tcase cur != id:\n\t\treturn fmt.Errorf("%s was absorbed into %s: name that role", id, cur)	\tcase cur != id && false:\n\t\treturn fmt.Errorf("%s was absorbed into %s: name that role", id, cur)	./internal/fleet	TestIsRosterRole
+D1-socket-listed	cmd/ebac/sudo.go	18	\t"socket":        "a socket ebac dials (figaro, band-hub, band-grants)",\n		./cmd/ebac	TestSudoDoor
+D2-token-cmd-listed	cmd/ebac/sudo.go	22	\t"token-cmd":     "a command ebac runs to obtain a bearer token",\n		./cmd/ebac	TestSudoDoor
+D3-eq-form	cmd/ebac/sudo.go	49	\t\tif k, v, ok := strings.Cut(name, "="); ok {	\t\tif k, v, ok := strings.Cut(name, "="); false && ok {	./cmd/ebac	TestSudoDoor
+D4-single-dash	cmd/ebac/sudo.go	47	\t\tname := strings.TrimLeft(a, "-")	\t\tname := strings.TrimPrefix(a, "--")	./cmd/ebac	TestSudoDoor
+D5-stdin-only	cmd/ebac/sudo.go	60	\t\t\tif val == "-" {	\t\t\tif val != "" {	./cmd/ebac	TestSudoDoor
+D6-sudo-keyed	cmd/ebac/sudo.go	36	\tif sudoUID == "" {\n\t\treturn nil\n\t}	\tif sudoUID == "never" {\n\t\treturn nil\n\t}	./cmd/ebac	TestSudoDoor
+D7-double-dash-end	cmd/ebac/sudo.go	41	\t\tif a == "--" {\n\t\t\treturn nil\n\t\t}	\t\tif a == "--" {\n\t\t\tcontinue\n\t\t}	./cmd/ebac	TestSudoDoor

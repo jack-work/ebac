@@ -138,6 +138,10 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
+	if err := refuseSudoFlags(os.Getenv("SUDO_UID"), os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
+		os.Exit(2)
+	}
 
 	// Strip global flags wherever they appear.
 	args = extractGlobals(args, &g)
