@@ -119,5 +119,5 @@ S7-stopped	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archive
 R11-chat-id	internal/model/authority.go	99	\t\tset("chat.id", c.ID, a.TeamsChat, &c.ID)\n		./internal/model	TestAuthorityReadTargets
 R12-logins	internal/model/authority.go	96	\t\to.Logins, o.KnownBreaks = slices.Clone(a.Logins), slices.Clone(a.KnownBreaks)\n		./internal/model	TestAuthorityReadTargets
 LIVE-L1-ls-live	cmd/ebac/show.go	36	\trows, sum, err := fleet.BuildRoster(ctx, st, st.Fig, "")	\trows, sum, age0, err := fleet.ReadRoster(ctx, st, st.Fig)\n\t_ = age0	./cmd/ebac	TestLiveLsShowsASetEndAtOnce
-LIVE-M1-merge	internal/form/formstate.go	584	\t\tmerged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])	\t\tmerged, c, merr := json.RawMessage(cfgRaw), []string(nil), error(nil)	./internal/form	TestLiveRacingCriticSetSurvivesSave
+LIVE-M1-merge	internal/form/formstate.go	584	\t\tmerged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])	\t\tmerged, c, merr := json.RawMessage(cfgRaw), []string(nil), error(nil)\n\t\t_ = base	./internal/form	TestLiveRacingCriticSetSurvivesSave
 A11-creation-least	internal/model/authority.go	120	\ta := Authority{Source: w.Source, Mode: mode}	\ta := AuthorityOf(w)	./internal/model	TestCreationAuthority|TestAuthorityReadTargets
