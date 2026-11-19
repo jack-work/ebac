@@ -11,7 +11,11 @@ func TestAuthorizeKeelArms(t *testing.T) {
 	w := &model.Critic{Name: "keel-captains-log", Mode: model.ModeKeel, Write: true,
 		Keel: &model.KeelRef{Repo: "notes/captains-log", Paths: []string{"2026/**", "handoffs/*.md"}}}
 	const aria, role = "e680885d31ef318df6abd5ffbfe69868", "figaro-knight"
-	ok := func(p model.Post) model.Post { p.PR, p.ByAria, p.ByRole = "notes/captains-log", aria, role; return p }
+	const form = "@8292f32b9578e0502343dbd0f6679c7c"
+	ok := func(p model.Post) model.Post {
+		p.PR, p.ByAria, p.ByRole, p.ByRoleForm = "notes/captains-log", aria, role, form
+		return p
+	}
 
 	accept := map[string]model.Post{
 		"reply":                  ok(model.Post{ReplyTo: "t1", Body: "x"}),
@@ -31,11 +35,12 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		p    model.Post
 		want string
 	}{
-		"other repo":        {model.Post{PR: "notes/other", ByAria: aria, ByRole: role, ReplyTo: "t1", Body: "x"}, "not this critic's keel repo"},
+		"other repo":        {model.Post{PR: "notes/other", ByAria: aria, ByRole: role, ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "not this critic's keel repo"},
 		"event":             {ok(model.Post{ReplyTo: "t1", Body: "x", Event: "APPROVE"}), "no reviews"},
 		"react":             {ok(model.Post{ReplyTo: "t1", React: "+1"}), "no reactions"},
-		"no writer aria":    {model.Post{PR: "notes/captains-log", ByRole: role, ReplyTo: "t1", Body: "x"}, "by_aria"},
-		"bad writer role":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: "Knight", ReplyTo: "t1", Body: "x"}, "by_role"},
+		"no writer aria":    {model.Post{PR: "notes/captains-log", ByRole: role, ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_aria"},
+		"bad writer role":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: "Knight", ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_role"},
+		"no role form":      {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ReplyTo: "t1", Body: "x"}, "by_role_form"},
 		"resolve no thread": {ok(model.Post{Resolve: true}), "resolve needs reply_to"},
 		"empty body":        {ok(model.Post{ReplyTo: "t1"}), "empty body"},
 		"too long":          {long, "keel takes at most 16000"},

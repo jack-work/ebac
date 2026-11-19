@@ -12,6 +12,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/internal/identity"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
 )
@@ -54,6 +55,10 @@ type Poller struct {
 	// Roles replaces the role-name lookup for trigger role_in_path in tests
 	// (nil: RoleNames, read from the roster critic's form).
 	Roles func(ctx context.Context) (map[string]string, error)
+	// RoleCheck replaces CheckRole in tests.
+	RoleCheck func(ctx context.Context, caller, role string) (form, why string, err error)
+	// dir is this round's identity directory (Directory), read at most once.
+	dir *identity.Directory
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
@@ -125,6 +130,7 @@ func orDefault(s, d string) string {
 }
 
 func (p *Poller) pollRound(ctx context.Context, name string) error {
+	p.dir = nil // identity is read fresh each round, at most once
 	w, err := p.Store.LoadCritic(ctx, name)
 	if err != nil {
 		if figaro.Unavailable(err) {
@@ -153,7 +159,7 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
-	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: w.Reads}
+	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: p.withReviewCheck(ctx, w)}
 	if w.SourceName() == model.SourceRoster {
 		// The roster's whole input is the aria store, read here with the
 		// core's own grant: the plugin has none.

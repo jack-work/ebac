@@ -620,7 +620,7 @@ func (f *Figaro) ListArias(ctx context.Context) ([]model.Aria, error) {
 		}
 		out = append(out, model.Aria{ID: r.ID, Handle: r.Handle, Kind: r.Kind, State: r.State, Model: r.Model,
 			Mantra: r.Mantra, Parent: r.Parent, ContextTokens: r.ContextTokens, ContextLimit: r.ContextLimit,
-			TTLMS: r.TTLMS, ExpiresAt: r.ExpiresAt, Name: r.Name, TargetAria: r.TargetAria})
+			TTLMS: r.TTLMS, ExpiresAt: r.ExpiresAt, ReapedAt: r.ReapedAt, Name: r.Name, TargetAria: r.TargetAria})
 	}
 	return out, nil
 }

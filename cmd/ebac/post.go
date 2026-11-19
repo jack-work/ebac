@@ -31,8 +31,8 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	bodyFile := fs.String("body-file", "", "file holding the body (- for stdin); optional with --resolve")
 	id := fs.String("id", "", "post id (default: generated)")
 	rev := fs.String("rev", "", "keel: with --path/--line, anchor the new thread on the diff view at this commit")
-	byAria := fs.String("by-aria", "", "keel: the writing seat's aria id (keel stamps it on the comment)")
-	byRole := fs.String("by-role", "", "keel: the writing seat's role name (keel stamps it on the comment)")
+	byAria := fs.String("by-aria", "", "keel: must equal the caller's own aria when given (the caller is the writer)")
+	byRole := fs.String("by-role", "", "keel: the role the caller writes for; it must hold it (keel stamps aria and role on the comment)")
 	_ = fs.Parse(args)
 
 	var body []byte
@@ -70,6 +70,11 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	}
 	post := &model.Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react,
 		Rev: *rev, ByAria: *byAria, ByRole: *byRole}
+	if w.Mode == model.ModeKeel {
+		if err := keelWriter(ctx, g, st, post); err != nil {
+			return err
+		}
+	}
 	if why := poll.Authorize(w, snap, "", post); why != "" {
 		return fmt.Errorf("refused: %s", why)
 	}
@@ -92,5 +97,28 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	fmt.Printf("%s: queued %s on %s; the next round sends it (receipt: %s.sent)\n", w.Name, *id, w.FormID, key)
+	return nil
+}
+
+// keelWriter makes the caller the post's writer: by_aria is the caller (an
+// explicit --by-aria must match it), the caller must hold by_role, and the
+// role form it resolved to is recorded for the flush-time re-check.
+func keelWriter(ctx context.Context, g globals, st *form.Store, post *model.Post) error {
+	if g.caller == "" {
+		return fmt.Errorf("refused: no caller aria (run ebac from a figaro seat: the wrapper passes FIGARO_ARIA as --caller)")
+	}
+	if post.ByAria != "" && post.ByAria != g.caller {
+		return fmt.Errorf("refused: --by-aria %s is not the caller %s", post.ByAria, g.caller)
+	}
+	post.ByAria = g.caller
+	p := &poll.Poller{Store: st, Fig: st.Fig, Out: io.Discard}
+	form, why, err := p.PostCheck(ctx, g.caller, post.ByRole)
+	if err != nil {
+		return fmt.Errorf("role check: %w", err)
+	}
+	if why != "" {
+		return fmt.Errorf("refused: %s", why)
+	}
+	post.ByRoleForm = form
 	return nil
 }

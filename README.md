@@ -274,6 +274,33 @@ the seen state come from the full fetch. `changed` and `last:N` trade completene
 slept through a round sees only the latest round's rows, so its wake brief names the full view (the
 threads fetch). A bad value keeps the last good scope and says why in `scope_error`.
 
+**Keel posting and reviews.** A keel critic with write on (`ebac set-write --critic N --on`) carries an outbox
+like a PR critic: `post.<id>` with `reply_to` (a reply), `path` + `line` (a new thread at main's revision of that
+line; `rev` anchors it on a diff instead) and `resolve`. The operator wrapper passes the seat's aria as the first
+argument (`--caller=<aria>`, the only place ebac reads it). `ebac post` makes that caller the writer (`by_aria`),
+requires `--by-role` to be a role the caller holds (the holder of the one live role form of that name, or a live
+fork of it, walking through reaped ancestors; a name carried by two live forms is refused) and records the form (`by_role_form`); the flush re-checks
+caller and form right before sending (a figaro read failure only delays). keel's write door stamps each comment
+`jack via Figaro <aria8> (<role>)`. `ebac review --critic N --doc D --reviewers R[,R] --author-role A` (only the
+author role's side) sets a review; `ebac verdict --critic N --role R --verdict pass|changes|comment --rev <rev>`
+(the reviewer role's holder only, at the doc's current revision read from keel, never the author side) records
+a verdict. Both are stamped with an HMAC key only ebac's core reads (plugins never see it); every round the core
+verifies the review key and each verdict (stamp, repo, doc, the role's current form AND current holder) and the
+plugin recomputes `review_state` from that, the threads and the doc's revision read that round: pass only when
+every named reviewer's verdict counts at the current revision and no thread on the doc is open. Anything
+unreadable is never pass, and a hand-written `review_state` is overwritten on the next round.
+
+**Trust limit: `review_state` is ADVISORY, not a gate,** until figaro attests who wrote a form patch. Known
+bypasses: (1) the caller is a claim: every seat reaches ebac as the same uid, so a seat can name another aria
+(the holder) as `--caller` by running ebac outside the wrapper; (2) a seat can `figaro cast` itself into a role
+and act as its holder while it holds it (a verdict stops counting once the holder changes); (3) the author side
+can re-run `ebac review` and change the reviewers (each review key records who set it); (4) a role can change
+hands between the flush's check and the write; (5) between rounds the form shows whatever was last written
+(a hand edit lasts until the next round, about a minute); (6) a seat with ebac's uid or root can read the stamp
+key; (7) DENIAL, by design: any seat can mint a second live form with a role's name, and that role then resolves to
+nothing (ambiguous, refused) for posts, reviews and verdicts until the extra form is gone; ebac fails closed rather
+than guess which form is the role.
+
 ## Layout
 
 | Path | What |

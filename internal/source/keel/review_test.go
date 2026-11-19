@@ -3,6 +3,7 @@ package keel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -10,6 +11,17 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
 )
+
+func allStamped(string, Verdict) bool { return true }
+
+func TestUnstampedVerdictsCountAsMissing(t *testing.T) {
+	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}}
+	v := map[string]Verdict{"reviewer": {Verdict: "pass", Rev: "r2"}}
+	got := reviewState(cfg, true, v, nil, "r2", func(string, Verdict) bool { return false })
+	if got.State != "waiting" || !reflect.DeepEqual(got.Unstamped, []string{"reviewer"}) {
+		t.Fatalf("%+v", got)
+	}
+}
 
 func TestReviewStateArms(t *testing.T) {
 	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer", "warden"}}
@@ -41,18 +53,22 @@ func TestReviewStateArms(t *testing.T) {
 			ReviewState{State: "waiting", Doc: "d.md"}},
 	}
 	for _, c := range cases {
-		if got := reviewState(cfg, c.verdicts, c.index, c.rev); !reflect.DeepEqual(got, c.want) {
+		if got := reviewState(cfg, true, c.verdicts, c.index, c.rev, allStamped); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", c.name, got, c.want)
 		}
 	}
-	// No reviewers named: every role with a verdict is required; none at all waits.
-	if got := reviewState(ReviewConfig{Doc: "d.md"}, map[string]Verdict{"reviewer": pass}, closed, "r2"); got.State != "pass" {
-		t.Errorf("implicit pool: %+v", got)
+	// No reviewers named: never pass, whatever verdicts are present (the pool is never derived from them).
+	if got := reviewState(ReviewConfig{Doc: "d.md"}, true, map[string]Verdict{"reviewer": pass}, closed, "r2", allStamped); got.State != "waiting" {
+		t.Errorf("implicit pool passed: %+v", got)
 	}
-	if got := reviewState(ReviewConfig{Doc: "d.md"}, map[string]Verdict{"reviewer": pass}, closed, ""); got.State != "waiting" || got.RevChecked {
+	// An unstamped review key never passes.
+	if got := reviewState(cfg, false, map[string]Verdict{"reviewer": pass, "warden": pass}, closed, "r2", allStamped); got.State != "waiting" || !got.ConfigUnstamped {
+		t.Errorf("unstamped config: %+v", got)
+	}
+	if got := reviewState(ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}}, true, map[string]Verdict{"reviewer": pass}, closed, "", allStamped); got.State != "waiting" || got.RevChecked {
 		t.Errorf("pass verdict, unknown rev: %+v, want waiting", got)
 	}
-	if got := reviewState(ReviewConfig{Doc: "d.md"}, nil, closed, "r2"); got.State != "waiting" {
+	if got := reviewState(ReviewConfig{Doc: "d.md"}, true, nil, closed, "r2", allStamped); got.State != "waiting" {
 		t.Errorf("no verdicts: %+v", got)
 	}
 }
@@ -94,41 +110,95 @@ func TestDocRevAsksKeelsLogForThePathOnMain(t *testing.T) {
 	}
 }
 
-func TestReviewRoundWritesOnlyOnChangeAndKeepsTheOpenCount(t *testing.T) {
-	old := DocRev
-	DocRev = func(context.Context, *Client, string, string) (string, error) { return "r9", nil }
-	defer func() { DocRev = old }()
-	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
-	st := &model.KeelState{}
+// roundKeys is a round's keys: a review of d.md (reviewer: reviewer), the
+// verdicts, the core's check, and the review_state now on the form.
+func roundKeys(config bool, valid bool, onForm json.RawMessage) map[string]json.RawMessage {
+	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "knight"}
+	v := Verdict{Verdict: "pass", Rev: "r9"}
+	chk := model.KeelReviewCheck{Config: config, Roles: map[string]model.KeelRoleCheck{"reviewer": {Valid: valid}}}
 	keys := map[string]json.RawMessage{
-		ReviewKey:  json.RawMessage(`{"doc":"d.md"}`),
-		VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r9"}}`),
+		ReviewKey:  model.MustJSON(cfg),
+		VerdictKey: model.MustJSON(map[string]Verdict{"reviewer": v}),
+		CheckKey:   model.MustJSON(chk),
 	}
-	idx := map[string]IndexEntry{"a": {Path: "d.md"}}
+	if onForm != nil {
+		keys[ReviewStateKey] = onForm
+	}
+	return keys
+}
+
+func roundState(t *testing.T, keys map[string]json.RawMessage, byPath map[string][]Thread, cl *Client) (ReviewState, bool) {
+	t.Helper()
 	rep := &plugin.Reply{}
-	reviewRound(context.Background(), nil, rep, w, st, keys, idx)
+	w := &model.Critic{Name: "k", FormID: "@7d99311ef30a41de02b53090bd27a2e8", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
+	reviewRound(context.Background(), cl, rep, w, &model.KeelState{}, keys, byPath)
+	raw, set := rep.Set[ReviewStateKey]
 	var rs ReviewState
-	_ = json.Unmarshal(rep.Set[ReviewStateKey], &rs)
-	if rs.State != "waiting" || rs.Open != 1 || st.ReviewOpen != 1 {
-		t.Fatalf("first: %+v state %+v", rs, st)
+	_ = json.Unmarshal(raw, &rs)
+	return rs, set
+}
+
+func stubRev(t *testing.T, rev string, err error) {
+	t.Helper()
+	old := DocRev
+	DocRev = func(context.Context, *Client, string, string) (string, error) { return rev, err }
+	t.Cleanup(func() { DocRev = old })
+}
+
+var closedDoc = map[string][]Thread{"d.md": {{ID: "a", Resolved: true}}, "other.md": {{ID: "b"}}}
+
+func TestReviewRoundPassesOnlyOnTheCoresCheckAndFreshFacts(t *testing.T) {
+	stubRev(t, "r9", nil)
+	if rs, _ := roundState(t, roundKeys(true, true, nil), closedDoc, nil); rs.State != "pass" || !rs.RevChecked {
+		t.Fatalf("all good: %+v", rs)
 	}
-	// A round that fetched nothing, same verdicts: nothing rewritten.
-	rep = &plugin.Reply{}
-	reviewRound(context.Background(), nil, rep, w, st, keys, nil)
-	if _, set := rep.Set[ReviewStateKey]; set {
-		t.Fatalf("unchanged state rewritten")
+	if rs, _ := roundState(t, roundKeys(true, false, nil), closedDoc, nil); rs.State != "waiting" || len(rs.Unstamped) != 1 {
+		t.Errorf("core says the verdict does not count: %+v", rs)
 	}
-	// The thread resolves: pass.
-	rep = &plugin.Reply{}
-	reviewRound(context.Background(), nil, rep, w, st, keys, map[string]IndexEntry{"a": {Path: "d.md", Resolved: true}})
-	_ = json.Unmarshal(rep.Set[ReviewStateKey], &rs)
-	if rs.State != "pass" || rs.Open != 0 {
-		t.Fatalf("resolved: %+v", rs)
+	if rs, _ := roundState(t, roundKeys(false, true, nil), closedDoc, nil); rs.State != "waiting" || !rs.ConfigUnstamped {
+		t.Errorf("core says the review key is unstamped: %+v", rs)
 	}
-	// The review key goes away: review_state is removed.
-	rep = &plugin.Reply{}
-	reviewRound(context.Background(), nil, rep, w, st, map[string]json.RawMessage{}, nil)
-	if len(rep.Unset) != 1 || rep.Unset[0] != ReviewStateKey || st.ReviewLast != "" {
-		t.Fatalf("unset %v last %q", rep.Unset, st.ReviewLast)
+	keys := roundKeys(true, true, nil)
+	delete(keys, CheckKey)
+	if rs, _ := roundState(t, keys, closedDoc, nil); rs.State != "waiting" {
+		t.Errorf("no core check: %+v", rs)
+	}
+	open := map[string][]Thread{"d.md": {{ID: "a"}}}
+	if rs, _ := roundState(t, roundKeys(true, true, nil), open, nil); rs.State != "waiting" || rs.Open != 1 {
+		t.Errorf("an open thread: %+v", rs)
+	}
+}
+
+// F3/F4: nothing is carried from earlier rounds. No threads this round and
+// keel unreadable: waiting; the rev read failing: waiting, rev_checked false.
+func TestReviewRoundFailsClosedOnUnreadableFacts(t *testing.T) {
+	stubRev(t, "r9", nil)
+	if rs, _ := roundState(t, roundKeys(true, true, nil), nil, &Client{T: cannedDoor{}}); rs.State != "waiting" || rs.RevChecked {
+		t.Errorf("threads unreadable: %+v", rs)
+	}
+	stubRev(t, "r9", errors.New("keel down")) // a value with the error must not be used
+	if rs, _ := roundState(t, roundKeys(true, true, nil), closedDoc, nil); rs.State != "waiting" || rs.RevChecked {
+		t.Errorf("rev unreadable: %+v", rs)
+	}
+}
+
+// N3: a hand-written review_state does not survive a round; an equal one is
+// not rewritten.
+func TestReviewRoundRewritesAHandWrittenState(t *testing.T) {
+	stubRev(t, "r9", nil)
+	forged := json.RawMessage(`{"state":"pass","doc":"d.md","rev":"r9","rev_checked":true,"open":0}`)
+	rs, set := roundState(t, roundKeys(true, false, forged), closedDoc, nil)
+	if !set || rs.State != "waiting" {
+		t.Fatalf("forged pass kept: set %v %+v", set, rs)
+	}
+	computed, _ := roundState(t, roundKeys(true, false, nil), closedDoc, nil)
+	if _, set := roundState(t, roundKeys(true, false, model.MustJSON(computed)), closedDoc, nil); set {
+		t.Fatal("an equal state was rewritten")
+	}
+	rep := &plugin.Reply{}
+	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
+	reviewRound(context.Background(), nil, rep, w, &model.KeelState{}, map[string]json.RawMessage{ReviewStateKey: forged}, nil)
+	if len(rep.Unset) != 1 || rep.Unset[0] != ReviewStateKey {
+		t.Fatalf("no review configured: unset %v", rep.Unset)
 	}
 }

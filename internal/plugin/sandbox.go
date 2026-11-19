@@ -42,6 +42,9 @@ const (
 	GrantBandGrants Grant = "band-grants"
 	// GrantBandHub is the band hub's metadata reader socket.
 	GrantBandHub Grant = "band-hub"
+	// GrantStampKey is the HMAC key that stamps reviews and verdicts. No
+	// plugin ever sees it: the core verifies and tells the plugin.
+	GrantStampKey Grant = "stamp-key"
 )
 
 // Needs is what one plugin may use for one critic. The network is shared by

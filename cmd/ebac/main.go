@@ -94,6 +94,8 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac resume --critic N
   ebac rm     --critic N [--purge]           archive and remove
   ebac ack    --critic N --round R           the seat says it has acted on a delta
+  ebac review --critic N --doc D --reviewers R[,R] --author-role A   (keel) stamped review key
+  ebac verdict --critic N --role R --verdict pass|changes|comment --rev REV [--note T]   (keel) stamped verdict
   ebac post   --critic N --pr P [--reply-to T [--react +1] [--resolve] | --path F --line L] [--event E] --body-file - < F
                                             queue a comment or review on the form; the next round sends it
   ebac compact --critic N [--dry-run]        rewrite the form without comment bodies (author watch: run one
@@ -124,10 +126,18 @@ type globals struct {
 	gh     string
 	figaro string
 	host   string
+	// caller is the calling seat's aria, passed by the operator wrapper from
+	// FIGARO_ARIA (sudo strips the environment). A claim: see internal/identity.
+	caller string
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	caller, rest, cerr := splitCaller(os.Args[1:])
+	if cerr != nil {
+		fmt.Fprintln(os.Stderr, "ebac:", cerr)
+		os.Exit(2)
+	}
+	if len(rest) < 1 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
@@ -135,9 +145,10 @@ func main() {
 		gh:     env("EBAC_GH", "gh"),
 		figaro: os.Getenv("EBAC_SOCKET"),
 		host:   env("EBAC_HOST", forge.DefaultForgeHost()),
+		caller: caller,
 	}
-	cmd := os.Args[1]
-	args := os.Args[2:]
+	cmd := rest[0]
+	args := rest[1:]
 	if err := mainGate(); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 		os.Exit(2)
@@ -157,6 +168,10 @@ func main() {
 		err = cmdAddAuthor(ctx, g, args)
 	case "add-keel":
 		err = cmdAddKeel(ctx, g, args)
+	case "verdict":
+		err = cmdVerdict(ctx, g, args)
+	case "review":
+		err = cmdReview(ctx, g, args)
 	case "add-releases":
 		err = cmdAddReleases(ctx, g, args)
 	case "repoint":
@@ -266,6 +281,25 @@ func env(k, def string) string {
 	return def
 }
 
+// splitCaller takes the caller from the FIRST argument only, in the one form
+// the operator wrapper writes ("--caller=<aria>", before the user's args), so
+// nothing the user types can override or swallow it. Any other --caller is
+// refused.
+func splitCaller(args []string) (caller string, rest []string, err error) {
+	if len(args) > 0 && strings.HasPrefix(args[0], "--caller=") {
+		caller, args = strings.TrimPrefix(args[0], "--caller="), args[1:]
+		if caller == "" {
+			return "", nil, fmt.Errorf("empty --caller")
+		}
+	}
+	for _, a := range args {
+		if a == "--caller" || strings.HasPrefix(a, "--caller=") {
+			return "", nil, fmt.Errorf("--caller is set by the operator wrapper only (first argument); refused")
+		}
+	}
+	return caller, args, nil
+}
+
 func extractGlobals(args []string, g *globals) []string {
 	var out []string
 	for i := 0; i < len(args); i++ {
@@ -277,6 +311,7 @@ func extractGlobals(args []string, g *globals) []string {
 			g.figaro, i = args[i+1], i+1
 		case a == "--host" && i+1 < len(args):
 			g.host, i = args[i+1], i+1
+
 		case strings.HasPrefix(a, "--gh="):
 			g.gh = strings.TrimPrefix(a, "--gh=")
 		case strings.HasPrefix(a, "--socket="):

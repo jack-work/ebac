@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -270,6 +271,8 @@ type keelRound struct {
 	// pos is each item's comment's place in its thread (0: the head), for
 	// the inbox scope.
 	pos map[string]int
+	// byPath is the threads read this round (nil: none read).
+	byPath map[string][]Thread
 }
 
 // positions maps every comment's inbox key to its place in its thread.
@@ -292,7 +295,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 			return keelRound{}, err
 		}
 		ev, items, index := keelDiff(st, ref, byPath)
-		return keelRound{ev, items, index, positions(byPath)}, nil
+		return keelRound{ev, items, index, positions(byPath), byPath}, nil
 	}
 	if !st.FeedStarted {
 		head, err := feedHead(ctx, cl, ref.Repo)
@@ -306,7 +309,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 		ev, items, index := keelDiff(st, ref, byPath)
 		st.Cursor, st.FeedStarted = head, true
 		st.Seen, st.Resolved = nil, nil
-		return keelRound{ev, items, index, positions(byPath)}, nil
+		return keelRound{ev, items, index, positions(byPath), byPath}, nil
 	}
 	evs, next, err := cl.Events(ctx, ref.Repo, st.Cursor, feedWait)
 	if err != nil {
@@ -321,7 +324,7 @@ func fetchRound(ctx context.Context, cl *Client, st *model.KeelState, ref *model
 		return keelRound{}, err
 	}
 	r := feedDiff(st.Cursor, ref, evs, byPath)
-	r.pos = positions(byPath)
+	r.pos, r.byPath = positions(byPath), byPath
 	st.Cursor = next
 	return r, nil
 }
@@ -465,7 +468,7 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string, keys m
 	case r.index != nil:
 		rep.SetKey("threads", sc.indexValue(r.index))
 	}
-	reviewRound(ctx, cl, rep, w, st, keys, r.index)
+	reviewRound(ctx, cl, rep, w, st, keys, r.byPath)
 	return rep
 }
 
@@ -483,10 +486,14 @@ var DocRev = func(ctx context.Context, cl *Client, repo, doc string) (string, er
 	return cs[0].SHA, nil
 }
 
-// reviewRound writes review_state when a review is configured and its state
-// changed; a bad review key goes to review_error.
+// reviewRound computes review_state from this round's facts only: the
+// threads read now, the doc's revision read now (a failed read: waiting,
+// rev_checked false), and the core's verification of the review key and the
+// verdicts (review_check). Nothing is carried from earlier rounds, and the
+// value is rewritten whenever the form's differs (a hand-written
+// review_state does not survive a round).
 func reviewRound(ctx context.Context, cl *Client, rep *plugin.Reply, w *model.Critic, st *model.KeelState,
-	keys map[string]json.RawMessage, index map[string]IndexEntry) {
+	keys map[string]json.RawMessage, byPath map[string][]Thread) {
 	cfg, verdicts, ok, err := readReview(keys)
 	errText := ""
 	if err != nil {
@@ -500,38 +507,52 @@ func reviewRound(ctx context.Context, cl *Client, rep *plugin.Reply, w *model.Cr
 		}
 		st.ReviewErr = errText
 	}
+	onForm := keys[ReviewStateKey]
 	if !ok {
-		if st.ReviewLast != "" {
+		if len(onForm) > 0 && string(onForm) != "null" {
 			rep.Unset = append(rep.Unset, ReviewStateKey)
-			st.ReviewLast, st.ReviewDoc, st.ReviewOpen = "", "", 0
 		}
 		return
 	}
-	if index != nil {
-		st.ReviewDoc, st.ReviewOpen = cfg.Doc, 0
-		for _, e := range index {
-			if e.Path == cfg.Doc && !e.Resolved {
-				st.ReviewOpen++
-			}
+	var chk model.KeelReviewCheck
+	_ = json.Unmarshal(keys[CheckKey], &chk) // absent: nothing valid (fails closed)
+	open := map[string]IndexEntry{}
+	if byPath == nil {
+		var rerr error
+		if byPath, rerr = cl.Threads(ctx, w.Keel.Repo); rerr != nil {
+			rep.Logf("%s: review threads: %v", w.Name, rerr)
+			byPath = nil
 		}
-	} else if st.ReviewDoc != cfg.Doc {
-		return // the doc changed and nothing was fetched: wait for the next fetch
+	}
+	threadsKnown := byPath != nil
+	for _, t := range byPath[cfg.Doc] {
+		if !t.Resolved {
+			open[t.ID] = IndexEntry{Path: cfg.Doc}
+		}
 	}
 	rev, rerr := DocRev(ctx, cl, w.Keel.Repo, cfg.Doc)
 	if rerr != nil {
 		rep.Logf("%s: review rev of %s: %v", w.Name, cfg.Doc, rerr)
-		return // keep the last state rather than drop the rev check
+		rev = "" // unknown: never pass
 	}
-	open := map[string]IndexEntry{}
-	for i := 0; i < st.ReviewOpen; i++ {
-		open[fmt.Sprint(i)] = IndexEntry{Path: cfg.Doc}
+	if !threadsKnown {
+		rev = "" // open threads unknown: never pass either
 	}
-	rs := reviewState(cfg, verdicts, open, rev)
-	b, _ := json.Marshal(rs)
-	if string(b) != st.ReviewLast {
+	rs := reviewState(cfg, chk.Config, verdicts, open, rev, func(role string, v Verdict) bool {
+		return chk.Roles[role].Valid
+	})
+	b := model.MustJSON(rs)
+	if !jsonEqual(b, onForm) {
 		rep.SetKey(ReviewStateKey, rs)
-		st.ReviewLast = string(b)
 	}
+}
+
+func jsonEqual(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }
 
 func keelBrief(w *model.Critic, events []model.Event) string {

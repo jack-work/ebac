@@ -312,3 +312,27 @@ func TestBandGrantsOnlyForOrgApprove(t *testing.T) {
 		}
 	}
 }
+
+// The stamp key's directory is hidden from every plugin: no plugin needs it.
+func TestSandboxHidesTheStampKeyFromEveryPlugin(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "ebac-stamp", "stamp.key")
+	if err := os.MkdirAll(filepath.Dir(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key, []byte(strings.Repeat("k", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sb := &Sandbox{Bwrap: "bwrap", Grants: Grants{GrantFigaro: {"/nonexistent/fig.sock"}, GrantStampKey: {key}}}
+	for _, p := range []string{"keel", "gh", "tomb", "approve", "bandhub", "roster"} {
+		found := false
+		for _, d := range sb.Hide(p, &model.Critic{}) {
+			if d == filepath.Dir(key) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("plugin %s sees the stamp key dir: hide %v", p, sb.Hide(p, &model.Critic{}))
+		}
+	}
+}

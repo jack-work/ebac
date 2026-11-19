@@ -41,6 +41,10 @@ type Post struct {
 	// (<role>): "), so the thread names its writer, never ebac.
 	ByAria string `json:"by_aria,omitempty"`
 	ByRole string `json:"by_role,omitempty"`
+	// ByRoleForm is the role form ByRole resolved to when the post was
+	// written (role-checked: ByAria held it); the flush re-checks that the
+	// caller still holds that same form.
+	ByRoleForm string `json:"by_role_form,omitempty"`
 
 	Sent     *PostReceipt `json:"sent,omitempty"`
 	Resolved string       `json:"resolved,omitempty"` // when the thread was resolved

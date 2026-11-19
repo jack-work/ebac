@@ -452,7 +452,7 @@ const (
 // on every round (Request.Keys): configuration the role holder edits.
 var SourceReads = map[string][]string{
 	"github-author": {AuthorPathsKey, AuthorTitleKey},
-	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey, "review", "verdict"},
+	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey, "review", "verdict", "review_state"},
 }
 
 // The keel watch's scope (Boss 2026-11-16): holder-edited role-form keys,
@@ -559,13 +559,8 @@ type KeelState struct {
 	// shown in the form's key scope_error ("" when the keys are good).
 	Scope    *KeelScope `json:"scope,omitempty"`
 	ScopeErr string     `json:"scope_error,omitempty"`
-	// Review: the open-thread count on the reviewed doc as of the last
-	// fetch (rounds that fetch nothing keep it), and the review_state last
-	// written, so an unchanged state is never rewritten.
-	ReviewDoc  string `json:"review_doc,omitempty"`
-	ReviewOpen int    `json:"review_open,omitempty"`
-	ReviewLast string `json:"review_last,omitempty"`
-	ReviewErr  string `json:"review_err,omitempty"`
+	// ReviewErr is the review_error last written.
+	ReviewErr string `json:"review_err,omitempty"`
 }
 
 // EndWarnBefore: an expires_after end is announced this long ahead, once per
@@ -716,6 +711,7 @@ type Aria struct {
 	ContextLimit  int    `json:"context_limit,omitempty"`
 	TTLMS         int64  `json:"ttl_ms,omitempty"`
 	ExpiresAt     int64  `json:"expires_at,omitempty"`  // unix millis
+	ReapedAt      int64  `json:"reaped_at,omitempty"`   // unix millis; set: the aria is reaped (listed, not live)
 	Name          string `json:"name,omitempty"`        // forms
 	TargetAria    string `json:"target_aria,omitempty"` // a role's holder
 }

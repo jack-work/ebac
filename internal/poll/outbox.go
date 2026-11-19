@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -218,6 +219,11 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 // did. A plugin failure is every post's error for this round: each is retried
 // on the next.
 func (p *Poller) post(ctx context.Context, w *model.Critic, snap *model.Snapshot, todo map[string]*model.Post) {
+	if w.Mode == model.ModeKeel {
+		// The enforcing point: the writer must still hold the role form
+		// recorded when the post was written, checked right before sending.
+		p.recheckKeelRoles(ctx, w, todo)
+	}
 	if len(todo) == 0 {
 		return
 	}
@@ -239,6 +245,8 @@ func (p *Poller) post(ctx context.Context, w *model.Critic, snap *model.Snapshot
 		}
 	}
 }
+
+var keelRoleForm = regexp.MustCompile(`^@[0-9a-f]{32}$`)
 
 // KeelBodyMax is keel-web's comment limit (16384 chars) less room for the
 // door's stamp and the post marker.
@@ -263,6 +271,9 @@ func authorizeKeel(w *model.Critic, p *model.Post) string {
 	}
 	if why := model.KeelWriter(p.ByAria, p.ByRole); why != "" {
 		return why
+	}
+	if !keelRoleForm.MatchString(p.ByRoleForm) {
+		return "by_role_form: a keel post is written by `ebac post`, which checks the role and records its form"
 	}
 	if p.Resolve && p.ReplyTo == "" {
 		return "resolve needs reply_to: the thread to resolve"
@@ -295,4 +306,32 @@ func authorizeKeel(w *model.Critic, p *model.Post) string {
 		return fmt.Sprintf("path %s is outside this critic's paths %v", p.Path, w.Keel.Paths)
 	}
 	return ""
+}
+
+// recheckKeelRoles re-checks, right before sending, that each keel post's
+// writer still holds the role form recorded when the post was written. A
+// read failure holds the post for the next round (never sent unchecked); a
+// role no longer held, or resolving to another form, refuses it.
+func (p *Poller) recheckKeelRoles(ctx context.Context, w *model.Critic, todo map[string]*model.Post) {
+	check := p.PostCheck
+	if p.RoleCheck != nil {
+		check = p.RoleCheck
+	}
+	for id, post := range todo {
+		form, why, err := check(ctx, post.ByAria, post.ByRole)
+		switch {
+		case err != nil:
+			post.Error = "role check: " + err.Error()
+			delete(todo, id)
+		case why != "" && form == post.ByRoleForm:
+			post.Refused = "the holder of " + post.ByRole + " changed since the post was written (succession): " + why
+			delete(todo, id)
+		case why != "":
+			post.Refused = why
+			delete(todo, id)
+		case form != post.ByRoleForm:
+			post.Refused = fmt.Sprintf("role %s moved to another role form (%s, was %s when the post was written)", post.ByRole, form, post.ByRoleForm)
+			delete(todo, id)
+		}
+	}
 }

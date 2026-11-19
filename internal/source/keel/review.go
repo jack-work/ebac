@@ -2,6 +2,7 @@ package keel
 
 import (
 	"encoding/json"
+	"github.com/gluck/ebac/internal/model"
 	"sort"
 )
 
@@ -10,14 +11,14 @@ import (
 // verdict on the critic's role form. The critic derives review_state.
 //
 //	review              {"doc": "<path>", "reviewers": ["reviewer", ...]}   holder-edited
-//	verdict.<role>      {"verdict": "pass"|"changes"|"comment", "rev": "<sha>", "at": "<RFC3339>"}   written by each reviewer
+//	verdict.<role>      {"verdict", "rev", "at", "by_aria", "stamp"}   written by `ebac verdict` only (stamped)
 //	review_state        written by the critic (below)
 //
 // review_state is "pass" only when the doc's current revision is known, every
 // required reviewer's verdict is pass at it, and no thread on the doc is open; "changes"
 // when any required reviewer says changes at the current revision; else
 // "waiting", naming what is missing. Required reviewers are review.reviewers,
-// else every role with a verdict.
+// which must be named (no reviewers: never pass).
 
 const (
 	ReviewKey      = "review"
@@ -25,16 +26,20 @@ const (
 	ReviewStateKey = "review_state"
 )
 
-type ReviewConfig struct {
-	Doc       string   `json:"doc"`
-	Reviewers []string `json:"reviewers,omitempty"`
-}
+type (
+	ReviewConfig = model.KeelReviewConfig
+	Verdict      = model.KeelVerdict
+)
 
-type Verdict struct {
-	Verdict string `json:"verdict"`
-	Rev     string `json:"rev,omitempty"`
-	At      string `json:"at,omitempty"`
-}
+var (
+	ConfigStampFields = model.KeelConfigStampFields
+	StampFields       = model.KeelVerdictStampFields
+)
+
+// CheckKey carries, from the core to the plugin, the core's verification
+// of the review key and of each named reviewer's verdict (a request key,
+// never on the form): the plugin never sees the stamp key.
+const CheckKey = model.KeelReviewCheckKey
 
 type ReviewState struct {
 	State string `json:"state"`         // pass | changes | waiting
@@ -49,29 +54,33 @@ type ReviewState struct {
 	Pending    []string `json:"pending,omitempty"`    // verdict "comment": no decision yet
 	ChangesBy  []string `json:"changes_by,omitempty"` // verdict "changes" at the current revision
 	Invalid    []string `json:"invalid,omitempty"`    // a verdict value that is none of the three
+	// Unstamped verdicts were not written by `ebac verdict` (set by hand, or
+	// edited since): they count as missing.
+	Unstamped []string `json:"unstamped,omitempty"`
+	// ConfigUnstamped: the review key was not written by `ebac review` (or
+	// was edited since): never pass.
+	ConfigUnstamped bool `json:"config_unstamped,omitempty"`
 }
 
 // reviewState derives the state; index is the round's threads index.
-func reviewState(cfg ReviewConfig, verdicts map[string]Verdict, index map[string]IndexEntry, rev string) ReviewState {
-	st := ReviewState{Doc: cfg.Doc, Rev: rev, RevChecked: rev != ""}
+func reviewState(cfg ReviewConfig, cfgStamped bool, verdicts map[string]Verdict, index map[string]IndexEntry, rev string, stamped func(role string, v Verdict) bool) ReviewState {
+	st := ReviewState{Doc: cfg.Doc, Rev: rev, RevChecked: rev != "", ConfigUnstamped: !cfgStamped}
 	for _, e := range index {
 		if e.Path == cfg.Doc && !e.Resolved {
 			st.Open++
 		}
 	}
-	required := cfg.Reviewers
-	if len(required) == 0 {
-		for r := range verdicts {
-			required = append(required, r)
-		}
-	}
-	required = append([]string(nil), required...)
+	// The pool is named: never derived from whichever verdicts are present,
+	// so a removed or hand-set verdict cannot shrink it.
+	required := append([]string(nil), cfg.Reviewers...)
 	sort.Strings(required)
 	for _, r := range required {
 		v, ok := verdicts[r]
 		switch {
 		case !ok:
 			st.Missing = append(st.Missing, r)
+		case !stamped(r, v):
+			st.Unstamped = append(st.Unstamped, r)
 		case st.RevChecked && v.Rev != rev:
 			st.Stale = append(st.Stale, r)
 		case v.Verdict == "pass":
@@ -86,7 +95,7 @@ func reviewState(cfg ReviewConfig, verdicts map[string]Verdict, index map[string
 	switch {
 	case len(st.ChangesBy) > 0:
 		st.State = "changes"
-	case st.RevChecked && len(required) > 0 && st.Open == 0 && len(st.Missing)+len(st.Stale)+len(st.Pending)+len(st.Invalid) == 0:
+	case st.RevChecked && cfgStamped && len(required) > 0 && st.Open == 0 && len(st.Missing)+len(st.Unstamped)+len(st.Stale)+len(st.Pending)+len(st.Invalid) == 0:
 		st.State = "pass"
 	default:
 		st.State = "waiting"
