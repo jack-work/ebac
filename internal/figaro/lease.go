@@ -136,7 +136,20 @@ func (f *Figaro) renewTo(ctx context.Context, id string, ttl time.Duration) bool
 // LifetimeSock is the figaro-lifetime-broker's socket (interim for
 // figaro#155): it sets system.ttl / system.keepalive on ebac's own forms as
 // the owner, for uid ebac only. One JSON line each way.
-var LifetimeSock = "/run/user/1000/figaro-lifetime.sock"
+var LifetimeSock = lifetimeSock(os.Getenv)
+
+// DefaultLifetimeSock is the broker's socket, in its own directory so a unit
+// binds the directory (a bound socket FILE goes stale when the broker
+// re-creates it).
+const DefaultLifetimeSock = "/run/user/1000/figaro-lifetime/sock"
+
+// lifetimeSock is EBAC_LIFETIME_SOCK, else the default.
+func lifetimeSock(getenv func(string) string) string {
+	if s := getenv("EBAC_LIFETIME_SOCK"); s != "" {
+		return s
+	}
+	return DefaultLifetimeSock
+}
 
 // lifetimeWarned makes a broker failure log once per process: without the
 // broker a form simply keeps the lifetime it has, and ebac carries on.

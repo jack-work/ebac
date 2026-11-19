@@ -197,3 +197,21 @@ func TestRenewalOverTheBrokerCapSkipsAndSaysOnce(t *testing.T) {
 		t.Fatalf("within the cap: broker got %v", *got)
 	}
 }
+
+// The broker socket is EBAC_LIFETIME_SOCK when set, else the literal default in its own directory. RED if the
+// default path or the env name changes.
+func TestLifetimeSockFromEnvElseTheDefault(t *testing.T) {
+	env := map[string]string{}
+	get := func(k string) string { return env[k] }
+	if got := lifetimeSock(get); got != "/run/user/1000/figaro-lifetime/sock" {
+		t.Fatalf("default %q", got)
+	}
+	env["EBAC_LIFETIME_SOCK"] = "/x/sock"
+	if got := lifetimeSock(get); got != "/x/sock" {
+		t.Fatalf("env %q", got)
+	}
+	env["EBAC_LIFETIME_SOCK"] = ""
+	if got := lifetimeSock(get); got != "/run/user/1000/figaro-lifetime/sock" {
+		t.Fatalf("empty env %q", got)
+	}
+}

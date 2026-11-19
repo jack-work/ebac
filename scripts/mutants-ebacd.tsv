@@ -30,3 +30,5 @@ R1-late	internal/fleet/roster.go	297	return max(0, now.Sub(w.Runtime.LastPolled)
 R2-latefactor	internal/fleet/roster.go	289	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestLateCritic
 D1-default-40	cmd/ebac/daemon.go	41	"graphql": {PerHour: 40, Burst: 10, Floor: 1000},	"graphql": {PerHour: 41, Burst: 10, Floor: 1000},	./cmd/ebac	TestDaemonDefaults
 D2-bad-config	cmd/ebac/daemon.go	59	return DaemonConfig{}, fmt.Errorf("%s: %w", path, err)	return DefaultDaemonConfig(), nil	./cmd/ebac	TestDaemonConfigFile
+L1-env-name	internal/figaro/lease.go	148	getenv("EBAC_LIFETIME_SOCK")	getenv("EBAC_LIFETIME")	./internal/figaro	TestLifetimeSock
+L2-default	internal/figaro/lease.go	144	const DefaultLifetimeSock = "/run/user/1000/figaro-lifetime/sock"	const DefaultLifetimeSock = "/run/user/1000/figaro-lifetime.sock"	./internal/figaro	TestLifetimeSock
