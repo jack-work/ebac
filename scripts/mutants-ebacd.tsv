@@ -49,13 +49,13 @@ U2-read-error	internal/fleet/roster.go	351	\t\treturn nil, fmt.Errorf("read %s: 
 U3-two-forms	internal/fleet/roster.go	347	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U4-no-beat	internal/fleet/roster.go	362	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 T1-clears-seat	internal/form/formstate.go	673	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
-E1-until-boundary	internal/model/critic.go	585	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
-E2-renew	internal/model/critic.go	575	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
-E3-allclosed-needs-prs	internal/model/critic.go	595	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
-E4-warn-once	internal/model/critic.go	609	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
-E5-warn-window	internal/model/critic.go	566	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
-E6-purge-default	internal/model/critic.go	617	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
-E7-ended-no-repurge	internal/model/critic.go	622	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
+E1-until-boundary	internal/model/critic.go	592	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
+E2-renew	internal/model/critic.go	582	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
+E3-allclosed-needs-prs	internal/model/critic.go	602	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
+E4-warn-once	internal/model/critic.go	616	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
+E5-warn-window	internal/model/critic.go	573	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
+E6-purge-default	internal/model/critic.go	624	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
+E7-ended-no-repurge	internal/model/critic.go	629	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
 E8-sched-end	internal/sched/sched.go	202	\t\t\tif reason := w.EndReason(now); reason != "" {	\t\t\tif reason := ""; reason != "" {	./internal/sched	TestEndsAreEnforced
 E9-sched-purge	internal/sched/sched.go	171	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
 E10-sched-retry	internal/sched/sched.go	166	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
