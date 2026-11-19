@@ -37,7 +37,20 @@ func (p *Poller) Classify(ctx context.Context, w *model.Critic, events []model.E
 	if len(events) == 0 {
 		return nil, nil
 	}
-	return rules.Apply(events)
+	var roles map[string]string
+	if rules.NeedsRoles() {
+		lookup := p.RoleNames
+		if p.Roles != nil {
+			lookup = p.Roles
+		}
+		var err error
+		if roles, err = lookup(ctx); err != nil {
+			// role_in_path then matches nothing: those events fall through
+			// to the next rule (the default route), never lost.
+			fmt.Fprintf(p.Out, "%s: role names for role_in_path: %v\n", w.Name, err)
+		}
+	}
+	return rules.Apply(events, roles)
 }
 
 // Rules is the set in force for a critic, and the error to show on the form

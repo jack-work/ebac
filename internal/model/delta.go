@@ -75,8 +75,11 @@ type Event struct {
 	IsBot    bool   `json:"is_bot,omitempty"`
 	Stamped  bool   `json:"stamped,omitempty"`
 	Path     string `json:"path,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Detail   string `json:"detail,omitempty"`
+	// Route is the role (@form) a trigger rule's `to` sent this event to;
+	// empty means the critic's own alert target.
+	Route  string `json:"route,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Detail string `json:"detail,omitempty"`
 	// Text is the full message text, for trigger rules only (contains,
 	// regex): never persisted, because pending events are stored and the
 	// body already lives in the inbox.

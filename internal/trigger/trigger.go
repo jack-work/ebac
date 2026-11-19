@@ -21,9 +21,16 @@
 //	contains  case-insensitive substrings of the full message text.
 //	regex     a Go regular expression over the full text (add (?i) for case).
 //	kind      the event kind, e.g. teams_new, thread_new, comment_new, author_new.
+//	path      a glob over the event's path (keel: the file a thread is on);
+//	          '*' is one segment, '**' any number of segments, anywhere.
 //
 // Actions: wake (worth a turn), record (inbox only, never wakes), drop
 // (neither inbox nor wake), keep (leave the tier the source chose).
+//
+// Routing: a rule may add "to": "@role". The events it matches are delivered
+// to that role instead of the critic's alert target, one wake per role; a
+// rule can route without changing the tier ("action": "keep"). The default
+// rule may route too. A dropped event cannot be routed.
 //
 // The last rule must be {"default": true, "action": ...} and carry no match
 // fields. A rule set that does not parse is never applied: ebac keeps the last
@@ -89,8 +96,17 @@ type Rule struct {
 	Contains list   `json:"contains,omitempty"`
 	Regex    string `json:"regex,omitempty"`
 	Kind     list   `json:"kind,omitempty"`
-	Default  bool   `json:"default,omitempty"`
-	Action   Action `json:"action"`
+	Path     list   `json:"path,omitempty"`
+	// RoleInPath matches an event whose path names a role: a directory
+	// segment, or the file name without ".md", equal to a role name the
+	// caller knows; the event is routed to that role (the deepest segment
+	// wins). It takes no "to".
+	RoleInPath bool   `json:"role_in_path,omitempty"`
+	Default    bool   `json:"default,omitempty"`
+	Action     Action `json:"action"`
+	// To routes the event to this role (@form) instead of the critic's
+	// alert target; empty keeps the critic's own.
+	To string `json:"to,omitempty"`
 
 	re *regexp.Regexp
 }
@@ -98,7 +114,8 @@ type Rule struct {
 type Rules []Rule
 
 func (r Rule) hasMatch() bool {
-	return len(r.From) > 0 || len(r.NotFrom) > 0 || len(r.Contains) > 0 || r.Regex != "" || len(r.Kind) > 0
+	return len(r.From) > 0 || len(r.NotFrom) > 0 || len(r.Contains) > 0 || r.Regex != "" || len(r.Kind) > 0 ||
+		len(r.Path) > 0 || r.RoleInPath
 }
 
 // Parse validates a rule set. A value stored as a JSON string holding the list
@@ -134,6 +151,20 @@ func Parse(raw json.RawMessage) (Rules, error) {
 		default:
 			return nil, fmt.Errorf("%s: unknown action %q (wake|record|drop|keep)", at, r.Action)
 		}
+		if r.To != "" && (!strings.HasPrefix(r.To, "@") || len(r.To) < 2 || strings.ContainsAny(r.To, " \t\n")) {
+			return nil, fmt.Errorf("%s: to %q: want a role form (@id)", at, r.To)
+		}
+		if r.RoleInPath && r.To != "" {
+			return nil, fmt.Errorf("%s: role_in_path routes to the role it finds: drop the to", at)
+		}
+		if (r.To != "" || r.RoleInPath) && r.Action == Drop {
+			return nil, fmt.Errorf("%s: to with action drop: a dropped event goes nowhere", at)
+		}
+		for _, g := range r.Path {
+			if err := CheckGlob(g); err != nil {
+				return nil, fmt.Errorf("%s: path %q: %w", at, g, err)
+			}
+		}
 		if r.Default {
 			if r.hasMatch() {
 				return nil, fmt.Errorf("%s: a default rule takes no match fields", at)
@@ -160,7 +191,46 @@ func Parse(raw json.RawMessage) (Rules, error) {
 	return rs, nil
 }
 
-func (r Rule) matches(e model.Event) bool {
+// matches reports whether r matches e and, for role_in_path, the role found.
+func (r Rule) matches(e model.Event, roles map[string]string) (bool, string) {
+	if !r.matchFields(e) {
+		return false, ""
+	}
+	if !r.RoleInPath {
+		return true, r.To
+	}
+	role := RoleInPath(e.Path, roles)
+	return role != "", role
+}
+
+// RoleInPath is the role a path names: the deepest directory segment, or the
+// file name without ".md", that is a key of roles. "" when none is.
+func RoleInPath(p string, roles map[string]string) string {
+	if p == "" || len(roles) == 0 {
+		return ""
+	}
+	segs := strings.Split(p, "/")
+	segs[len(segs)-1] = strings.TrimSuffix(segs[len(segs)-1], ".md")
+	for i := len(segs) - 1; i >= 0; i-- {
+		if id, ok := roles[segs[i]]; ok && id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// NeedsRoles says a rule uses role_in_path, so the caller must pass the
+// role names it knows to Apply.
+func (rs Rules) NeedsRoles() bool {
+	for _, r := range rs {
+		if r.RoleInPath {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Rule) matchFields(e model.Event) bool {
 	if len(r.From) > 0 && !anySender(r.From, e) {
 		return false
 	}
@@ -185,6 +255,18 @@ func (r Rule) matches(e model.Event) bool {
 	}
 	if r.re != nil && !r.re.MatchString(text) {
 		return false
+	}
+	if len(r.Path) > 0 {
+		hit := false
+		for _, g := range r.Path {
+			if Glob(g, e.Path) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
+		}
 	}
 	if len(r.Kind) > 0 {
 		hit := false
@@ -228,14 +310,21 @@ func senderIs(name string, e model.Event) bool {
 	return id != "" && (low == id || bareGUID(low) == bareGUID(id))
 }
 
-// Apply runs the rules over events: the first matching rule decides each one.
-// It returns the events that survive (with their tier set) and those dropped.
-func (rs Rules) Apply(events []model.Event) (kept, dropped []model.Event) {
+// Apply runs the rules over events: the first matching rule decides each one,
+// its tier and its route. roles maps role names to role forms for
+// role_in_path (nil when no rule uses it). It returns the events that survive
+// (with their tier and route set) and those dropped.
+func (rs Rules) Apply(events []model.Event, roles map[string]string) (kept, dropped []model.Event) {
 	for _, e := range events {
 		act := Keep
+		e.Route = ""
 		for _, r := range rs {
-			if r.Default || r.matches(e) {
-				act = r.Action
+			if r.Default {
+				act, e.Route = r.Action, r.To
+				break
+			}
+			if ok, to := r.matches(e, roles); ok {
+				act, e.Route = r.Action, to
 				break
 			}
 		}

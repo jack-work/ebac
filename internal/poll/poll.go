@@ -49,6 +49,9 @@ type Poller struct {
 	// OnSpend, when set, receives what each plugin call spent (ebacd settles
 	// the budget ledger with it; a poll by hand leaves it nil).
 	OnSpend func(spent []budget.Spend)
+	// Roles replaces the role-name lookup for trigger role_in_path in tests
+	// (nil: RoleNames, read from the roster critic's form).
+	Roles func(ctx context.Context) (map[string]string, error)
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
@@ -494,35 +497,60 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 		return nil
 	}
 
-	target := w.AlertTarget()
 	holder := p.RoleHasHolder
 	if p.Holder != nil {
 		holder = p.Holder
 	}
-	if !holder(ctx, target) {
-		w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + target
-		fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
-		return nil // not an error exit: an empty seat is an operator condition
+	send := p.Fig.Send
+	if p.Send != nil {
+		send = p.Send
 	}
 
-	var msg string
-	var err error
-	if w.PingEvery() > 0 {
-		msg = PingLine(w)
-	} else {
-		msg, err = p.brief(ctx, w, snap)
-	}
-	if err == nil {
-		if p.Send != nil {
-			err = p.Send(ctx, target, msg)
-		} else {
-			err = p.Fig.Send(ctx, target, msg)
+	// One wake per route: a trigger rule's "to" sends its events to that
+	// role; the rest go to the critic's alert target. A route with nothing
+	// wake-worthy is forgiven like a quiet round; a route whose role has no
+	// holder or whose send fails keeps its events for the next round, and
+	// the routes delivered are not sent again.
+	all := w.Runtime.PendingEvents
+	var keep []model.Event
+	var errs []string
+	delivered := 0
+	for _, g := range routeGroups(all, w.AlertTarget()) {
+		if !(&model.Delta{Events: g.events}).WakeWorthy() {
+			continue
 		}
+		if !holder(ctx, g.target) {
+			w.Runtime.LastError = "role has no reachable target-aria; cast a figaro into " + g.target
+			fmt.Fprintf(p.Out, "%s: %s\n", w.Name, w.Runtime.LastError)
+			keep = append(keep, g.events...)
+			continue
+		}
+		w.Runtime.PendingEvents = g.events // brief and ping line render this route's events only
+		var msg string
+		var err error
+		if w.PingEvery() > 0 {
+			msg = PingLine(w)
+		} else {
+			msg, err = p.brief(ctx, w, snap)
+		}
+		if err == nil {
+			err = send(ctx, g.target, msg)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", g.target, err))
+			keep = append(keep, g.events...)
+			continue
+		}
+		delivered++
+		fmt.Fprintf(p.Out, "%s: alerted %s — %d event(s), %d wake-worthy\n",
+			w.Name, g.target, len(g.events), len((&model.Delta{Events: g.events}).Tier1()))
 	}
-	if err != nil {
+	w.Runtime.PendingEvents = keep
+	if len(errs) > 0 {
+		err := strings.Join(errs, "; ")
 		w.Runtime.RetryCount++
 		if w.Runtime.RetryCount >= maxRetries {
-			w.Runtime.LastError = fmt.Sprintf("delivery failed %d times, giving up on this batch: %v",
+			w.Runtime.LastError = fmt.Sprintf("delivery failed %d times, giving up on this batch: %s",
 				w.Runtime.RetryCount, err)
 			w.Runtime.PendingEvents = nil
 			w.Runtime.RetryCount = 0
@@ -530,14 +558,15 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 			return fmt.Errorf("%s: %s", w.Name, w.Runtime.LastError)
 		}
 		w.Runtime.NextRetryAt = time.Now().Add(backoffFor(w.Runtime.RetryCount))
-		w.Runtime.LastError = fmt.Sprintf("delivery attempt %d failed: %v", w.Runtime.RetryCount, err)
+		w.Runtime.LastError = fmt.Sprintf("delivery attempt %d failed: %s", w.Runtime.RetryCount, err)
 		return fmt.Errorf("%s: %s", w.Name, w.Runtime.LastError)
 	}
-
-	fmt.Fprintf(p.Out, "%s: alerted %s — %d event(s), %d wake-worthy\n",
-		w.Name, target, len(w.Runtime.PendingEvents), len(pending.Tier1()))
-	w.Runtime.PendingEvents = nil
-	w.Runtime.PendingSince = time.Time{}
+	if delivered == 0 {
+		return nil // every wake-worthy route lacks a holder: an operator condition, events kept
+	}
+	if len(keep) == 0 {
+		w.Runtime.PendingSince = time.Time{}
+	}
 	w.Runtime.RetryCount = 0
 	w.Runtime.NextRetryAt = time.Time{}
 	w.Runtime.LastDelivered = time.Now().UTC()
@@ -546,6 +575,33 @@ func (p *Poller) Deliver(ctx context.Context, w *model.Critic, snap *model.Snaps
 		w.Runtime.LastPing = w.Runtime.LastDelivered
 	}
 	return nil
+}
+
+// routeGroup is one wake: the role it goes to and its events.
+type routeGroup struct {
+	target string
+	events []model.Event
+}
+
+// routeGroups splits events by their trigger route, in first-seen order;
+// an event with no route goes to def, the critic's alert target.
+func routeGroups(events []model.Event, def string) []routeGroup {
+	var out []routeGroup
+	at := map[string]int{}
+	for _, e := range events {
+		t := e.Route
+		if t == "" {
+			t = def
+		}
+		i, ok := at[t]
+		if !ok {
+			i = len(out)
+			at[t] = i
+			out = append(out, routeGroup{target: t})
+		}
+		out[i].events = append(out[i].events, e)
+	}
+	return out
 }
 
 // PingHeld says a collect-mode critic must keep its wake-worthy events for

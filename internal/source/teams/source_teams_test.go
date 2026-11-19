@@ -80,7 +80,7 @@ func TestTeamsNewMessageWakesWithInboxItem(t *testing.T) {
 // migrated legacy quiet list.
 func teamsRules(t *testing.T, ev []model.Event, rules trigger.Rules) map[string]model.Event {
 	t.Helper()
-	kept, dropped := rules.Apply(ev)
+	kept, dropped := rules.Apply(ev, nil)
 	if len(dropped) != 0 {
 		t.Fatalf("teams defaults dropped %+v", dropped)
 	}

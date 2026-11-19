@@ -19,7 +19,7 @@ func mustParse(t *testing.T, s string) Rules {
 
 // tierOf runs one event through rules: "wake", "record", "drop", or "keep:<tier>".
 func tierOf(rs Rules, e model.Event) string {
-	kept, dropped := rs.Apply([]model.Event{e})
+	kept, dropped := rs.Apply([]model.Event{e}, nil)
 	if len(dropped) == 1 {
 		return "drop"
 	}
