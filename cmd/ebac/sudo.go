@@ -71,28 +71,20 @@ func refuseSudoFlags(sudoUID string, args []string) error {
 	return nil
 }
 
-// sudoPathPrefixes are the only PATH entries kept under the sudo door: sudo
-// keeps the caller's PATH (no secure_path), so a bare "systemctl", "gh" or
-// "git" would otherwise run a binary the caller chose, as uid ebac (review
-// d9d993be F3). The wrapper's own entries are store paths.
-var sudoPathPrefixes = []string{"/nix/store/", "/run/current-system/sw/bin", "/run/wrappers/bin", "/etc/profiles/per-user/ebac/bin"}
+// sudoPATH is the whole PATH under the sudo door: sudo keeps the caller's
+// PATH (no secure_path), so a bare "systemctl", "gh" or "git" would run a
+// binary the caller chose, as uid ebac (review d9d993be F3). Filtering the
+// caller's PATH is not enough: a prefix match passes "..", and /nix/store
+// takes caller content (nix-store --add; review 1d5cb0fa N1, N2). So the
+// caller's PATH is replaced whole by a build-time constant: pkgs/ebac.nix
+// sets it with -ldflags "-X main.sudoPATH=<store bin dirs of gh, git, tomb,
+// band-cred, systemd, coreutils>". Unset (a dev build), it is the
+// root-owned system profile and setuid wrappers only.
+var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin"
 
-// sudoPath keeps only the trusted entries of path.
-func sudoPath(path string) string {
-	var keep []string
-	for _, d := range strings.Split(path, ":") {
-		for _, p := range sudoPathPrefixes {
-			if d == p || strings.HasPrefix(d, p) && (strings.HasSuffix(p, "/") || strings.HasPrefix(d, p+"/")) {
-				keep = append(keep, d)
-				break
-			}
-		}
-	}
-	return strings.Join(keep, ":")
-}
-
-// sudoGate is main's sudo-door check: refuse path-picking flags and narrow
-// PATH, when SUDO_UID is set. getenv/setenv are os.Getenv/os.Setenv.
+// sudoGate is main's sudo-door check: refuse path-picking flags and replace
+// PATH with sudoPATH, when SUDO_UID is set. getenv/setenv are
+// os.Getenv/os.Setenv.
 func sudoGate(args []string, getenv func(string) string, setenv func(string, string) error) error {
 	uid := getenv("SUDO_UID")
 	if uid == "" {
@@ -101,5 +93,5 @@ func sudoGate(args []string, getenv func(string) string, setenv func(string, str
 	if err := refuseSudoFlags(uid, args); err != nil {
 		return err
 	}
-	return setenv("PATH", sudoPath(getenv("PATH")))
+	return setenv("PATH", sudoPATH)
 }

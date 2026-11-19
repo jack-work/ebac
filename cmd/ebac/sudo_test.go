@@ -77,26 +77,17 @@ func TestSudoDoorScansPastDoubleDashAndValuePositions(t *testing.T) {
 	}
 }
 
-// Under the door PATH keeps only store, system and wrapper entries (sudo keeps the caller's PATH: review F3).
-// RED if a caller directory survives or a trusted one is dropped.
-func TestSudoPathKeepsOnlyTrustedEntries(t *testing.T) {
-	in := "/home/gluck/bin:/nix/store/abc-gh/bin:/tmp/evil:/run/current-system/sw/bin:/run/wrappers/bin:/etc/profiles/per-user/ebac/bin:/etc/profiles/per-user/gluck/bin:/run/current-system/sw/binX"
-	want := "/nix/store/abc-gh/bin:/run/current-system/sw/bin:/run/wrappers/bin:/etc/profiles/per-user/ebac/bin"
-	if got := sudoPath(in); got != want {
-		t.Fatalf("got  %s\nwant %s", got, want)
-	}
-}
-
-// main's gate: with SUDO_UID it refuses a path flag and narrows PATH; without it, it does neither. RED if main stops
-// calling the scan, or the PATH narrowing goes (review F7: the wiring was untested).
+// main's gate: with SUDO_UID it refuses a path flag and REPLACES PATH whole with sudoPATH (a caller "..", store or
+// /tmp entry never survives: reviews F3, N1, N2); without it, it does neither. RED if main stops calling the scan,
+// or PATH is filtered or kept instead of replaced.
 func TestSudoGateWiring(t *testing.T) {
-	env := map[string]string{"SUDO_UID": "1000", "PATH": "/tmp/evil:/nix/store/x/bin"}
+	env := map[string]string{"SUDO_UID": "1000", "PATH": "/run/current-system/sw/bin/../../../../tmp/X:/nix/store/fake-systemctl/bin:/tmp/evil"}
 	get := func(k string) string { return env[k] }
 	set := func(k, v string) error { env[k] = v; return nil }
 	if err := sudoGate([]string{"show", "--socket", "/x"}, get, set); err == nil {
 		t.Fatal("a path flag passed the gate under sudo")
 	}
-	if err := sudoGate([]string{"show", "--critic", "x"}, get, set); err != nil || env["PATH"] != "/nix/store/x/bin" {
+	if err := sudoGate([]string{"show", "--critic", "x"}, get, set); err != nil || env["PATH"] != sudoPATH || sudoPATH != "/run/current-system/sw/bin:/run/wrappers/bin" {
 		t.Fatalf("under sudo: err %v PATH %q", err, env["PATH"])
 	}
 	env = map[string]string{"PATH": "/tmp/evil"}
