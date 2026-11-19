@@ -50,7 +50,10 @@ type Change struct {
 type RepointReq struct {
 	Critic, Alert string
 	From, To      string
-	DryRun        bool
+	// Only limits a From/To repoint to one critic (ebacd following an
+	// absorbed role for a with-role critic); "" = every critic.
+	Only   string
+	DryRun bool
 }
 
 // Forms resolves @ids against the store: a full id or a unique prefix of a
@@ -132,8 +135,12 @@ func Repoint(ctx context.Context, st *form.Store, forms Forms, req RepointReq) (
 	}
 
 	var critics []*model.Critic
-	if alert {
-		w, err := st.LoadCritic(ctx, req.Critic)
+	if alert || req.Only != "" {
+		name := req.Critic
+		if !alert {
+			name = req.Only
+		}
+		w, err := st.LoadCritic(ctx, name)
 		if err != nil {
 			return nil, err
 		}

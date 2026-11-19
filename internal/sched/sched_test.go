@@ -438,36 +438,51 @@ func TestEndsAreEnforcedBeforeScheduling(t *testing.T) {
 	}
 }
 
-// A with-role critic ends only when its role is gone; an unreadable role ends nothing; a present role keeps it. RED if
-// an unreadable role ends a standing critic, or a retired role does not end it.
-func TestWithRoleEnds(t *testing.T) {
+// A with-role critic: an ABSORBED role is followed (every address repointed to the absorber, the critic kept, not
+// ended); a RETIRED role ends it; an unreadable role ends nothing; a standing role keeps it as is. RED if absorption
+// ends a critic, a retirement does not, or an unreadable role ends one.
+func TestWithRoleFollowsAbsorptionEndsOnRetirement(t *testing.T) {
 	c := newClock()
 	mk := func(name, role string) *model.Critic {
 		w := critic(name, time.Minute)
 		w.Stop = model.StopConditions{WithRole: role}
 		return w
 	}
-	s := sched(c, ledger(t, c), newFake(), mk("held", "@held"), mk("retired", "@gone"), mk("unknown", "@err"))
+	absorbed := mk("absorbed", "@old")
+	s := sched(c, ledger(t, c), newFake(), mk("held", "@held"), mk("retired", "@gone"), mk("unknown", "@err"), absorbed)
 	var ended []endCall
+	var repointed []string
 	s.End = func(_ context.Context, w *model.Critic, reason string) error {
 		ended = append(ended, endCall{w.Name, reason})
 		w.Runtime.Archived = true
 		return nil
 	}
-	s.Role = func(_ context.Context, id string) (bool, string, error) {
+	s.Follow = func(_ context.Context, id string) (string, bool, string, error) {
 		switch id {
 		case "@gone":
-			return false, "retired: its form is gone", nil
+			return id, true, "retired: its form is gone", nil
 		case "@err":
-			return false, "", fmt.Errorf("role %s unreadable: connection closed", id)
+			return "", false, "", fmt.Errorf("role %s unreadable: connection closed", id)
+		case "@old":
+			return "@new", false, "", nil
 		}
-		return true, "", nil
+		return id, false, "", nil
+	}
+	s.Repoint = func(_ context.Context, w *model.Critic, from, to string) error {
+		repointed = append(repointed, w.Name+" "+from+"->"+to)
+		return nil
 	}
 	s.Tick(context.Background())
 	if len(ended) != 1 || ended[0] != (endCall{"retired", "role @gone retired: its form is gone"}) {
 		t.Fatalf("ended %+v, want only retired", ended)
 	}
-	if _, ok := s.Snapshot()["unknown"]; !ok {
-		t.Fatal("a critic whose role is unreadable was not kept scheduled")
+	if len(repointed) != 1 || repointed[0] != "absorbed @old->@new" || absorbed.Stop.WithRole != "@new" {
+		t.Fatalf("repointed %v (with_role now %q), want absorbed @old->@new", repointed, absorbed.Stop.WithRole)
+	}
+	snap := s.Snapshot()
+	for _, n := range []string{"held", "unknown", "absorbed"} {
+		if _, ok := snap[n]; !ok {
+			t.Errorf("%s is not kept scheduled", n)
+		}
 	}
 }

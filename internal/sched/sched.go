@@ -71,9 +71,12 @@ type Scheduler struct {
 	// expiry. nil: ends are not enforced (tests of the schedule alone).
 	End  func(ctx context.Context, w *model.Critic, reason string) error
 	Warn func(ctx context.Context, w *model.Critic, at time.Time) error
-	// Role says whether a with-role critic's role is still in the roster
-	// (fleet.RoleStanding); an error means unknown, and nothing ends.
-	Role func(ctx context.Context, id string) (present bool, why string, err error)
+	// Follow is a with-role critic's role now (fleet.FollowRole): followed
+	// along moved-to when absorbed, retired when gone; an error means
+	// unknown, and nothing ends. Repoint moves every address of an absorbed
+	// role on that critic to the absorbing role (fleet.Repoint, Only).
+	Follow  func(ctx context.Context, id string) (current string, retired bool, why string, err error)
+	Repoint func(ctx context.Context, w *model.Critic, from, to string) error
 
 	mu       sync.Mutex
 	entries  map[string]*Entry
@@ -172,18 +175,28 @@ func (s *Scheduler) ends(ctx context.Context, ws []*model.Critic, now time.Time)
 			}
 		case w.Runtime.Stopped:
 		case w.Stop.WithRole != "":
-			if s.Role == nil {
+			if s.Follow == nil {
 				continue
 			}
-			present, why, err := s.Role(ctx, w.Stop.WithRole)
-			if err != nil {
+			cur, retired, why, err := s.Follow(ctx, w.Stop.WithRole)
+			switch {
+			case err != nil:
 				fmt.Fprintf(s.Out, "%s: with-role end not judged: %v\n", w.Name, err)
-				continue
-			}
-			if !present {
+			case retired:
 				if err := s.End(ctx, w, "role "+w.Stop.WithRole+" "+why); err != nil {
 					fmt.Fprintf(s.Out, "%s: %v\n", w.Name, err)
 				}
+			case cur != w.Stop.WithRole:
+				// Absorbed: the critic follows its role, it does not end.
+				if s.Repoint == nil {
+					continue
+				}
+				if err := s.Repoint(ctx, w, w.Stop.WithRole, cur); err != nil {
+					fmt.Fprintf(s.Out, "%s: role %s absorbed into %s, repoint failed (retried next listing): %v\n", w.Name, w.Stop.WithRole, cur, err)
+					continue
+				}
+				fmt.Fprintf(s.Out, "%s: role %s absorbed into %s: repointed, critic kept\n", w.Name, w.Stop.WithRole, cur)
+				w.Stop.WithRole = cur
 			}
 		default:
 			if reason := w.EndReason(now); reason != "" {

@@ -143,8 +143,16 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 			p := base
 			return p.End(ctx, w, reason)
 		},
-		Role: func(ctx context.Context, id string) (bool, string, error) {
-			return fleet.RoleStanding(ctx, st.Fig.Form, id)
+		Follow: func(ctx context.Context, id string) (string, bool, string, error) {
+			return fleet.FollowRole(ctx, st.Fig.Form, id)
+		},
+		Repoint: func(ctx context.Context, w *model.Critic, from, to string) error {
+			forms, err := fleet.ListForms(ctx, st.Fig)
+			if err != nil {
+				return err
+			}
+			_, err = fleet.Repoint(ctx, st, forms, fleet.RepointReq{From: from, To: to, Only: w.Name})
+			return err
 		},
 		Warn: func(ctx context.Context, w *model.Critic, at time.Time) error {
 			p := base
