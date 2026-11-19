@@ -79,6 +79,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	if gh != nil {
 		if sp := gh.Spent(); sp.All > 0 {
 			rep.Logf("%s: %s", w.Name, sp) // a round that asked the forge: what it cost
+			rep.Spend = sp.Budget()
 		}
 	}
 	w.Runtime.BandHub = model.MustJSON(r.State)

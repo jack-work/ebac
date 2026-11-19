@@ -9,7 +9,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddKeelBranches mints a keel-branches critic: one child form per work
@@ -58,9 +57,6 @@ func cmdAddKeelBranches(ctx context.Context, g globals, args []string) error {
 	w.FormID = formID
 	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("keel branches %q: role %s, %s %s<owner>/<topic> against %s, reviewer %s, every %s\n", *name, formID, *repo, *prefix, *base, *reviewer, *every)
 	return nil

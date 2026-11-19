@@ -19,6 +19,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"github.com/gluck/ebac/internal/budget"
 
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
@@ -172,8 +173,6 @@ type Reply struct {
 	Forms []FormWrite `json:"forms,omitempty"`
 	// Wake are one-off messages for the alert target (blind, gone).
 	Wake []string `json:"wake,omitempty"`
-	// DisableTimer stops the critic's timer (the source stopped it for good).
-	DisableTimer bool `json:"disable_timer,omitempty"`
 	// Me is the operator's upstream login, if the plugin resolved it.
 	Me string `json:"me,omitempty"`
 	// Done ends the round early: effects are applied, nothing is delivered.
@@ -194,6 +193,11 @@ type Reply struct {
 
 	// Log lines go to the core's output, prefixed by nothing.
 	Log []string `json:"log,omitempty"`
+
+	// Spend is what the round spent on the critic's credential, by limit
+	// ("graphql" points, "rest" calls): the core settles its budget with it.
+	// A plugin that reports none settles at nothing spent.
+	Spend []budget.Spend `json:"spend,omitempty"`
 }
 
 // Logf appends one line to the reply's log.

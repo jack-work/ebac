@@ -92,21 +92,11 @@ func TestDescribeLimit(t *testing.T) {
 	}
 }
 
-// ebac set --every: the interval lands in every_sec and a running critic's timer is re-armed at it; a stopped one's
-// stays off; too short, under a keel feed's floor, or above the collect ping is refused and changes nothing.
+// ebac set --every: the interval lands in every_sec (ebacd takes it at the next round); too short, under a keel feed's floor, or above the collect ping is refused and changes nothing.
 func TestSetEvery(t *testing.T) {
 	w := &model.Critic{Name: "author-jack", EverySec: 120}
 	if err := setEvery(w, 5*time.Minute, 0); err != nil || w.EverySec != 300 {
 		t.Fatalf("5m: err %v every_sec %d", err, w.EverySec)
-	}
-	var armed []string
-	enable := func(name string, d time.Duration) error { armed = append(armed, name+" "+d.String()); return nil }
-	if ok, err := rearm(w, enable); !ok || err != nil || strings.Join(armed, ",") != "author-jack 5m0s" {
-		t.Fatalf("re-arm: %v %v %q", ok, err, armed)
-	}
-	w.Runtime.Stopped, armed = true, nil
-	if ok, _ := rearm(w, enable); ok || armed != nil {
-		t.Fatalf("a stopped critic's timer was armed: %q", armed)
 	}
 	for _, c := range []struct {
 		w     *model.Critic
@@ -120,23 +110,5 @@ func TestSetEvery(t *testing.T) {
 		if err := setEvery(c.w, c.every, c.ping); err == nil || c.w.EverySec != 60 {
 			t.Errorf("every %s ping %s keel %v: accepted (every_sec %d)", c.every, c.ping, c.w.Keel, c.w.EverySec)
 		}
-	}
-}
-
-// ebac rm of a critic whose form is gone (removed, or its log lost: "xwal: unknown trunk", 11-19) still drops its
-// timer and drop-ins by name, and refuses a name that is not a critic name.
-func TestRemoveLeftovers(t *testing.T) {
-	var did []string
-	disable := func(n string) error { did = append(did, "timer "+n); return nil }
-	dropIns := func(n string) error { did = append(did, "drop-ins "+n); return nil }
-	if err := removeLeftovers("livetest-set-17e13c59", disable, dropIns, form.ErrNoCritic); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(did, ",") != "timer livetest-set-17e13c59,drop-ins livetest-set-17e13c59" {
-		t.Fatalf("did %q", did)
-	}
-	did = nil
-	if err := removeLeftovers("../x", disable, dropIns, form.ErrNoCritic); err == nil || did != nil {
-		t.Fatalf("a bad name was acted on: %v %q", err, did)
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // The roster is a special role: one form holding a view of every active PR
@@ -34,7 +33,7 @@ type RosterRow struct {
 	Awaiting   int    `json:"awaiting_reply"`
 	Round      int    `json:"round"`
 	LastPolled string `json:"last_polled,omitempty"`
-	Timer      string `json:"timer"`
+	Every      string `json:"every"` // the interval ebacd polls it at
 	Health     string `json:"health"`
 	Pending    int    `json:"pending_delivery,omitempty"`
 }
@@ -92,8 +91,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 		if !w.Runtime.LastPolled.IsZero() {
 			row.LastPolled = w.Runtime.LastPolled.UTC().Format(time.RFC3339)
 		}
-		timer := systemd.TimerState(w.Name)
-		row.Timer = timer.Display
+		row.Every = w.Interval().String()
 
 		// Seat health is the SAME question the selfcheck asks, asked the
 		// same way. Two instruments that disagree about one fact are worse
@@ -118,7 +116,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 				row.Awaiting += c.AwaitingUs
 			}
 		}
-		row.Health = health(w, row, timer)
+		row.Health = health(w, row, time.Now())
 		if row.Health != "ok" {
 			sum.Unhealthy++
 		}
@@ -171,7 +169,7 @@ func SeatOf(ctx context.Context, fig seatReader, w *model.Critic) (seat string, 
 	return "", false, nil
 }
 
-func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {
+func health(w *model.Critic, row RosterRow, now time.Time) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason
@@ -179,8 +177,8 @@ func health(w *model.Critic, row RosterRow, timer systemd.TimerStatus) string {
 		return "no seat cast"
 	case strings.HasSuffix(row.Seat, "(unreachable)"):
 		return "seat aria is gone; re-cast"
-	case !timer.Armed():
-		return "timer not armed (" + timer.Display + ")"
+	case lateBy(w, now) > 0:
+		return fmt.Sprintf("late: last round %s ago, polls every %s", now.Sub(w.Runtime.LastPolled).Round(time.Second), w.Interval())
 	case w.Runtime.ConsecutiveFailures > 0:
 		return fmt.Sprintf("%d consecutive failures", w.Runtime.ConsecutiveFailures)
 	case len(w.Runtime.PendingEvents) > 0 && w.Runtime.RetryCount > 0:
@@ -284,4 +282,17 @@ func modeLabel(w *model.Critic) string {
 		s += "+a"
 	}
 	return s
+}
+
+// LateFactor: a live critic whose last round is older than this many
+// intervals is late (ebacd is not scheduling it, or its rounds fail to end).
+const LateFactor = 4
+
+// lateBy is how far past LateFactor intervals a live critic's last round is
+// (0: on time, never polled, stopped or archived).
+func lateBy(w *model.Critic, now time.Time) time.Duration {
+	if w.Runtime.Stopped || w.Runtime.Archived || w.Runtime.LastPolled.IsZero() {
+		return 0
+	}
+	return max(0, now.Sub(w.Runtime.LastPolled)-LateFactor*w.Interval())
 }

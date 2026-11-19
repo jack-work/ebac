@@ -8,7 +8,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddTeams mints a teams critic: role form, critic, seat, timer.
@@ -57,9 +56,6 @@ func cmdAddTeams(ctx context.Context, g globals, args []string) error {
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("teams critic %q: role %s, chat %s (%s), seat %s, every %s\n", *name, formID, *chat, *topic, *aria, *every)
 	return nil

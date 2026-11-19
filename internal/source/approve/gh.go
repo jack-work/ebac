@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/budget"
 	"os"
 	"strconv"
 	"strings"
@@ -118,6 +119,15 @@ func (s Spend) String() string {
 		left = strconv.Itoa(s.Remaining)
 	}
 	return fmt.Sprintf("graphql %d call(s), %d point(s), %s left", s.Calls, s.Points, left)
+}
+
+// Budget is the spend in the budget ledger's terms (GraphQL points; the
+// ledger assumes the hour window for the reported remaining).
+func (s Spend) Budget() []budget.Spend {
+	if s.Calls == 0 {
+		return nil
+	}
+	return []budget.Spend{{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining}}
 }
 
 // Spent is the GraphQL spend so far.

@@ -9,7 +9,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddReleases mints a release watch (W7 item 3): one event per new release
@@ -58,9 +57,6 @@ func cmdAddReleases(ctx context.Context, g globals, args []string) error {
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("release watch %q: role %s, %s, alert %s, every %s\n", *name, formID, *repo, w.AlertTarget(), *every)
 	return nil

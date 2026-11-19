@@ -60,6 +60,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	default:
 		return nil, fmt.Errorf("op %q not supported", req.Op)
 	}
+	rep.Spend = gh.Spent().Budget() // every op that asked the forge, posts included
 	return rep, nil
 }
 
@@ -100,7 +101,6 @@ func retireGone(rep *plugin.Reply, w *model.Critic, gone []model.PRRef, errs map
 	if len(w.PRs) == 0 {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "every pull request is gone: " + strings.Join(names, ", ")
-		rep.DisableTimer = true
 	}
 	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: %s gone (not found on %d consecutive rounds). The form's key gone says what to do.",
 		w.Name, strings.Join(names, ", "), prGoneAfter))

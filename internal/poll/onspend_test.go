@@ -1,0 +1,45 @@
+package poll
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/gluck/ebac/internal/budget"
+	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/plugin"
+)
+
+type spendCaller struct{ rep *plugin.Reply }
+
+func (c spendCaller) Call(context.Context, string, plugin.Request) (*plugin.Reply, error) {
+	// Through the wire, as a plugin process answers.
+	b, _ := json.Marshal(c.rep)
+	var r plugin.Reply
+	_ = json.Unmarshal(b, &r)
+	return &r, nil
+}
+
+// Every plugin call hands its reported spend to OnSpend (ebacd settles the budget with it); a reply with none
+// calls nothing; a hand poll (OnSpend nil) is unaffected. RED if call() stops forwarding Spend.
+func TestCallForwardsTheRoundsSpend(t *testing.T) {
+	w := &model.Critic{Name: "author-jack", Source: "github-author"}
+	sp := []budget.Spend{{Limit: "graphql", N: 3, Remaining: 4100}, {Limit: "rest", N: 2, Remaining: -1}}
+	var got [][]budget.Spend
+	p := &Poller{Plugins: spendCaller{&plugin.Reply{Spend: sp}}, OnSpend: func(s []budget.Spend) { got = append(got, s) }}
+	if _, err := p.call(context.Background(), w, plugin.Request{Op: plugin.OpRound}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || len(got[0]) != 2 || got[0][0] != sp[0] || got[0][1] != sp[1] {
+		t.Fatalf("forwarded %+v, want %+v", got, sp)
+	}
+	got = nil
+	p.Plugins = spendCaller{&plugin.Reply{}}
+	if _, err := p.call(context.Background(), w, plugin.Request{Op: plugin.OpRound}); err != nil || got != nil {
+		t.Fatalf("a reply without spend forwarded %+v (%v)", got, err)
+	}
+	p.OnSpend, p.Plugins = nil, spendCaller{&plugin.Reply{Spend: sp}}
+	if _, err := p.call(context.Background(), w, plugin.Request{Op: plugin.OpRound}); err != nil {
+		t.Fatalf("hand poll: %v", err)
+	}
+}

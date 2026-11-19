@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/internal/budget"
 	"io"
 	"sort"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -46,6 +46,9 @@ type Poller struct {
 	// as in tests); PauseFile overrides the bounce pause path ("" = PauseFile).
 	BackoffDir string
 	PauseFile  string
+	// OnSpend, when set, receives what each plugin call spent (ebacd settles
+	// the budget ledger with it; a poll by hand leaves it nil).
+	OnSpend func(spent []budget.Spend)
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
@@ -55,7 +58,11 @@ func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) 
 	}
 	req.Critic = *w
 	req.Me, req.GH, req.Host, req.DryRun = p.Me, p.GH, p.Host, p.DryRun
-	return p.Plugins.Call(ctx, name, req)
+	rep, err := p.Plugins.Call(ctx, name, req)
+	if rep != nil && p.OnSpend != nil && len(rep.Spend) > 0 {
+		p.OnSpend(rep.Spend)
+	}
+	return rep, err
 }
 
 // Poll runs exactly one reconciliation round. It is written to be safe to
@@ -78,6 +85,17 @@ func (p *Poller) Poll(ctx context.Context, name string) error {
 			fmt.Fprintf(p.Out, "%s: backing off from figaro until %s (attempt %d): round skipped\n", name, b.Until.UTC().Format(time.RFC3339), b.Attempt)
 			return nil
 		}
+	}
+	if p.BackoffDir != "" {
+		unlock, held, lerr := lockRound(p.BackoffDir, name)
+		if lerr != nil {
+			return lerr
+		}
+		if held {
+			fmt.Fprintf(p.Out, "%s: a round is already running (ebacd or a hand poll): skipped\n", name)
+			return nil
+		}
+		defer unlock()
 	}
 	err := p.pollRound(ctx, name)
 	if p.BackoffDir == "" {
@@ -281,10 +299,6 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 			p.WakeOnce(ctx, w, msg)
 		}
 	}
-	if rep.DisableTimer {
-		_ = systemd.DisableTimer(w.Name)
-	}
-
 	events, inbox := p.classify(ctx, w, rep)
 
 	if rep.Done || rep.Error != "" {
@@ -678,12 +692,8 @@ func (p *Poller) MaybeArchive(ctx context.Context, w *model.Critic, snap *model.
 		return fmt.Errorf("archive %s: %w", w.Name, err)
 	}
 	fmt.Fprintf(p.Out, "%s: ARCHIVED to %s (%s)\n", w.Name, dir, w.Runtime.StopReason)
-
-	// The timer is disabled and the form left standing for whoever still
-	// wants to read it; nothing renews its lease now, so it expires.
-	if err := systemd.DisableTimer(w.Name); err != nil {
-		fmt.Fprintf(p.Out, "%s: could not disable timer: %v\n", w.Name, err)
-	}
+	// ebacd schedules no archived critic; the form is left standing for
+	// whoever still wants to read it, and its lease runs out.
 	return nil
 }
 

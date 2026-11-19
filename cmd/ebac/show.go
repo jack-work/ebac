@@ -16,7 +16,6 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/systemd"
 	"github.com/gluck/ebac/internal/trigger"
 )
 
@@ -65,10 +64,10 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "CRITIC\tMODE\tSEAT\tPRS\tOPEN\tUNRES\tROUND\tTIMER\tHEALTH")
+	fmt.Fprintln(tw, "CRITIC\tMODE\tSEAT\tPRS\tOPEN\tUNRES\tROUND\tEVERY\tHEALTH")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n",
-			r.Critic, r.Mode, r.Seat, r.PRs, r.Open, r.Unresolved, r.Round, r.Timer, r.Health)
+			r.Critic, r.Mode, r.Seat, r.PRs, r.Open, r.Unresolved, r.Round, r.Every, r.Health)
 	}
 	tw.Flush()
 	fmt.Printf("\n%d critic(s), %d PRs (%d open), %d unresolved threads, %d awaiting a reply\n",
@@ -131,7 +130,7 @@ func cmdShow(ctx context.Context, g globals, args []string) error {
 	} else {
 		fmt.Printf("role      %s -> %s\n", w.FormID, seat)
 	}
-	fmt.Printf("timer     %s, next %s\n", systemd.TimerState(w.Name).Display, systemd.NextElapse(w.Name))
+	fmt.Printf("schedule  ebacd, every %s, last polled %s\n", w.Interval(), stamp(w.Runtime.LastPolled))
 	fmt.Printf("round     %d, last success %s\n", w.Runtime.Round, stamp(w.Runtime.LastSuccess))
 	fmt.Printf("stop when %s\n", brief.DescribeStop(w.Stop))
 	if w.Runtime.LastError != "" {

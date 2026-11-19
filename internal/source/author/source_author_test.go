@@ -93,7 +93,7 @@ func TestListAuthoredPRsArgsAndParse(t *testing.T) {
 	if n := strings.Count(string(b), "CALL "); n != 1 {
 		t.Fatalf("want ONE gh call (both searches aliased in one GraphQL query: one point), got %d:\n%s", n, b)
 	}
-	for _, want := range []string{"api graphql", "rateLimit{cost remaining}",
+	for _, want := range []string{"api graphql", "rateLimit{cost remaining resetAt}",
 		`s0: search(type:ISSUE, first:100, query:"repo:bic/aether is:pr author:Chiqun-Zhang is:open updated:>=2026-10-15T00:00:00Z sort:updated-desc")`,
 		`s1: search(type:ISSUE, first:100, query:"repo:bic/aether is:pr author:Chiqun-Zhang is:closed closed:>=2026-11-12T06:00:00Z updated:>=2026-10-15T00:00:00Z sort:updated-desc")`,
 	} {

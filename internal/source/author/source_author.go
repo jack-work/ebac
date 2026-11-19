@@ -49,6 +49,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		rep, err := round(ctx, gh, files, &req.Critic, req.Keys)
 		if rep != nil {
 			rep.Logf("%s: %s", req.Critic.Name, gh.Spent())
+			rep.Spend = gh.Spent().Budget()
 		}
 		return rep, err
 	case plugin.OpBrief:
@@ -135,7 +136,7 @@ func round(ctx context.Context, gh *forge.GH, files FilesFunc, w *model.Critic, 
 	if a.Until != nil && time.Now().After(*a.Until) {
 		w.Runtime.Stopped = true
 		w.Runtime.StopReason = "window ended " + a.Until.UTC().Format(time.RFC3339)
-		rep.DisableTimer, rep.Done = true, true
+		rep.Done = true
 		rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
 		return rep, nil
 	}

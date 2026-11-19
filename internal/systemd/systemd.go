@@ -5,64 +5,34 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gluck/ebac/internal/model"
 )
 
-// One TEMPLATE unit plus a per-instance drop-in, not a daemon that manages
-// threads.
-//
-// Why: a thread-managing daemon means reimplementing restart, backoff,
-// per-critic isolation and log separation that systemd already has, and one
-// panicking critic takes every other critic down with it. Type=oneshot also
-// gives free self-throttling — systemd will not start a second instance of
-// an instance that is still running, so a slow round delays the next one
-// instead of stampeding GitHub.
-//
-// (prangl's runbook says "do not create one heartbeat per PR". That rule
-// existed because prangl's state identity was the whole aria+PR-set tuple,
-// so splitting it fragmented one state file. Here state is per-CRITIC and a
-// critic may hold many PRs, so the rule is satisfied by grouping PRs into a
-// critic, not by collapsing critics into one timer.)
-
-const serviceTemplate = `[Unit]
-Description=ebac PR review monitor (%i)
-Documentation=file://%HOME%/dev/ebac/README.md
+// ebacd is ONE long-running user service that schedules every critic's
+// round (internal/sched). It replaced one ebac@<critic>.timer per critic
+// (2026-11-19): a timer per critic could not share a budget, so twenty
+// critics spent one GitHub account's quota with no one counting. Per-critic
+// isolation is kept where it matters: each round's source plugin is its own
+// sandboxed process, killed at the round's deadline.
+const ebacdService = `[Unit]
+Description=ebacd: schedule every ebac critic's round under the shared budget
 After=network-online.target
 
 [Service]
-Type=oneshot
-ExecStart=%BIN% poll --critic %i
-TimeoutStartSec=300
+Type=simple
+ExecStart=%BIN% daemon
+Restart=always
+RestartSec=10
 Environment=NO_COLOR=1
 Environment=GH_PAGER=
-# A user timer inherits almost nothing. ebac pins absolute paths to gh and
-# figaro in the critic file, but a subprocess of gh (git, its credential
-# helper) still needs a usable PATH.
 Environment=PATH=%PATH%
-# A poll failure is normal (network, expired token). Do not let it mark the
-# unit failed forever; the next timer tick is the retry.
-SuccessExitStatus=0
 StandardOutput=journal
 StandardError=journal
-`
-
-const timerTemplate = `[Unit]
-Description=ebac heartbeat (%i)
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
-# Stagger instances so twenty critics do not hit GitHub in the same second.
-RandomizedDelaySec=45s
-Unit=ebac@%i.service
 
 [Install]
-WantedBy=timers.target
+WantedBy=default.target
 `
 
 // The reconciler is a SINGLE unit, not a template: it is the only writer of
@@ -149,13 +119,9 @@ func InstallUnits(binPath string) (string, error) {
 	if err == nil {
 		binPath = abs
 	}
-	svc := strings.ReplaceAll(serviceTemplate, "%BIN%", binPath)
-	svc = strings.ReplaceAll(svc, "%HOME%", home)
+	svc := strings.ReplaceAll(ebacdService, "%BIN%", binPath)
 	svc = strings.ReplaceAll(svc, "%PATH%", unitPath(home))
-	if err := os.WriteFile(filepath.Join(dir, "ebac@.service"), []byte(svc), 0o644); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ebac@.timer"), []byte(timerTemplate), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "ebacd.service"), []byte(svc), 0o644); err != nil {
 		return "", err
 	}
 	rsvc := strings.ReplaceAll(reconcileService, "%BIN%", binPath)
@@ -180,59 +146,6 @@ func InstallUnits(binPath string) (string, error) {
 	return dir, nil
 }
 
-// setInterval writes a per-instance drop-in. A template unit cannot carry a
-// per-instance interval, but a drop-in on the instance can.
-func setInterval(name string, d time.Duration) error {
-	dir, err := unitDir()
-	if err != nil {
-		return err
-	}
-	dd := filepath.Join(dir, fmt.Sprintf("ebac@%s.timer.d", name))
-	if err := os.MkdirAll(dd, 0o755); err != nil {
-		return err
-	}
-	// The On*Sec= settings form ONE list: a drop-in that does not reset it ADDS
-	// to the template's 5 minutes, and ANY empty assignment resets the WHOLE list
-	// (monotonic and realtime), so the reset comes ONCE, before every value. Two
-	// resets (one per key) wiped OnUnitActiveSec and left a timer that fired once
-	// (author-chiqun, 2026-10-22). Jitter is scaled to the interval.
-	jitter := int(d.Seconds()) / 10
-	if jitter > 45 {
-		jitter = 45
-	}
-	body := fmt.Sprintf("[Timer]\nOnUnitActiveSec=\nOnBootSec=60s\nOnUnitActiveSec=%ds\nRandomizedDelaySec=%ds\nAccuracySec=5s\n",
-		int(d.Seconds()), jitter)
-	return os.WriteFile(filepath.Join(dd, "interval.conf"), []byte(body), 0o644)
-}
-
-// TemplateInterval is ebac@.timer's own OnUnitActiveSec: what a critic
-// without an interval drop-in runs at.
-const TemplateInterval = 5 * time.Minute
-
-// TimerInterval is the interval a critic's timer runs at: its drop-in's
-// OnUnitActiveSec, else the template's. A critic whose every_sec was edited
-// on its form without re-arming kept the old drop-in (review-* 11-17:
-// every_sec 900, timer 5 min); reconcile compares the two.
-func TimerInterval(name string) time.Duration {
-	dir, err := unitDir()
-	if err != nil {
-		return TemplateInterval
-	}
-	b, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("ebac@%s.timer.d", name), "interval.conf"))
-	if err != nil {
-		return TemplateInterval
-	}
-	d := TemplateInterval
-	for _, l := range strings.Split(string(b), "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "OnUnitActiveSec="); ok && v != "" {
-			if n, err := strconv.Atoi(strings.TrimSuffix(v, "s")); err == nil {
-				d = time.Duration(n) * time.Second // the last assignment wins, as in systemd
-			}
-		}
-	}
-	return d
-}
-
 func systemctl(args ...string) error {
 	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
 	out, err := cmd.CombinedOutput()
@@ -246,16 +159,6 @@ func systemctlOut(args ...string) (string, error) {
 	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
-}
-
-func EnableTimer(name string, interval time.Duration) error {
-	if err := setInterval(name, interval); err != nil {
-		return err
-	}
-	if err := systemctl("daemon-reload"); err != nil {
-		return err
-	}
-	return systemctl("enable", "--now", fmt.Sprintf("ebac@%s.timer", name))
 }
 
 // removeTimerDropIns deletes the critic's ebac@<name>.timer.d (its interval
@@ -281,8 +184,9 @@ func RemoveTimerDropIns(name string) error {
 
 func DisableTimer(name string) error {
 	unit := fmt.Sprintf("ebac@%s.timer", name)
+	_, _ = systemctlOut("stop", unit) // a runtime-started timer is active without being enabled
 	if _, err := systemctlOut("is-enabled", unit); err != nil {
-		// Not enabled: nothing to do, and that is not a failure.
+		// Not enabled: nothing more to do, and that is not a failure.
 		return nil
 	}
 	return systemctl("disable", "--now", unit)
@@ -344,37 +248,6 @@ func TimerState(name string) TimerStatus {
 	return t
 }
 
-// NextElapse reports when the timer next fires.
-//
-// `systemctl show -p NextElapseUSecRealtime` returns 0 for a MONOTONIC timer
-// (OnUnitActiveSec), which is exactly the kind ebac installs — so the
-// obvious property reads "no next elapse" for every healthy timer we own.
-// That is a false absence: the timer is scheduled and systemd knows when.
-// Ask the question the way that can actually return the answer.
-func NextElapse(name string) string {
-	unit := fmt.Sprintf("ebac@%s.timer", name)
-	if out, err := systemctlOut("show", unit, "-p", "NextElapseUSecRealtime", "--value"); err == nil {
-		if out != "" && out != "0" && out != "n/a" {
-			return out
-		}
-	}
-	out, err := systemctlOut("list-timers", unit, "--all", "--no-pager", "--no-legend")
-	if err != nil || out == "" {
-		return "-"
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, unit) {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 4 {
-			return strings.Join(fields[:4], " ")
-		}
-		return line
-	}
-	return "-"
-}
-
 // unitPath builds a PATH for the unit from the operator's current one,
 // keeping only entries that exist. Copying $PATH verbatim would bake in
 // whatever a shell happened to prepend.
@@ -397,4 +270,35 @@ func unitPath(home string) string {
 		keep = append(keep, d)
 	}
 	return strings.Join(keep, ":")
+}
+
+// RetireCriticTimers disables every per-critic ebac@<name>.timer still loaded
+// in this user manager and removes its interval drop-ins: ebacd schedules
+// every critic, and a leftover timer would run a second, unbudgeted round.
+// It returns the names it retired. Reverting the ebacd pin brings the timers
+// back (ebac reconcile R3 of the older ebac re-arms them).
+func RetireCriticTimers() ([]string, error) {
+	out, err := systemctlOut("list-unit-files", "ebac@*.timer", "--no-legend", "--no-pager")
+	if err != nil && out == "" {
+		return nil, fmt.Errorf("list ebac@ timers: %v", err)
+	}
+	var retired []string
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		name, ok := strings.CutPrefix(strings.TrimSuffix(f[0], ".timer"), "ebac@")
+		if !ok || name == "" || model.ValidName(name) != nil {
+			continue // the template itself (ebac@.timer), or not ours
+		}
+		if err := DisableTimer(name); err != nil {
+			return retired, err
+		}
+		if err := RemoveTimerDropIns(name); err != nil {
+			return retired, err
+		}
+		retired = append(retired, name)
+	}
+	return retired, nil
 }

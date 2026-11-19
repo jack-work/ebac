@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gluck/ebac/internal/forge/fakegql"
 	"github.com/gluck/ebac/internal/model"
@@ -120,7 +121,7 @@ func TestHelperProcess(t *testing.T) {
 				repo[m[1]] = map[string]any{"target": map[string]any{"oid": "sha-" + m[2]}}
 			}
 		}
-		b, _ := json.Marshal(map[string]any{"data": map[string]any{"rateLimit": map[string]int{"cost": 1, "remaining": 4000}, "repository": repo}})
+		b, _ := json.Marshal(map[string]any{"data": map[string]any{"rateLimit": map[string]any{"cost": 1, "remaining": 4000, "resetAt": "2026-11-19T07:00:00Z"}, "repository": repo}})
 		os.Stdout.Write(b)
 	case "paginate":
 		os.Stdout.WriteString(fakegql.PRs(q, func(_, cursor string) string {
@@ -325,7 +326,8 @@ func TestBranchTipsOneCall(t *testing.T) {
 	if tips["main"] != "sha-main" || tips["stack/x"] != "sha-stack/x" || tips["gone"] != "" || len(tips) != 3 {
 		t.Fatalf("tips %v", tips)
 	}
-	if sp := g.Spent(); sp.All != 1 || sp.Calls != 1 || sp.Points != 1 || sp.String() != "graphql 1 call(s), 1 point(s), 4000 left; rest 0 call(s)" {
+	if sp := g.Spent(); sp.All != 1 || sp.Calls != 1 || sp.Points != 1 || sp.String() != "graphql 1 call(s), 1 point(s), 4000 left; rest 0 call(s)" ||
+		!sp.ResetAt.Equal(time.Date(2026, 11, 19, 7, 0, 0, 0, time.UTC)) {
 		t.Fatalf("spend %+v %q", sp, sp)
 	}
 }

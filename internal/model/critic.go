@@ -133,9 +133,12 @@ type Critic struct {
 	Mode      Mode      `json:"mode"`
 	Host      string    `json:"host"`
 	CreatedAt time.Time `json:"created_at"`
-	// EverySec is the critic's poll interval as armed at creation. Reconcile
-	// re-arms a stopped timer with it; 0 means the default (5 minutes).
+	// EverySec is the critic's poll interval: ebacd runs a round this long
+	// after the last one ends; 0 means the default (5 minutes).
 	EverySec int `json:"every_sec,omitempty"`
+	// Priority is the critic's budget class when its credential's bucket is
+	// short: wake-critical, scan or backfill ("" = by source, sched.ClassOf).
+	Priority string `json:"priority,omitempty"`
 
 	PRs []PRRef `json:"prs"`
 

@@ -1,0 +1,329 @@
+// Package sched is ebacd's scheduler: it runs every live critic's round at
+// its interval in one long-running process (it replaces one systemd timer
+// per critic). Each round first reserves its estimated spend on the critic's
+// credential from the budget ledger; a short bucket defers the round to the
+// bucket's refill time. A bounded pool runs the rounds, a critic never runs
+// twice at once, and a round past its deadline gives its pool slot back.
+package sched
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/gluck/ebac/internal/budget"
+	"github.com/gluck/ebac/internal/model"
+)
+
+// Defaults. Each is pinned by a test that states the number.
+const (
+	DefaultPool         = 4
+	DefaultRoundTimeout = 10 * time.Minute
+	// DefaultListEvery is how often the critic set is re-read: a new critic
+	// starts within this, a removed one stops.
+	DefaultListEvery = time.Minute
+	// StartSpread bounds the first round of every critic after a start: each
+	// is due at a jittered moment within min(its interval, StartSpread), so
+	// a restart does not fire every critic in the same second.
+	StartSpread = 2 * time.Minute
+	// defaultEst is the first estimate of a critic never settled.
+	defaultEst = 1
+)
+
+// Runner runs one round of the named critic. settle is called with what the
+// round spent (it may be called more than once: once per plugin call).
+type Runner func(ctx context.Context, name string, settle func([]budget.Spend)) error
+
+// Entry is one critic's place in the schedule, as the heartbeat shows it.
+type Entry struct {
+	Next    time.Time `json:"next"`
+	Last    time.Time `json:"last,omitzero"`
+	Running bool      `json:"running,omitempty"`
+	// Hung: the round passed its deadline and has not returned; its slot
+	// is back in the pool, the critic is not run again until it returns.
+	Hung     bool               `json:"hung,omitempty"`
+	Deferred string             `json:"deferred,omitempty"` // why the last reservation waited
+	Err      string             `json:"err,omitempty"`
+	Est      map[string]float64 `json:"est,omitempty"`
+	Cred     string             `json:"cred,omitempty"`
+	Class    budget.Class       `json:"class,omitempty"`
+	interval time.Duration
+}
+
+// Scheduler runs the rounds. Fields are set before Run; zero values take
+// the defaults.
+type Scheduler struct {
+	List   func(ctx context.Context) ([]*model.Critic, error)
+	Run    Runner
+	Ledger *budget.Ledger
+	Now    func() time.Time
+	// Jitter returns a duration in [0, d): the start spread (rand in
+	// production, fixed in tests).
+	Jitter       func(d time.Duration) time.Duration
+	Pool         int
+	RoundTimeout time.Duration
+	ListEvery    time.Duration
+	Out          io.Writer
+	// Deadline gives a round its context (nil: RoundTimeout from now);
+	// tests cancel it by hand instead of waiting on a clock.
+	Deadline func(ctx context.Context) (context.Context, context.CancelFunc)
+
+	mu       sync.Mutex
+	entries  map[string]*Entry
+	listed   time.Time
+	slots    int // in use
+	inflight sync.WaitGroup
+}
+
+func (s *Scheduler) defaults() {
+	if s.Pool <= 0 {
+		s.Pool = DefaultPool
+	}
+	if s.RoundTimeout <= 0 {
+		s.RoundTimeout = DefaultRoundTimeout
+	}
+	if s.ListEvery <= 0 {
+		s.ListEvery = DefaultListEvery
+	}
+	if s.Out == nil {
+		s.Out = io.Discard
+	}
+	if s.Jitter == nil {
+		s.Jitter = func(time.Duration) time.Duration { return 0 }
+	}
+	if s.entries == nil {
+		s.entries = map[string]*Entry{}
+	}
+}
+
+// Tick is one pass: re-list when due, then start every due critic a pool
+// slot and its budget allow. It never blocks on a round.
+func (s *Scheduler) Tick(ctx context.Context) {
+	s.mu.Lock()
+	s.defaults()
+	now := s.Now()
+	needList := s.listed.IsZero() || now.Sub(s.listed) >= s.ListEvery
+	s.mu.Unlock()
+	if needList {
+		ws, err := s.List(ctx)
+		if err != nil {
+			fmt.Fprintf(s.Out, "ebacd: list critics: %v\n", err)
+		} else {
+			s.sync(ws, now)
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, name := range s.dueNames(now) {
+		if s.slots >= s.Pool {
+			return
+		}
+		e := s.entries[name]
+		g, until, ok := s.Ledger.Reserve(e.Cred, e.Class, e.Est)
+		if !ok {
+			e.Next = until
+			e.Deferred = fmt.Sprintf("budget %s short at %s, retry %s", e.Cred, now.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+			fmt.Fprintf(s.Out, "%s: reserve %s %v (%s) deferred until %s\n", name, e.Cred, e.Est, e.Class, until.UTC().Format(time.RFC3339))
+			continue
+		}
+		e.Deferred = ""
+		e.Running = true
+		s.slots++
+		s.inflight.Add(1)
+		go s.round(ctx, name, g)
+	}
+}
+
+// sync makes the entries the live critic set: new critics are due within the
+// start spread, removed, stopped or archived ones leave, a changed interval
+// or class takes effect at the next round.
+func (s *Scheduler) sync(ws []*model.Critic, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listed = now
+	seen := map[string]bool{}
+	for _, w := range ws {
+		if w.Runtime.Stopped || w.Runtime.Archived {
+			continue
+		}
+		seen[w.Name] = true
+		e, ok := s.entries[w.Name]
+		if !ok {
+			spread := min(w.Interval(), StartSpread)
+			e = &Entry{Next: now.Add(s.Jitter(spread)), Est: map[string]float64{}}
+			s.entries[w.Name] = e
+		}
+		e.interval, e.Cred, e.Class = w.Interval(), Credential(w), ClassOf(w)
+		for _, lim := range s.Ledger.LimitNames(e.Cred) {
+			if _, ok := e.Est[lim]; !ok {
+				e.Est[lim] = defaultEst
+			}
+		}
+	}
+	for name, e := range s.entries {
+		if !seen[name] && !e.Running {
+			delete(s.entries, name)
+		}
+	}
+}
+
+// dueNames is the critics due now and not running, most overdue first.
+func (s *Scheduler) dueNames(now time.Time) []string {
+	var out []string
+	for name, e := range s.entries {
+		if !e.Running && !e.Next.After(now) {
+			out = append(out, name)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := s.entries[out[i]], s.entries[out[j]]
+		if !a.Next.Equal(b.Next) {
+			return a.Next.Before(b.Next)
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
+// round runs one critic's round under its deadline. Past the deadline the
+// pool slot is released and the critic marked hung; it stays out of the
+// schedule until the round returns.
+func (s *Scheduler) round(ctx context.Context, name string, g budget.Grant) {
+	defer s.inflight.Done()
+	dl := s.Deadline
+	if dl == nil {
+		dl = func(c context.Context) (context.Context, context.CancelFunc) {
+			return context.WithTimeout(c, s.RoundTimeout)
+		}
+	}
+	rctx, cancel := dl(ctx)
+	defer cancel()
+	var spentMu sync.Mutex
+	var spent []budget.Spend
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Run(rctx, name, func(sp []budget.Spend) {
+			spentMu.Lock()
+			spent = append(spent, sp...)
+			spentMu.Unlock()
+		})
+	}()
+	var err error
+	select {
+	case err = <-done:
+	case <-rctx.Done():
+		if ctx.Err() != nil {
+			// ebacd is stopping, not a hung round: wait for it like any other.
+			s.finish(name, g, spent, &spentMu, <-done, true)
+			return
+		}
+		s.mu.Lock()
+		if e := s.entries[name]; e != nil {
+			e.Hung = true
+		}
+		s.slots--
+		s.mu.Unlock()
+		fmt.Fprintf(s.Out, "%s: round passed its %s deadline: killed, pool slot released\n", name, s.RoundTimeout)
+		err = <-done // the runner's own context is cancelled: wait for it to return
+		s.finish(name, g, spent, &spentMu, fmt.Errorf("deadline %s: %v", s.RoundTimeout, err), false)
+		return
+	}
+	s.finish(name, g, spent, &spentMu, err, true)
+}
+
+func (s *Scheduler) finish(name string, g budget.Grant, spent []budget.Spend, mu *sync.Mutex, err error, releaseSlot bool) {
+	mu.Lock()
+	sp := append([]budget.Spend(nil), spent...)
+	mu.Unlock()
+	s.Ledger.Settle(g, sp)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if releaseSlot {
+		s.slots--
+	}
+	e := s.entries[name]
+	if e == nil {
+		return
+	}
+	now := s.Now()
+	e.Running, e.Hung, e.Last = false, false, now
+	e.Next = now.Add(e.interval)
+	e.Err = ""
+	if err != nil {
+		e.Err = model.FirstLine(err.Error())
+		fmt.Fprintf(s.Out, "%s: %v\n", name, err)
+	}
+	// The next estimate is this round's spend, smoothed: half the last
+	// estimate, half what was spent (never below the default).
+	got := map[string]float64{}
+	for _, x := range sp {
+		got[x.Limit] += x.N
+	}
+	for _, lim := range s.Ledger.LimitNames(e.Cred) {
+		prev, ok := e.Est[lim]
+		if !ok {
+			prev = defaultEst
+		}
+		e.Est[lim] = max(defaultEst, (prev+got[lim])/2)
+	}
+}
+
+// Snapshot is every entry, for the heartbeat.
+func (s *Scheduler) Snapshot() map[string]Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]Entry{}
+	for n, e := range s.entries {
+		c := *e
+		c.Est = map[string]float64{}
+		for k, v := range e.Est {
+			c.Est[k] = v
+		}
+		out[n] = c
+	}
+	return out
+}
+
+// Wait blocks until every started round has returned.
+func (s *Scheduler) Wait() { s.inflight.Wait() }
+
+// Credential is the one place that knows which upstream credential a critic
+// spends: the budget is per credential because the upstream's quota is per
+// account. "" is unmetered.
+func Credential(w *model.Critic) string {
+	switch w.SourceName() {
+	case model.SourceReleases, model.SourceRoster, model.SourceKeelBranches, "keel-threads":
+		return "" // public github.com, figaro, keel: no shared account quota
+	case "teams-chat":
+		return "teams"
+	}
+	host := w.Host
+	if host == "" {
+		host = "github.com"
+	}
+	return "github:" + host
+}
+
+// ClassOf is a critic's priority class: its own priority if set, else by
+// what it serves (a waiting seat or asker first, scans next, backfill last).
+func ClassOf(w *model.Critic) budget.Class {
+	if w.Priority != "" {
+		return budget.Class(w.Priority)
+	}
+	switch w.SourceName() {
+	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":
+		return budget.WakeCritical
+	case model.SourceScout:
+		return budget.Scan
+	case model.SourceBandHub, model.SourceRoster, model.SourceReleases, model.SourceKeelBranches, "github-author":
+		return budget.Backfill
+	}
+	if w.Mode == model.ModeReviewer {
+		return budget.WakeCritical
+	}
+	return budget.Scan
+}

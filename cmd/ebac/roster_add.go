@@ -8,7 +8,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddRoster mints the role roster (plugin ebac-roster): a role form the
@@ -41,9 +40,6 @@ func cmdAddRoster(ctx context.Context, g globals, args []string) error {
 	}
 	if err := st.SeedTrigger(ctx, w); err != nil {
 		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("role roster %q: form %s (no seat; studiers: figaro study %s), every %s\n", *name, formID, formID, *every)
 	return nil

@@ -10,7 +10,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddBandHub mints a band-hub mirror (plugin ebac-bandhub): a role form its
@@ -51,9 +50,6 @@ func cmdAddBandHub(ctx context.Context, g globals, args []string) error {
 	}
 	if err := st.SeedTrigger(ctx, w); err != nil {
 		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("band-hub mirror %q: role %s (no seat; studiers: figaro study %s), hub %s, every %s\n", *name, formID, formID, *socket, *every)
 	return nil

@@ -7,38 +7,39 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
-// Regression: the roster's health column scored an unarmed critic as "ok"
-// because it compared TimerState against the literal "inactive/disabled",
-// while systemd actually says "not-found" for a unit that was never
-// installed. The selfcheck disagreed with the roster about one fact. Health
-// must be derived from the PROPERTY, so no unrecognised display string can
-// ever read as healthy.
-func TestUnarmedTimerIsNeverHealthy(t *testing.T) {
-	w := &model.Critic{Name: "x"}
+// A live critic whose last round is older than 4 intervals is late (ebacd not scheduling it, or its rounds not
+// ending); exactly 4 intervals is on time; never polled, stopped or archived is not late. RED if LateFactor or the
+// comparison moves.
+func TestLateCriticIsNeverHealthy(t *testing.T) {
+	now := time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC)
 	row := RosterRow{Seat: "abc123"}
-	for _, ts := range []systemd.TimerStatus{
-		{Display: "absent"},
-		{Display: "disabled", Known: true},
-		{Display: "enabled/inactive", Known: true, Enabled: true},
-		{Display: "something-systemd-invents-in-2027"},
+	for _, c := range []struct {
+		name    string
+		ago     time.Duration // since LastPolled; 0 = never polled
+		stopped bool
+		health  string
+	}{
+		{"exactly four 5-minute intervals is on time", 20 * time.Minute, false, "ok"},
+		{"one second past four intervals is late", 20*time.Minute + time.Second, false, "late: last round 20m1s ago, polls every 5m0s"},
+		{"never polled is not late", 0, false, "ok"},
+		{"stopped is not late", time.Hour, true, "stopped: "},
 	} {
-		if got := health(w, row, ts); got == "ok" {
-			t.Errorf("timer %+v scored healthy", ts)
+		w := &model.Critic{Name: "x", EverySec: 300}
+		if c.ago > 0 {
+			w.Runtime.LastPolled = now.Add(-c.ago)
 		}
-	}
-	armed := systemd.TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
-	if got := health(w, row, armed); got != "ok" {
-		t.Errorf("armed timer scored %q, want ok", got)
+		w.Runtime.Stopped = c.stopped
+		if got := health(w, row, now); got != c.health {
+			t.Errorf("%s: %q, want %q", c.name, got, c.health)
+		}
 	}
 }
 
 func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
-	armed := systemd.TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
-		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, armed); got == "ok" {
+		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, time.Now()); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)
 		}
 	}
@@ -77,7 +78,6 @@ func (f fakeSeats) AriaExists(_ context.Context, id string) bool { return f.aliv
 // alert role resolves to a live aria, and "no seat cast" / unreachable only when the ALERT role is empty / dead.
 // Control: a critic without --alert is still judged by its own form.
 func TestAlertCriticSeatIsTheAlertRole(t *testing.T) {
-	armed := systemd.TimerStatus{Active: true, Enabled: true, Known: true, Display: "armed"}
 	ctx := context.Background()
 	fig := fakeSeats{
 		forms: map[string]map[string]any{
@@ -104,16 +104,16 @@ func TestAlertCriticSeatIsTheAlertRole(t *testing.T) {
 		}
 		return RosterRow{Seat: seat}
 	}
-	if w := keel("@alert"); health(w, row(w), armed) != "ok" {
-		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), armed), row(w).Seat)
+	if w := keel("@alert"); health(w, row(w), time.Now()) != "ok" {
+		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), time.Now()), row(w).Seat)
 	}
-	if w := keel("@void"); health(w, row(w), armed) != "no seat cast" {
-		t.Fatalf("empty alert role: %q", health(w, row(w), armed))
+	if w := keel("@void"); health(w, row(w), time.Now()) != "no seat cast" {
+		t.Fatalf("empty alert role: %q", health(w, row(w), time.Now()))
 	}
-	if w := keel("@stale"); health(w, row(w), armed) == "ok" {
+	if w := keel("@stale"); health(w, row(w), time.Now()) == "ok" {
 		t.Fatalf("dead alert holder scored healthy")
 	}
-	if w := keel(""); health(w, row(w), armed) != "no seat cast" {
-		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), armed))
+	if w := keel(""); health(w, row(w), time.Now()) != "no seat cast" {
+		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), time.Now()))
 	}
 }

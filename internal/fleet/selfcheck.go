@@ -10,7 +10,6 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // The selfcheck is the instrument a develop-mode seat runs every heartbeat.
@@ -109,27 +108,8 @@ func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 		add("seat-occupied", "OK", fmt.Sprintf("%d/%d seats held", checked, checked))
 	}
 
-	// 3. Timer armed. The state directory and systemd can disagree, and a
-	//    critic file with no timer never runs again.
-	unarmed := []string{}
-	for _, w := range critics {
-		if w.Runtime.Archived || w.Runtime.Stopped {
-			continue
-		}
-		if s := systemd.TimerState(w.Name); !s.Armed() {
-			unarmed = append(unarmed, w.Name+"("+s.Display+")")
-		}
-	}
-	if live == 0 {
-		add("timer-armed", "UNTESTABLE", "0 live critics")
-	} else if len(unarmed) > 0 {
-		add("timer-armed", "WARN", fmt.Sprintf("%d/%d not armed: %v", len(unarmed), live, unarmed))
-	} else {
-		add("timer-armed", "OK", fmt.Sprintf("%d/%d armed", live, live))
-	}
-
-	// 4. Freshness. Stale beyond 4x the nominal interval means the timer is
-	//    firing but the round is not completing.
+	// 4. Freshness. Stale beyond 4x the nominal interval means ebacd is not
+	//    scheduling it, or the round is not completing.
 	stale := []string{}
 	for _, w := range critics {
 		if w.Runtime.Archived || w.Runtime.Stopped {
@@ -161,7 +141,7 @@ func Selfcheck(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 			continue
 		}
 		owing++
-		if w.Runtime.Archived || w.Runtime.Stopped || !systemd.TimerState(w.Name).Armed() {
+		if w.Runtime.Archived || w.Runtime.Stopped {
 			stranded = append(stranded, fmt.Sprintf("%s(%d events)", w.Name, len(w.Runtime.PendingEvents)))
 		}
 	}

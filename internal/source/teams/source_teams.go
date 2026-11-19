@@ -305,6 +305,6 @@ func teamsGone(rep *plugin.Reply, w *model.Critic, cause error) {
 	rep.Gone = append(rep.Gone, plugin.Gone{Key: "chat", Resource: "teams chat " + w.Chat.ID + " (" + w.Chat.Topic + ")",
 		Since: st.GoneSince, Error: cause.Error(), Action: action})
 	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: the chat %q is gone (%v). Polling stopped; the form's key gone says what to do.", w.Name, w.Chat.Topic, cause))
-	rep.DisableTimer, rep.Done = true, true
+	rep.Done = true
 	rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
 }

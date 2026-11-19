@@ -59,6 +59,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	if sp, ok := gh.(interface{ Spent() forge.Spend }); ok {
 		rep.Logf("%s: %s", w.Name, sp.Spent()) // what the round cost, also when it failed
+		rep.Spend = sp.Spent().Budget()
 	}
 	if err != nil {
 		// A round that could not read its source is a failure: last_success

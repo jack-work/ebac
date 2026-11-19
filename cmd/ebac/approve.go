@@ -10,7 +10,6 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddApprove mints an approve-requests critic (GO-20261112-secretary-ahmed):
@@ -56,9 +55,6 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 	w.FormID = formID
 	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("approve-requests %q: role %s, requests %s, %s for %s, ask in %s from %s, every %s\n",
 		*name, formID, *inputs, aw.Grant, aw.Principal, aw.ChatAlias, aw.AskFrom, *every)

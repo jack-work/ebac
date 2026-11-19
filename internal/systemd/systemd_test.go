@@ -5,9 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gluck/ebac/internal/model"
 )
 
 func TestRemoveTimerDropIns(t *testing.T) {
@@ -47,47 +44,6 @@ func TestRemoveTimerDropIns(t *testing.T) {
 	}
 }
 
-// A drop-in that does not reset OnUnitActiveSec ADDS to the template's 5 minutes.
-// Reconcile (R3) re-armed a 60 s Teams critic at a hard-coded 5m after a reboot.
-func TestEnableTimerResetsTheTemplateAndUsesTheCriticsInterval(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	w := &model.Critic{Name: "every-test", EverySec: 60}
-	if err := EnableTimer(w.Name, w.Interval()); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "ebac@every-test.timer.d", "interval.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(b)
-	// ANY empty On*Sec= assignment resets the whole timer list: exactly one, first.
-	if strings.Count(got, "Sec=\n") != 1 || !strings.HasPrefix(got, "[Timer]\nOnUnitActiveSec=\n") {
-		t.Fatalf("drop-in must reset the timer list exactly once, first:\n%s", got)
-	}
-	for _, want := range []string{"OnBootSec=60s\n", "OnUnitActiveSec=60s\n", "RandomizedDelaySec=6s\n"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("drop-in lacks %q:\n%s", want, got)
-		}
-	}
-	if (&model.Critic{}).Interval() != 5*time.Minute || (&model.Critic{EverySec: 600}).Interval() != 10*time.Minute {
-		t.Fatal("Interval default/explicit wrong")
-	}
-	// Jitter is capped at the template's 45 s.
-	if err := EnableTimer("every-test", 30*time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	b, _ = os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "ebac@every-test.timer.d", "interval.conf"))
-	if !strings.Contains(string(b), "RandomizedDelaySec=45s\n") {
-		t.Fatalf("jitter not capped:\n%s", b)
-	}
-}
-
 // An elapsed timer (all triggers in the past) is "active" to is-active but will
 // never fire again; it must not read as armed.
 func TestTimerStateElapsedIsNotArmed(t *testing.T) {
@@ -109,30 +65,57 @@ func TestTimerStateElapsedIsNotArmed(t *testing.T) {
 	}
 }
 
-// TimerInterval reads what the timer runs at: the template's 5 min without a drop-in (review-* 11-17: every_sec 900
-// set on the form, no drop-in rewritten, the timer stayed at 5 min), the drop-in's interval after EnableTimer.
-func TestTimerIntervalReadsTheDropIn(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	if d := TimerInterval("review-1"); d != TemplateInterval || !strings.Contains(timerTemplate, "OnUnitActiveSec=5min\n") || TemplateInterval != 5*time.Minute {
-		t.Fatalf("no drop-in: %s (template and TemplateInterval must agree)", d)
-	}
-	w := &model.Critic{Name: "review-1", EverySec: 900}
-	if err := EnableTimer(w.Name, 5*time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if d := TimerInterval(w.Name); d != 5*time.Minute || d == w.Interval() {
-		t.Fatalf("stale drop-in reads %s", d)
-	}
-	if err := EnableTimer(w.Name, w.Interval()); err != nil {
-		t.Fatal(err)
-	}
-	if d := TimerInterval(w.Name); d != 15*time.Minute {
-		t.Fatalf("after re-arm: %s", d)
+// RetireCriticTimers stops and disables every per-critic timer the manager lists, removes its drop-ins, skips the
+// template and names that are not critic names, and does nothing when there are none. RED if retirement skips a
+// timer, touches the template, or acts on a path-like name.
+func TestRetireCriticTimers(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		listing string
+		retired string
+		calls   string
+	}{
+		{"two critics and the template", "ebac@.timer static -\nebac@author-jack.timer enabled enabled\nebac@review-1.timer linked enabled\n",
+			"author-jack,review-1",
+			"list-unit-files ebac@*.timer --no-legend --no-pager|stop ebac@author-jack.timer|is-enabled ebac@author-jack.timer|disable --now ebac@author-jack.timer|stop ebac@review-1.timer|is-enabled ebac@review-1.timer|disable --now ebac@review-1.timer"},
+		{"none left", "", "", "list-unit-files ebac@*.timer --no-legend --no-pager"},
+		{"a path-like name is not ours", "ebac@../x.timer enabled enabled\n", "", "list-unit-files ebac@*.timer --no-legend --no-pager"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			bin := t.TempDir()
+			log := filepath.Join(bin, "calls")
+			script := "#!/bin/sh\nshift\necho \"$*\" >> " + log + "\ncase \"$1\" in\nlist-unit-files) printf '" + c.listing + "';;\nis-enabled) echo enabled;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin)
+			dd := filepath.Join(home, ".config", "systemd", "user", "ebac@author-jack.timer.d")
+			if err := os.MkdirAll(dd, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			got, err := RetireCriticTimers()
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if strings.Join(got, ",") != c.retired {
+				t.Fatalf("%s: retired %q, want %q", c.name, got, c.retired)
+			}
+			b, _ := os.ReadFile(log)
+			var calls []string
+			for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+				if l != "daemon-reload" { // follows each drop-in removal
+					calls = append(calls, l)
+				}
+			}
+			if got := strings.Join(calls, "|"); got != c.calls {
+				t.Fatalf("%s: calls\n%s\nwant\n%s", c.name, got, c.calls)
+			}
+			_, statErr := os.Stat(dd)
+			if (c.retired != "") != os.IsNotExist(statErr) {
+				t.Fatalf("%s: drop-ins left=%v", c.name, statErr == nil)
+			}
+		})
 	}
 }

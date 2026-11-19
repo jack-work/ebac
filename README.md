@@ -6,7 +6,7 @@ seat only when the delta earns it.
 ```
 GitHub ──poll──▶ snapshot (on disk, full)  ──diff──▶ delta ──▶ role form ──▶ figaro seat
                                                                   ▲
-                                                       systemd timer, one per critic
+                                      ebacd: one scheduler, one budget per credential
 ```
 
 ## The three decisions everything else follows from
@@ -39,13 +39,14 @@ outstanding feedback are recorded and never delivered.
 
 ```sh
 go install ./...
-ebac init                                    # systemd template units
+ebac init                                    # ebacd.service (+ reconcile, queue)
+systemctl --user enable --now ebacd.service
 
-ebac add --name aether --repo acme/widget --author @me \
+ebac add --name aether --repo acme/widget --author @me --arm=false \
     --mode develop --mint --outfit sonnet --issue-repo acme/widget
 
 ebac poll --critic aether --dry-run           # reconcile, persist, alert nobody
-systemctl --user enable --now ebac@aether.timer
+ebac resume --critic aether                   # ebacd schedules it within a minute
 ```
 
 Dry-run first, always. It performs the full round and persists observed state
@@ -154,11 +155,14 @@ ebac stop --critic W --reason "..."
 ```
 
 When every PR is closed or merged and the grace elapses, ebac sends the seat
-one closing notice, disables the timer, and moves the critic plus its final
+one closing notice, stops scheduling it, and moves the critic plus its final
 snapshot into `archive/<name>-<stamp>/`. **The evidence outlives the critic**: a
 reaped monitor that leaves no corpse cannot be audited afterwards.
 
 ## Robustness properties, and the incident behind each
+
+**Wake idempotency (system of record).** The critic's figaro role form is the system of record: a round's snapshot, round counter, outbox receipts and pending events commit as ONE version-checked patch (`form.Store.SaveRound` / `Commit`), so a lost or doubled trigger costs latency only (the next round recomputes the same delta). The wake itself does NOT commit with that patch: `figaro send` runs first and a second patch then clears `pending_events`, so a crash between the two re-sends the wake (at-least-once); the seat's ack is a separate mark (`read.<critic>`, `ebac ack`), not the cursor; after 5 failed sends (`maxRetries`) the batch is DROPPED with `last_error`, not kept; and the on-disk side state (`runtime/<form>.scout.json`, the PR detail file) is written after the form patch, not with it, so a crash between costs a re-read and may repeat events.
+
 
 - **A partial scan never infers a deletion.** One failed page marks the
   snapshot incomplete and the differ suppresses every removal, reporting the
@@ -234,7 +238,7 @@ stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout 
 failed round. Ops: `round` (fetch and diff: events, inbox items, source form keys, gone markers,
 the critic's source fields and snapshot), `post` (posts the core has already authorized), `brief`
 (the wake text). The core owns everything figaro: the role form, trigger rules, pending events,
-delivery, lease, succession, archival and timers.
+delivery, lease, succession, archival and the schedule (ebacd).
 
 **Sandbox.** Each plugin execs under bubblewrap (path fixed at build time,
 `-X github.com/gluck/ebac/internal/plugin.BwrapPath=...`, never PATH): own user, pid and mount

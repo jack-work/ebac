@@ -9,21 +9,37 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gluck/ebac/internal/budget"
 	"github.com/gluck/ebac/internal/model"
 )
 
 // GraphQL points are charged per CALL (min 1), not per node, and every gh
 // caller on the account shares one 5000 points/h bucket (2026-11-17: it ran
 // dry). So every read here is one aliased query for many PRs, and every query
-// asks rateLimit{cost remaining} so a round can log what it spent.
+// asks rateLimit{cost remaining resetAt} so a round can log and settle what it spent.
 
 // Spend is what this process has spent on GraphQL reads.
 type Spend struct {
 	All       int // every gh call (REST, GraphQL, writes)
 	Calls     int // GraphQL reads
 	Points    int
-	Remaining int // after the last call; -1 when no call has answered
+	Remaining int       // after the last call; -1 when no call has answered
+	ResetAt   time.Time // the account window's reset, from the last call (zero: none)
+}
+
+// Budget is the spend in the budget ledger's terms: GraphQL points (with the
+// account's remaining and reset when a call reported them) and REST calls.
+func (s Spend) Budget() []budget.Spend {
+	var out []budget.Spend
+	if s.Calls > 0 {
+		out = append(out, budget.Spend{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining, ResetAt: s.ResetAt})
+	}
+	if rest := s.All - s.Calls; rest > 0 {
+		out = append(out, budget.Spend{Limit: "rest", N: float64(rest), Remaining: -1})
+	}
+	return out
 }
 
 func (s Spend) String() string {
@@ -51,13 +67,13 @@ type gqlError struct {
 	Path    []any  `json:"path"`
 }
 
-// withRateLimit adds rateLimit{cost remaining} to a query's top selection.
+// withRateLimit adds rateLimit{cost remaining resetAt} to a query's top selection.
 func withRateLimit(q string) string {
 	i := strings.IndexByte(q, '{')
 	if i < 0 || strings.Contains(q, "rateLimit") {
 		return q
 	}
-	return q[:i+1] + " rateLimit{cost remaining} " + q[i+1:]
+	return q[:i+1] + " rateLimit{cost remaining resetAt} " + q[i+1:]
 }
 
 // query runs one GraphQL read, counts its cost and returns its data without
@@ -78,12 +94,14 @@ func (g *GH) query(ctx context.Context, q string) (json.RawMessage, []gqlError, 
 	g.spendMu.Lock()
 	g.spend.Calls++
 	var rl struct {
-		Cost      int `json:"cost"`
-		Remaining int `json:"remaining"`
+		Cost      int       `json:"cost"`
+		Remaining int       `json:"remaining"`
+		ResetAt   time.Time `json:"resetAt"`
 	}
 	if raw, ok := r.Data["rateLimit"]; ok && json.Unmarshal(raw, &rl) == nil {
 		g.spend.Points += rl.Cost
 		g.spend.Remaining = rl.Remaining
+		g.spend.ResetAt = rl.ResetAt
 	} else {
 		g.spend.Points++ // the minimum a call costs
 	}

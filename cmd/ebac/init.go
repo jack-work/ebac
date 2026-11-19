@@ -24,7 +24,7 @@ func cmdInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("installed ebac@.service and ebac@.timer in %s\n", dir)
-	fmt.Printf("units will exec: %s poll --critic <name>\n", self)
+	fmt.Printf("installed ebacd.service (and the reconcile and queue units) in %s\n", dir)
+	fmt.Printf("start it: systemctl --user enable --now ebacd.service (it runs: %s daemon)\n", self)
 	return nil
 }

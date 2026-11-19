@@ -89,6 +89,9 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	for _, l := range o.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}
+	if s, ok := rd.(interface{ Spent() approve.Spend }); ok {
+		rep.Spend = s.Spent().Budget()
+	}
 	if len(o.Q) > 0 && !req.DryRun {
 		rep.Forms = []plugin.FormWrite{{Inputs: true, Set: map[string]json.RawMessage{"q": model.MustJSON(o.Q)}}}
 	}

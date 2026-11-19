@@ -20,7 +20,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac init                                 install the systemd template units
   ebac add    --name N [--pr URL]...        create a critic (a role) over one or more PRs
               [--mode reviewer [--approve] [--clone DIR --worktree-root DIR] [--notes REF]]
-  ebac set --critic N --every D             poll interval of a live critic (every_sec); re-arms its timer now
+  ebac set --critic N --every D             poll interval of a critic (every_sec); ebacd takes it at the next round
   ebac set --critic N --ping-every D        collect mode on a live critic: ping the seat at most every D (0 = off)
   ebac set --critic N [--threads S] [--inbox S] [--mirror K]   a keel critic's scope (see add-keel); "" clears a key
   ebac add-teams --name N --chat ID|48:notes --topic T --aria SEAT [--every 60s] [--ping-every 30m (collect mode)]
@@ -84,7 +84,9 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             warn role, keel-branches reviewer); the seat stays ebac cast's
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
-  ebac poll   --critic N [--dry-run]         run one reconciliation round (systemd calls this)
+  ebac poll   --critic N [--dry-run]         run one round now, by hand (ebacd runs them on schedule)
+  ebac daemon [--config F] [--pool N] [--round-timeout D]
+                                            ebacd: schedule every critic under the shared budget (one per node)
   ebac cast   --critic N --aria ID           seat or re-seat the role (succession)
   ebac stop   --critic N [--reason R]        stop polling; state is kept
   ebac resume --critic N
@@ -179,6 +181,8 @@ func main() {
 		err = cmdShow(ctx, g, args)
 	case "poll":
 		err = cmdPoll(ctx, g, args)
+	case "daemon":
+		err = cmdDaemon(ctx, g, args)
 	case "cast":
 		err = cmdCast(ctx, g, args)
 	case "stop":

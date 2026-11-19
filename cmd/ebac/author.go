@@ -12,7 +12,6 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/author"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddAuthor mints an author watch: role form, critic, optional seat, timer.
@@ -110,9 +109,6 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("author watch %q: role %s, %s in %s since %s, alert %s, every %s\n", *name, formID, ref.Login,
 		strings.Join(ref.Repos, ","), ref.Since.UTC().Format(time.RFC3339), w.AlertTarget(), *every)

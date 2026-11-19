@@ -118,26 +118,15 @@ func Reconcile(ctx context.Context, st *form.Store, fig *figaro.Figaro, out io.W
 			}
 		}
 
-		// R3: a live critic with no armed timer never runs again, and nothing
-		// else in the system notices.
-		if !c.Runtime.Stopped {
-			if ts := systemd.TimerState(c.Name); !ts.Armed() {
-				if dryRun {
-					add("R3-timer", c.Name, "timer "+ts.Display, "would re-arm", false)
-				} else if err := systemd.EnableTimer(c.Name, c.Interval()); err != nil {
-					add("R3-timer", c.Name, "timer "+ts.Display, "re-arm FAILED: "+err.Error(), false)
-				} else {
-					add("R3-timer", c.Name, "timer was "+ts.Display, "re-armed at "+c.Interval().String(), true)
-				}
-			} else if have := systemd.TimerInterval(c.Name); intervalDrift(have, c.Interval()) {
-				// every_sec changed on the form without a re-arm: the timer kept its old interval.
-				if dryRun {
-					add("R3-interval", c.Name, "timer every "+have.String()+", every_sec "+c.Interval().String(), "would re-arm", false)
-				} else if err := systemd.EnableTimer(c.Name, c.Interval()); err != nil {
-					add("R3-interval", c.Name, "timer every "+have.String(), "re-arm FAILED: "+err.Error(), false)
-				} else {
-					add("R3-interval", c.Name, "timer every "+have.String(), "re-armed at "+c.Interval().String(), true)
-				}
+		// R3: ebacd schedules every critic; a per-critic timer left armed from
+		// before it would run a second, unbudgeted round. Disable it.
+		if ts := systemd.TimerState(c.Name); ts.Armed() {
+			if dryRun {
+				add("R3-timer", c.Name, "timer "+ts.Display, "would disable (ebacd schedules it)", false)
+			} else if err := systemd.DisableTimer(c.Name); err != nil {
+				add("R3-timer", c.Name, "timer "+ts.Display, "disable FAILED: "+err.Error(), false)
+			} else {
+				add("R3-timer", c.Name, "timer was "+ts.Display, "disabled (ebacd schedules it)", true)
 			}
 		}
 	}
@@ -175,7 +164,3 @@ func printReconcile(out io.Writer, rep *ReconcileReport) {
 		fmt.Fprintln(out, "  nothing to rectify")
 	}
 }
-
-// intervalDrift says whether an armed timer runs at another interval than the
-// critic's every_sec says (edited on the form, never re-armed).
-func intervalDrift(have, want time.Duration) bool { return have != want }

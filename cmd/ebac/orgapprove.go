@@ -12,7 +12,6 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/orgapprove"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddOrgApprove mints an org-approve critic (ORG-APPROVE, the Boss
@@ -56,9 +55,6 @@ func cmdAddOrgApprove(ctx context.Context, g globals, args []string) error {
 	w.FormID = formID
 	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("org-approve %q: role %s, board %s, %d login(s), taps = %s for %s approved by %s, every %s\n",
 		*name, formID, *board, len(ow.Logins), ow.Grant, ow.Principal, ow.Approver, *every)

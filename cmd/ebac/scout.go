@@ -13,7 +13,6 @@ import (
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/relevance"
 	"github.com/gluck/ebac/internal/source/scout"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddScout mints the GitHub scout (source github-scout): no seat; it
@@ -91,9 +90,6 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	w.FormID = formID
 	if err := st.SaveCritic(ctx, w); err != nil {
 		return err
-	}
-	if err := systemd.EnableTimer(*name, *every); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	fmt.Printf("scout %q: role %s, %s in %s, board %s (read-only), inputs %s, every %s\n", *name, formID,
 		strings.Join(sw.Authors, ", "), sw.Repo, *board, *inputs, *every)

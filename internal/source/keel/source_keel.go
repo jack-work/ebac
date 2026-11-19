@@ -531,9 +531,9 @@ func keelGone(rep *plugin.Reply, w *model.Critic, cause error) {
 	w.Runtime.Stopped = true
 	w.Runtime.StopReason = fmt.Sprintf("keel threads gone since %s after %d consecutive answers: %v", st.GoneSince, st.GoneStreak, cause)
 	action := "polling stopped. If the repo is not on ebac's keel allowlist (ebacThreadRepos) or the door is down, fix that, then " +
-		"ebac resume --critic " + w.Name + " and re-arm its timer; otherwise remove it: ebac rm --critic " + w.Name
+		"ebac resume --critic " + w.Name + "; otherwise remove it: ebac rm --critic " + w.Name
 	rep.Gone = append(rep.Gone, plugin.Gone{Key: "keel", Resource: "keel threads of " + w.Keel.Repo, Since: st.GoneSince, Error: cause.Error(), Action: action})
 	rep.Wake = append(rep.Wake, fmt.Sprintf("ebac %s: keel threads of %s are gone (%v). Polling stopped; form %s's key gone says what to do.", w.Name, w.Keel.Repo, cause, w.FormID))
-	rep.DisableTimer, rep.Done = true, true
+	rep.Done = true
 	rep.Logf("%s: %s", w.Name, w.Runtime.StopReason)
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,7 +17,6 @@ import (
 	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/internal/source/orgapprove"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // ---------- add ----------
@@ -41,7 +39,7 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	grace := fs.Duration("archive-grace", 6*time.Hour, "keep polling this long after the last PR closes")
 	noArchive := fs.Bool("no-archive", false, "do not archive when all PRs close")
 	maxFail := fs.Int("max-failures", 20, "stop after N consecutive failed rounds (0 = never)")
-	arm := fs.Bool("arm", true, "enable the systemd timer immediately (in ebac's own user manager); --arm=false to stage only")
+	arm := fs.Bool("arm", true, "schedule it now (ebacd starts it within a minute); --arm=false creates it stopped, to stage only")
 	write := fs.Bool("write", false, "grant this critic authority to reply/comment/push on its PRs (never approve/merge/close)")
 	approve := fs.Bool("approve", false, "reviewer mode: may approve PRs it did not author")
 	clone := fs.String("clone", "", "reviewer mode: local clone to fetch PR heads through")
@@ -174,14 +172,11 @@ func cmdAdd(ctx context.Context, g globals, args []string) error {
 	fmt.Printf("stop when: %s\n", brief.DescribeStop(w.Stop))
 
 	if *arm {
-		if err := systemd.EnableTimer(w.Name, *interval); err != nil {
-			return fmt.Errorf("critic created but timer not armed: %w", err)
-		}
-		fmt.Printf("armed: ebac@%s.timer every %s\n", w.Name, *interval)
+		fmt.Printf("scheduled: ebacd polls it every %s, the first round within a minute\n", *interval)
 	} else {
-		fmt.Printf("\nnot armed (--arm=false). Dry-run first; ebac reconcile arms it within 30 min, or arm now:\n")
+		fmt.Printf("\nstaged stopped (--arm=false). Dry-run first, then schedule it:\n")
 		fmt.Printf("  ebac poll --critic %s --dry-run\n", w.Name)
-		fmt.Printf("  ebac reconcile   (ebac's timers live in ebac's own user manager, not gluck's)\n")
+		fmt.Printf("  ebac resume --critic %s\n", w.Name)
 	}
 	return nil
 }
@@ -227,8 +222,7 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 }
 
 // cmdSet edits a live critic's configuration. --every D is its poll interval
-// (every_sec), its timer re-armed at once (a stopped critic keeps it for
-// resume). --ping-every D turns COLLECT
+// (every_sec), which ebacd takes at the critic's next round. --ping-every D turns COLLECT
 // mode on (gather every round, ping the seat at most every D, only when
 // something woke) or off (0). It must be 0 or at least the poll interval.
 // --threads, --inbox and --mirror set a keel critic's scope (its form keys).
@@ -236,7 +230,7 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 	name := fs.String("critic", "", "critic name")
 	pingEvery := fs.Duration("ping-every", -1, "COLLECT mode ping interval, e.g. 30m; 0 turns collect mode off")
-	every := fs.Duration("every", 0, "poll interval, e.g. 5m: writes every_sec and re-arms the timer now")
+	every := fs.Duration("every", 0, "poll interval, e.g. 5m: writes every_sec; ebacd takes it at the next round")
 	threads, inbox, mirror := scopeFlags(fs)
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	logins := fs.String("logins", "", "org-approve critic: the org's GHE logins, comma-separated (replaces the list)")
@@ -279,14 +273,10 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 		if err := st.SaveCritic(ctx, w); err != nil {
 			return err
 		}
-		armed, err := rearm(w, systemd.EnableTimer)
-		switch {
-		case err != nil:
-			return fmt.Errorf("%s: every_sec %d saved, timer not re-armed: %w", w.Name, w.EverySec, err)
-		case armed:
-			fmt.Printf("%s: polls every %s; timer re-armed\n", w.Name, w.Interval())
-		default:
-			fmt.Printf("%s: polls every %s from its resume (stopped: timer left off)\n", w.Name, w.Interval())
+		if w.Runtime.Stopped {
+			fmt.Printf("%s: polls every %s from its resume (stopped)\n", w.Name, w.Interval())
+		} else {
+			fmt.Printf("%s: polls every %s from its next round (ebacd)\n", w.Name, w.Interval())
 		}
 	}
 	if given["ask-name"] {
@@ -361,15 +351,6 @@ func setEvery(w *model.Critic, every, ping time.Duration) error {
 
 // MinEvery is the shortest poll interval ebac set accepts.
 const MinEvery = 10 * time.Second
-
-// rearm re-arms a running critic's timer at its interval; a stopped critic's
-// stays off (resume arms it, through reconcile).
-func rearm(w *model.Critic, enable func(string, time.Duration) error) (bool, error) {
-	if w.Runtime.Stopped {
-		return false, nil
-	}
-	return true, enable(w.Name, w.Interval())
-}
 
 // checkPingEvery: a ping interval shorter than the poll interval would never
 // hold anything back.
@@ -458,7 +439,6 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	w.Runtime.Stopped = stop
 	if stop {
 		w.Runtime.StopReason = *reason
-		_ = systemd.DisableTimer(w.Name)
 	} else {
 		w.Runtime.StopReason = ""
 		w.Runtime.ConsecutiveFailures = 0
@@ -468,7 +448,7 @@ func cmdStopResume(ctx context.Context, g globals, args []string, stop bool) err
 	}
 	fmt.Printf("%s: %sped (%s)\n", w.Name, verb, w.Runtime.StopReason)
 	if !stop {
-		fmt.Printf("re-armed by the next ebac reconcile (within 30 min), or now: ebac reconcile\n")
+		fmt.Printf("ebacd schedules it within a minute\n")
 	}
 	return nil
 }
@@ -483,17 +463,8 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	w, err := st.LoadCritic(ctx, *name)
-	if errors.Is(err, form.ErrNoCritic) {
-		// The form is gone (removed, or its log lost): nothing to archive, but its timer and drop-ins still fire and
-		// still show on the fleet view. Drop them by name.
-		return removeLeftovers(*name, systemd.DisableTimer, systemd.RemoveTimerDropIns, err)
-	}
 	if err != nil {
-		return err
-	}
-	_ = systemd.DisableTimer(w.Name)
-	if err := systemd.RemoveTimerDropIns(w.Name); err != nil {
-		fmt.Fprintf(os.Stderr, "ebac: %s: %v\n", w.Name, err)
+		return err // a critic whose form is gone is not scheduled: nothing to remove
 	}
 	snap, _ := st.LoadSnapshot(ctx, w.Name)
 	w.Runtime.Stopped, w.Runtime.Archived = true, true
@@ -521,22 +492,6 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 	} else {
 		fmt.Printf("role form %s left standing; it expires with its lease (or: figaro kill %s)\n", w.FormID, w.FormID)
 	}
-	return nil
-}
-
-// removeLeftovers drops what a critic without a form leaves on the box: its
-// timer and interval drop-ins. why is the lookup error, said with the result.
-func removeLeftovers(name string, disable, dropIns func(string) error, why error) error {
-	if err := model.ValidName(name); err != nil {
-		return err
-	}
-	if err := disable(name); err != nil {
-		return fmt.Errorf("%v; its timer: %w", why, err)
-	}
-	if err := dropIns(name); err != nil {
-		return fmt.Errorf("%v; its drop-ins: %w", why, err)
-	}
-	fmt.Printf("%s: no form (%v): timer disabled and drop-ins removed\n", name, why)
 	return nil
 }
 

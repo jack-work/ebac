@@ -93,6 +93,9 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	for _, l := range o.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}
+	if s, ok := any(gh).(interface{ Spent() Spend }); ok {
+		rep.Spend = s.Spent().Budget()
+	}
 	if len(o.Results) > 0 {
 		set := map[string]any{}
 		for id, r := range o.Results {

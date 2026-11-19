@@ -1,0 +1,32 @@
+# ebacd step 2 mutants: id file line old new package test-regex
+B1-keep	internal/budget/budget.go	179	keep := l.cfg.keep(cl) * lim.Burst	keep := 0.0	./internal/budget	TestReserveTable
+B2-clamp	internal/budget/budget.go	175	need, asked := math.Min(est[name], lim.Burst), est[name] > 0	need, asked := est[name], est[name] > 0	./internal/budget	TestReserveTable
+B3-floor-lt	internal/budget/budget.go	171	lv.Remaining < lim.Floor	lv.Remaining <= lim.Floor	./internal/budget	TestFloor
+B4-floor-gone	internal/budget/budget.go	171	lim.Floor > 0 && lv.Remaining >= 0 && lv.Remaining < lim.Floor && lv.ResetAt.After(now)	false	./internal/budget	TestFloor
+B5-refill-cap	internal/budget/budget.go	149	math.Min(lim.Burst, lv.Tokens+dt*lim.PerHour/3600)	lv.Tokens+dt*lim.PerHour/3600	./internal/budget	TestRefill
+B6-settle-diff	internal/budget/budget.go	228	lv.Tokens += g.Est[name] - got[name]	lv.Tokens -= got[name]	./internal/budget	TestSettleChargesWhatWasSpent
+B7-torn-empty	internal/budget/budget.go	128	\t\t\t\tlv.Tokens = 0\n	\t\t\t\tlv.Tokens = lv.Tokens\n	./internal/budget	TestLedgerPersists
+B8-save	internal/budget/budget.go	284	\t_ = os.Rename(tmp, l.path)		./internal/budget	TestLedgerPersists
+B10-reset-hour	internal/budget/budget.go	221	\t\t\t\tlv.ResetAt = now.Add(time.Hour)		./internal/budget	TestSettleRecords
+B11-remaining-guard	internal/budget/budget.go	217	\t\tif s.Remaining >= 0 {	\t\tif true {	./internal/budget	TestSettleRecords
+S1-running	internal/sched/sched.go	178	if !e.Running && !e.Next.After(now) {	if !e.Next.After(now) {	./internal/sched	TestACriticNeverRunsTwiceAtOnce
+S2-pool	internal/sched/sched.go	122	if s.slots >= s.Pool {	if false {	./internal/sched	TestThePoolBounds
+S3-reserve-est	internal/sched/sched.go	126	s.Ledger.Reserve(e.Cred, e.Class, e.Est)	s.Ledger.Reserve(e.Cred, e.Class, nil)	./internal/sched	TestAShortBucket
+S4-spread	internal/sched/sched.go	156	spread := min(w.Interval(), StartSpread)	spread := w.Interval()	./internal/sched	TestFirstRound
+S5-hung-slot	internal/sched/sched.go	228	\t\ts.slots--\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	\t\ts.slots -= 0\n\t\ts.mu.Unlock()\n\t\tfmt.Fprintf	./internal/sched	TestAHungRound
+S6-settle	internal/sched/sched.go	242	\ts.Ledger.Settle(g, sp)		./internal/sched	TestARoundSettles
+S7-stopped	internal/sched/sched.go	150	if w.Runtime.Stopped || w.Runtime.Archived {	if false {	./internal/sched	TestStoppedArchived
+S8-cred	internal/sched/sched.go	308	return "github:" + host	return ""	./internal/sched	TestCredentialAndClass
+S9-class-approve	internal/sched/sched.go	318	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":	case "teams-chat", "keel-threads":	./internal/sched	TestCredentialAndClass
+S10-est	internal/sched/sched.go	271	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
+P1-lock-held	internal/poll/poll.go	94	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
+P2-onspend	internal/poll/poll.go	63	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
+F1-rest	internal/forge/gql.go	39	if rest := s.All - s.Calls; rest > 0 {	if rest := s.All; rest > 0 {	./internal/forge	TestSpendBudgetWireBytes
+F2-resetAt-query	internal/forge/gql.go	76	" rateLimit{cost remaining resetAt} "	" rateLimit{cost remaining} "	./internal/forge	TestWithRateLimitAsksTheReset
+F3-resetAt-parse	internal/forge/gql.go	104	\t\tg.spend.ResetAt = rl.ResetAt		./internal/forge	TestBranchTipsOneCall
+Y1-template-skip	internal/systemd/systemd.go	292	if !ok || name == "" || model.ValidName(name) != nil {	if !ok {	./internal/systemd	TestRetireCriticTimers
+Y2-dropins	internal/systemd/systemd.go	298	if err := RemoveTimerDropIns(name); err != nil {	if err := error(nil); err != nil {	./internal/systemd	TestRetireCriticTimers
+R1-late	internal/fleet/roster.go	297	return max(0, now.Sub(w.Runtime.LastPolled)-LateFactor*w.Interval())	return 0	./internal/fleet	TestLateCritic
+R2-latefactor	internal/fleet/roster.go	289	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestLateCritic
+D1-default-40	cmd/ebac/daemon.go	41	"graphql": {PerHour: 40, Burst: 10, Floor: 1000},	"graphql": {PerHour: 41, Burst: 10, Floor: 1000},	./cmd/ebac	TestDaemonDefaults
+D2-bad-config	cmd/ebac/daemon.go	59	return DaemonConfig{}, fmt.Errorf("%s: %w", path, err)	return DefaultDaemonConfig(), nil	./cmd/ebac	TestDaemonConfigFile

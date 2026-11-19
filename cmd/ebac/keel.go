@@ -12,7 +12,6 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/keel"
-	"github.com/gluck/ebac/internal/systemd"
 )
 
 // cmdAddKeel mints a keel-threads watch: role form, critic, optional seat, timer.
@@ -98,9 +97,6 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 		if err := st.Fig.Cast(ctx, *aria, formID); err != nil {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
-	}
-	if err := systemd.EnableTimer(*name, interval); err != nil {
-		return fmt.Errorf("critic created (role %s), but its timer: %w", formID, err)
 	}
 	via := "door " + keel.Socket()
 	if ref.URL != "" {
