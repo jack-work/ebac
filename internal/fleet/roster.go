@@ -80,7 +80,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 	}
 	var rows []RosterRow
 	var sum RosterSummary
-	beat, _ := ReadBeat(ctx, fig) // nil: no heartbeat form (health says so)
+	beat, beatErr := ReadBeat(ctx, fig) // nil, nil: no heartbeat form; an error: it could not be read
 	now := time.Now()
 	for _, w := range critics {
 		if w.Runtime.Archived {
@@ -119,7 +119,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 				row.Awaiting += c.AwaitingUs
 			}
 		}
-		row.Health = health(w, row, now, beat)
+		row.Health = health(w, row, now, beat, beatErr)
 		if row.Health != "ok" {
 			sum.Unhealthy++
 		}
@@ -172,7 +172,7 @@ func SeatOf(ctx context.Context, fig seatReader, w *model.Critic) (seat string, 
 	return "", false, nil
 }
 
-func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat) string {
+func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat, beatErr error) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason
@@ -180,6 +180,8 @@ func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat) str
 		return "no seat cast"
 	case strings.HasSuffix(row.Seat, "(unreachable)"):
 		return "seat aria is gone; re-cast"
+	case beatErr != nil:
+		return "heartbeat unreadable: " + model.FirstLine(beatErr.Error())
 	case beat == nil:
 		return "no ebacd heartbeat (is ebacd running?)"
 	case beatStale(beat, now) > 0:
@@ -316,24 +318,41 @@ func beatStale(b *sched.Beat, now time.Time) time.Duration {
 	return max(0, now.Sub(b.At)-2*every)
 }
 
-// ReadBeat is ebacd's heartbeat (the one form of kind sched.BeatKind); nil, nil
-// when there is none.
+// ReadBeat is ebacd's heartbeat (the one form of kind sched.BeatKind): nil,
+// nil when there is no such form; an error when it cannot be read (a figaro
+// failure, two such forms, or a form without a beat), never folded into
+// "missing".
 func ReadBeat(ctx context.Context, fig *figaro.Figaro) (*sched.Beat, error) {
 	found, err := FindFormsByKind(ctx, fig, sched.BeatKind)
-	if err != nil || len(found) != 1 {
-		return nil, err
-	}
-	f, err := fig.Form(ctx, found[0])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("find the heartbeat form: %w", err)
+	}
+	return beatFrom(found, func(id string) (map[string]any, error) { return fig.Form(ctx, id) })
+}
+
+// beatFrom decodes the heartbeat from the forms of its kind.
+func beatFrom(found []string, read func(id string) (map[string]any, error)) (*sched.Beat, error) {
+	switch len(found) {
+	case 0:
+		return nil, nil
+	case 1:
+	default:
+		return nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))
+	}
+	f, err := read(found[0])
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", found[0], err)
 	}
 	raw, err := json.Marshal(f["beat"])
 	if err != nil {
 		return nil, err
 	}
 	var b sched.Beat
-	if err := json.Unmarshal(raw, &b); err != nil || b.At.IsZero() {
-		return nil, err
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return nil, fmt.Errorf("%s: beat: %w", found[0], err)
+	}
+	if b.At.IsZero() {
+		return nil, fmt.Errorf("%s has no beat", found[0])
 	}
 	return &b, nil
 }

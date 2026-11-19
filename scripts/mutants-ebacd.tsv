@@ -39,8 +39,12 @@ W3-settle-wake	internal/budget/budget.go	288	\t\tif g.Wake[name] {	\t\tif false 
 W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = math.Min(wb+100, lv.Wake+dt*wr/3600)	./internal/budget	TestRefillFillsBothPools
 O1-cadence	internal/sched/sched.go	176	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
 O2-overdue-spread	internal/sched/sched.go	178	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
-H1-late-from-beat	internal/fleet/roster.go	307	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
-H2-stale-bound	internal/fleet/roster.go	316	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
-H3-no-beat	internal/fleet/roster.go	183	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
+H1-late-from-beat	internal/fleet/roster.go	309	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
+H2-stale-bound	internal/fleet/roster.go	318	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
+H3-no-beat	internal/fleet/roster.go	185	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
 Y4-exit1-none	internal/systemd/systemd.go	284	ee.ExitCode() == 1	ee.ExitCode() == 99	./internal/systemd	TestRetireWithNoTimersLeft
-R2-latefactor	internal/fleet/roster.go	298	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
+R2-latefactor	internal/fleet/roster.go	300	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
+U1-unreadable-arm	internal/fleet/roster.go	183	\tcase beatErr != nil:	\tcase false:	./internal/fleet	TestHeartbeatUnreadableIsNotMissing
+U2-read-error	internal/fleet/roster.go	344	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U3-two-forms	internal/fleet/roster.go	340	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
+U4-no-beat	internal/fleet/roster.go	355	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms

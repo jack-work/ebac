@@ -2,8 +2,10 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gluck/ebac/internal/sched"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +48,7 @@ func TestHealthReadsTheHeartbeat(t *testing.T) {
 			w.Runtime.LastPolled = now.Add(-c.polled)
 		}
 		w.Runtime.Stopped = c.stopped
-		if got := health(w, row, now, c.beat); got != c.health {
+		if got := health(w, row, now, c.beat, nil); got != c.health {
 			t.Errorf("%s: %q, want %q", c.name, got, c.health)
 		}
 	}
@@ -57,7 +59,7 @@ func TestHealthReadsTheHeartbeat(t *testing.T) {
 
 func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
-		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}); got == "ok" {
+		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)
 		}
 	}
@@ -122,16 +124,61 @@ func TestAlertCriticSeatIsTheAlertRole(t *testing.T) {
 		}
 		return RosterRow{Seat: seat}
 	}
-	if w := keel("@alert"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "ok" {
-		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}), row(w).Seat)
+	if w := keel("@alert"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil) != "ok" {
+		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil), row(w).Seat)
 	}
-	if w := keel("@void"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "no seat cast" {
-		t.Fatalf("empty alert role: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}))
+	if w := keel("@void"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil) != "no seat cast" {
+		t.Fatalf("empty alert role: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil))
 	}
-	if w := keel("@stale"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) == "ok" {
+	if w := keel("@stale"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil) == "ok" {
 		t.Fatalf("dead alert holder scored healthy")
 	}
-	if w := keel(""); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "no seat cast" {
-		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}))
+	if w := keel(""); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil) != "no seat cast" {
+		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil))
+	}
+}
+
+// A heartbeat that cannot be read says so, distinct from one that does not exist. RED if a read error is folded
+// into "no ebacd heartbeat", or the reason is dropped.
+func TestHeartbeatUnreadableIsNotMissing(t *testing.T) {
+	now := time.Now()
+	w := &model.Critic{Name: "x", EverySec: 300}
+	row := RosterRow{Seat: "abc123"}
+	if got := health(w, row, now, nil, errors.New("read @ca89: connection closed")); got != "heartbeat unreadable: read @ca89: connection closed" {
+		t.Fatalf("unreadable: %q", got)
+	}
+	if got := health(w, row, now, nil, nil); got != "no ebacd heartbeat (is ebacd running?)" {
+		t.Fatalf("missing: %q", got)
+	}
+}
+
+// beatFrom, arm by arm: no form is (nil, nil); one readable form is its beat; a figaro read error, two forms, a form
+// without a beat and a malformed beat are each an error naming the cause.
+func TestBeatFromArms(t *testing.T) {
+	at := time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC)
+	good := func(string) (map[string]any, error) {
+		return map[string]any{"beat": map[string]any{"at": at.Format(time.RFC3339), "every_s": 60}}, nil
+	}
+	if b, err := beatFrom(nil, good); b != nil || err != nil {
+		t.Fatalf("no form: %v %v", b, err)
+	}
+	if b, err := beatFrom([]string{"@a"}, good); err != nil || !b.At.Equal(at) || b.EveryS != 60 {
+		t.Fatalf("one form: %+v %v", b, err)
+	}
+	for _, c := range []struct {
+		name  string
+		found []string
+		read  func(string) (map[string]any, error)
+		want  string
+	}{
+		{"figaro read error", []string{"@a"}, func(string) (map[string]any, error) { return nil, errors.New("connection closed") }, "read @a: connection closed"},
+		{"two forms", []string{"@a", "@b"}, good, "2 heartbeat forms (@a, @b)"},
+		{"no beat key", []string{"@a"}, func(string) (map[string]any, error) { return map[string]any{"kind": "ebac.daemon"}, nil }, "@a has no beat"},
+		{"malformed beat", []string{"@a"}, func(string) (map[string]any, error) { return map[string]any{"beat": map[string]any{"at": 7}}, nil }, "@a: beat: "},
+	} {
+		b, err := beatFrom(c.found, c.read)
+		if b != nil || err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%s: %v %v, want an error starting %q", c.name, b, err, c.want)
+		}
 	}
 }
