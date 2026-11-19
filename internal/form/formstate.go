@@ -394,6 +394,9 @@ func (s *Store) criticForms(ctx context.Context) ([]*CriticForm, error) {
 }
 
 // findCritic locates a critic's form by the name its critic key carries.
+// ErrNoCritic: no live form carries the critic (its form is gone, or it never was).
+var ErrNoCritic = errors.New("no critic")
+
 func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error) {
 	if id, ok := s.formOf[name]; ok {
 		f, err := s.ReadForm(ctx, id)
@@ -418,7 +421,7 @@ func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error
 	}
 	switch len(hits) {
 	case 0:
-		return nil, fmt.Errorf("no critic named %q (try: ebac ls)", name)
+		return nil, fmt.Errorf("%w named %q (try: ebac ls)", ErrNoCritic, name)
 	case 1:
 		s.formOf[name] = hits[0].ID
 		return hits[0], nil

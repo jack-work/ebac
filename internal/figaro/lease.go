@@ -43,7 +43,9 @@ func isNotFound(err error) bool {
 		return false
 	}
 	s := err.Error()
-	return strings.Contains(s, "not found") || strings.Contains(s, "not in tree")
+	// "unknown trunk": the daemon still lists a removed form whose log is gone
+	// (xwal, 11-19: livetest-trigger-dcaa911b's @f95682bc); reading it can never succeed.
+	return strings.Contains(s, "not found") || strings.Contains(s, "not in tree") || strings.Contains(s, "unknown trunk")
 }
 
 // gone marks a daemon not-found as ErrFormGone and passes anything else

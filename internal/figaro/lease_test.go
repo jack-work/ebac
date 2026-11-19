@@ -66,6 +66,7 @@ func TestOnlyNotFoundMeansGone(t *testing.T) {
 		gone bool
 	}{
 		{errors.New(`jsonrpc error -32000: attach @ab: aria @ab not found`), true},
+		{errors.New(`jsonrpc error -32000: form: xwal: unknown trunk f95682bc`), true},
 		{errors.New(`dial @ab: unsupported transport scheme ""`), false},
 		{errors.New(`dial unix /run/user/1000/figaro/angelus.sock: connect: connection refused`), false},
 		{errors.New(`context deadline exceeded`), false},

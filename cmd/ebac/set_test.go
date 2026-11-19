@@ -121,3 +121,21 @@ func TestSetEvery(t *testing.T) {
 		}
 	}
 }
+
+// ebac rm of a critic whose form is gone (removed, or its log lost: "xwal: unknown trunk", 11-19) still drops its
+// timer and drop-ins by name, and refuses a name that is not a critic name.
+func TestRemoveLeftovers(t *testing.T) {
+	var did []string
+	disable := func(n string) error { did = append(did, "timer "+n); return nil }
+	dropIns := func(n string) error { did = append(did, "drop-ins "+n); return nil }
+	if err := removeLeftovers("livetest-set-17e13c59", disable, dropIns, form.ErrNoCritic); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(did, ",") != "timer livetest-set-17e13c59,drop-ins livetest-set-17e13c59" {
+		t.Fatalf("did %q", did)
+	}
+	did = nil
+	if err := removeLeftovers("../x", disable, dropIns, form.ErrNoCritic); err == nil || did != nil {
+		t.Fatalf("a bad name was acted on: %v %q", err, did)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -482,6 +483,11 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	w, err := st.LoadCritic(ctx, *name)
+	if errors.Is(err, form.ErrNoCritic) {
+		// The form is gone (removed, or its log lost): nothing to archive, but its timer and drop-ins still fire and
+		// still show on the fleet view. Drop them by name.
+		return removeLeftovers(*name, systemd.DisableTimer, systemd.RemoveTimerDropIns, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -520,6 +526,22 @@ func cmdRm(ctx context.Context, g globals, args []string) error {
 	} else {
 		fmt.Printf("role form %s left standing; it expires with its lease (or: figaro kill %s)\n", w.FormID, w.FormID)
 	}
+	return nil
+}
+
+// removeLeftovers drops what a critic without a form leaves on the box: its
+// timer and interval drop-ins. why is the lookup error, said with the result.
+func removeLeftovers(name string, disable, dropIns func(string) error, why error) error {
+	if err := model.ValidName(name); err != nil {
+		return err
+	}
+	if err := disable(name); err != nil {
+		return fmt.Errorf("%v; its timer: %w", why, err)
+	}
+	if err := dropIns(name); err != nil {
+		return fmt.Errorf("%v; its drop-ins: %w", why, err)
+	}
+	fmt.Printf("%s: no form (%v): timer disabled and drop-ins removed\n", name, why)
 	return nil
 }
 
