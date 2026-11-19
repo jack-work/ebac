@@ -59,7 +59,7 @@ type PostReceipt struct {
 
 var (
 	keelAria = regexp.MustCompile(`^[0-9a-f]{8,32}$`)
-	keelRole = regexp.MustCompile(`^[a-z-]{1,40}$`)
+	keelRole = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
 )
 
 // KeelWriter says why a keel post's writer is not one keel's write door
@@ -70,7 +70,7 @@ func KeelWriter(aria, role string) string {
 		return fmt.Sprintf("by_aria %q: the writing seat's aria id, 8-32 lowercase hex", aria)
 	}
 	if !keelRole.MatchString(role) {
-		return fmt.Sprintf("by_role %q: the writing seat's role, 1-40 of a-z and -", role)
+		return fmt.Sprintf("by_role %q: the writing seat's role, 1-40 of a-z, 0-9 and -", role)
 	}
 	return ""
 }

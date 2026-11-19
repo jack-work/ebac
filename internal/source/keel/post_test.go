@@ -224,3 +224,12 @@ func TestKeelPluginHandlesOpPostThroughItsWriter(t *testing.T) {
 		t.Fatalf("rep %+v err %v calls %d", rep, err, len(wr.calls))
 	}
 }
+
+func TestKeelWriterRoleRuleMatchesTheDoor(t *testing.T) {
+	for role, ok := range map[string]bool{"system1-engineer": true, "figaro-knight": true, "Knight": false, "a_b": false, "": false,
+		"abcdefghijabcdefghijabcdefghijabcdefghij": true, "abcdefghijabcdefghijabcdefghijabcdefghijk": false} {
+		if got := model.KeelWriter(aria, role) == ""; got != ok {
+			t.Errorf("role %q accepted=%v, want %v", role, got, ok)
+		}
+	}
+}
