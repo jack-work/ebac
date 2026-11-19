@@ -143,3 +143,27 @@ func TestRoleInPathDeepestSegmentAndFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestStampRoleRoutesFindingsToTheKnightAndAnswersToThePool(t *testing.T) {
+	rs := mustParse(t, `[{"stamp_role":"reviewer","to":"@6d1ebf69","action":"wake"},
+ {"stamp_role":"knight","to":"@8292f32b","action":"wake"},
+ {"default":true,"action":"keep"}]`)
+	cases := map[string]string{
+		"Figaro e680885d (reviewer) ⟩ jack":                  "@6d1ebf69",
+		"Figaro aa758aa465de4f91b483184ab59a0e59 (reviewer)": "@6d1ebf69",
+		"Figaro 6d1ebf69 (knight) ⟩ jack":                    "@8292f32b",
+		"Figaro e680885d (system1-engineer) ⟩ jack":          "",
+		"jack ⟩ jack":                       "",
+		"Someone (reviewer) ⟩ jack":         "",
+		"Figaro zzzzzzzz (reviewer) ⟩ jack": "",
+	}
+	for author, want := range cases {
+		kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Author: author}}, nil)
+		if kept[0].Route != want {
+			t.Errorf("%q: route %q, want %q", author, kept[0].Route, want)
+		}
+	}
+	if StampRole("Figaro e680885d (system1-engineer) ⟩ jack") != "system1-engineer" {
+		t.Errorf("digit role not read")
+	}
+}

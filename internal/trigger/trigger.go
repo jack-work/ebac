@@ -21,6 +21,7 @@
 //	contains  case-insensitive substrings of the full message text.
 //	regex     a Go regular expression over the full text (add (?i) for case).
 //	kind      the event kind, e.g. teams_new, thread_new, comment_new, author_new.
+//	stamp_role  the role in a figaro seat's keel stamp ("Figaro <aria8> (<role>)").
 //	path      a glob over the event's path (keel: the file a thread is on);
 //	          '*' is one segment, '**' any number of segments, anywhere.
 //
@@ -97,6 +98,10 @@ type Rule struct {
 	Regex    string `json:"regex,omitempty"`
 	Kind     list   `json:"kind,omitempty"`
 	Path     list   `json:"path,omitempty"`
+	// StampRole matches a comment stamped by a figaro seat of one of these
+	// roles: keel's write door writes "jack via Figaro <aria8> (<role>)" and
+	// names the author "Figaro <aria8> (<role>) ⟩ <account>".
+	StampRole list `json:"stamp_role,omitempty"`
 	// RoleInPath matches an event whose path names a role: a directory
 	// segment, or the file name without ".md", equal to a role name the
 	// caller knows; the event is routed to that role (the deepest segment
@@ -115,7 +120,7 @@ type Rules []Rule
 
 func (r Rule) hasMatch() bool {
 	return len(r.From) > 0 || len(r.NotFrom) > 0 || len(r.Contains) > 0 || r.Regex != "" || len(r.Kind) > 0 ||
-		len(r.Path) > 0 || r.RoleInPath
+		len(r.Path) > 0 || r.RoleInPath || len(r.StampRole) > 0
 }
 
 // Parse validates a rule set. A value stored as a JSON string holding the list
@@ -219,6 +224,18 @@ func RoleInPath(p string, roles map[string]string) string {
 	return ""
 }
 
+var stampRole = regexp.MustCompile(`^Figaro [0-9a-f]{8,32} \(([a-z0-9-]{1,40})\)$`)
+
+// StampRole is the role in a figaro-stamped keel author ("Figaro <aria8>
+// (<role>) ⟩ <account>", or the alias alone); "" for anyone else.
+func StampRole(author string) string {
+	alias, _, _ := strings.Cut(author, " ⟩ ")
+	if m := stampRole.FindStringSubmatch(strings.TrimSpace(alias)); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // NeedsRoles says a rule uses role_in_path, so the caller must pass the
 // role names it knows to Apply.
 func (rs Rules) NeedsRoles() bool {
@@ -255,6 +272,18 @@ func (r Rule) matchFields(e model.Event) bool {
 	}
 	if r.re != nil && !r.re.MatchString(text) {
 		return false
+	}
+	if len(r.StampRole) > 0 {
+		role, hit := StampRole(e.Author), false
+		for _, want := range r.StampRole {
+			if role != "" && role == want {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
+		}
 	}
 	if len(r.Path) > 0 {
 		hit := false
