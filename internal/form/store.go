@@ -43,6 +43,9 @@ func NewStore(fig *figaro.Figaro) (*Store, error) {
 			return nil, err
 		}
 	}
+	if authorityDir == "" {
+		authorityDir = filepath.Join(root, "authority")
+	}
 	return &Store{Root: root, Fig: fig, formOf: map[string]string{}}, nil
 }
 

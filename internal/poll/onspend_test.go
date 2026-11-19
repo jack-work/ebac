@@ -3,6 +3,7 @@ package poll
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/gluck/ebac/internal/budget"
@@ -41,5 +42,15 @@ func TestCallForwardsTheRoundsSpend(t *testing.T) {
 	p.OnSpend, p.Plugins = nil, spendCaller{&plugin.Reply{Spend: sp}}
 	if _, err := p.call(context.Background(), w, plugin.Request{Op: plugin.OpRound}); err != nil {
 		t.Fatalf("hand poll: %v", err)
+	}
+}
+
+// A form that claims write never authorizes a post once the overlay says read-only (positive control: write=true
+// does). RED if Authorize trusts a form value (it reads the critic after Trusted/Authority overlay).
+func TestAuthorizeReadsTheOverlaidWrite(t *testing.T) {
+	post := &model.Post{PR: "a/b#1", Body: "x"}
+	ro := &model.Critic{Name: "c", Mode: model.ModeReview, Write: false, PRs: []model.PRRef{{Owner: "a", Repo: "b", Number: 1}}}
+	if why := Authorize(ro, &model.Snapshot{}, "me", post); !strings.Contains(why, "read-only") {
+		t.Fatalf("read-only critic authorized: %q", why)
 	}
 }

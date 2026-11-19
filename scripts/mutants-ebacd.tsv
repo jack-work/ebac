@@ -100,3 +100,13 @@ K2-releases-api	internal/model/trusted.go	124	\t\trw.API = "" // the public api.
 K3-save-strips	internal/form/formstate.go	683	\tmodel.Strip(c) // the trusted fields never go back onto the seat-readable form\n		./internal/form	TestSaveNever
 K4-adopt-reapplies	internal/form/formstate.go	881	\tfresh.FormIgnored = TrustedConfig().Apply(&fresh)\n		./internal/form	TestSaveNever
 K5-band-socket	internal/model/trusted.go	120	\t\tb.Socket = t.BandHubSocket\n		./internal/model	TestTrustedApply
+A1-authority-overlay	internal/form/formstate.go	320	\tw.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)\n		./internal/form	TestAuthorityComesFrom
+A2-least-write	internal/form/formstate.go	946	\tleast.Write, least.Approve = false, false\n		./internal/form	TestAuthorityComesFrom
+A3-least-grants	internal/form/formstate.go	947	\tleast.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""\n		./internal/form	TestAuthorityComesFrom
+A4-record-once	internal/form/formstate.go	989	os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600	os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600	./internal/form	TestAuthorityComesFrom
+A5-config-first	internal/form/formstate.go	938	\tif a := TrustedConfig().Critics[w.FormID].Authority; a != nil {\n\t\treturn a.Apply(w)\n\t}\n		./internal/form	TestAuthorityComesFrom
+A6-sched-skip	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {	if w.Runtime.Stopped || w.Runtime.Archived {	./internal/sched	TestNoAuthority
+A7-ls-flag	internal/fleet/roster.go	190	\tcase w.NoAuthority:\n\t\treturn model.NoAuthorityNote(w.FormID)\n		./internal/fleet	TestNoAuthority
+A8-apply-write	internal/model/authority.go	61	\tsetb("write", w.Write, a.Write, &w.Write)\n		./internal/model	TestAuthorityApply
+A9-apply-source	internal/model/authority.go	56	\tset("source", w.Source, a.Source, &w.Source)\n		./internal/model	TestAuthorityApply
+A10-apply-approver	internal/model/authority.go	75	\t\tset("org_approve.approver", o.Approver, a.Approver, &o.Approver)\n		./internal/model	TestAuthorityApply

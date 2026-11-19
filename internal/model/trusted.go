@@ -36,6 +36,9 @@ type TrustedCritic struct {
 	Clone        string   `json:"clone,omitempty"`
 	WorktreeRoot string   `json:"worktree_root,omitempty"`
 	Notes        string   `json:"notes,omitempty"`
+	// Authority is the critic's authority (#11); nil: ebac's own record made
+	// at creation, else none (the critic is not run).
+	Authority *Authority `json:"authority,omitempty"`
 }
 
 // DefaultTrusted: the one forge host ebac reads today, and nothing per critic.

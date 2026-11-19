@@ -141,6 +141,9 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 		}
 		return err
 	}
+	if w.NoAuthority {
+		return fmt.Errorf("%s: %s", w.Name, model.NoAuthorityNote(w.FormID))
+	}
 	if w.Runtime.Archived {
 		fmt.Fprintf(p.Out, "%s: archived, nothing to do\n", name)
 		return nil

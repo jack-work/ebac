@@ -46,3 +46,53 @@ func TestSaveNeverWritesTrustedAndAdoptReapplies(t *testing.T) {
 		t.Fatalf("adopted: notes %q keel %+v ignored %v", w.Notes, w.Keel, w.FormIgnored)
 	}
 }
+
+// Authority comes from the trusted config, else ebac's creation record, else nowhere (not run, least authority).
+// The creation record is written once, on the save that creates the critic, and a form edit never changes what is
+// read back. RED if a form write/approve/source reaches the critic, or a critic with no authority keeps its grants.
+func TestAuthorityComesFromConfigOrCreationRecord(t *testing.T) {
+	dir := t.TempDir()
+	ResetTrusted(filepath.Join(dir, "absent.json"))
+	t.Cleanup(func() { ResetTrusted(model.TrustedConfigPath) })
+	old := authorityDir
+	authorityDir = filepath.Join(dir, "authority")
+	t.Cleanup(func() { authorityDir = old })
+	critic := func(m map[string]any) *CriticForm {
+		b, _ := json.Marshal(m)
+		return &CriticForm{ID: "@f1", Keys: map[string]json.RawMessage{model.CriticKey: b}}
+	}
+	seat := map[string]any{"name": "x", "source": "org-approve", "mode": "reviewer", "write": true, "approve": true,
+		"org_approve": map[string]any{"grant": "g", "principal": "p", "approver": "eve"}}
+
+	// No config, no record: not run, least authority.
+	w, err := critic(seat).Critic()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.NoAuthority || w.Write || w.Approve || w.OrgApprove.Approver != "" || w.OrgApprove.Grant != "" {
+		t.Fatalf("no authority: %+v %+v", w, w.OrgApprove)
+	}
+	// A creation record (as SaveRound writes it for a new critic) is what is read back, not the form.
+	s := &Store{}
+	if err := s.RegisterAuthority(&model.Critic{FormID: "@f1", Source: "teams-chat", Mode: model.ModeTeams}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RegisterAuthority(&model.Critic{FormID: "@f1", Source: "org-approve", Write: true}); err == nil {
+		t.Fatal("a second record overwrote the first")
+	}
+	w, _ = critic(seat).Critic()
+	if w.NoAuthority || w.Source != "teams-chat" || w.Mode != model.ModeTeams || w.Write || w.Approve {
+		t.Fatalf("record: %+v", w)
+	}
+	if !strings.Contains(strings.Join(w.FormIgnored, ","), "source,mode,write,approve") {
+		t.Fatalf("not flagged: %v", w.FormIgnored)
+	}
+	// The trusted config wins over the record (positive control: a granted write IS read).
+	p := filepath.Join(dir, "c.json")
+	_ = os.WriteFile(p, []byte(`{"trusted":{"critics":{"@f1":{"authority":{"source":"keel-threads","mode":"keel","write":true}}}}}`), 0o600)
+	ResetTrusted(p)
+	w, _ = critic(seat).Critic()
+	if w.Source != "keel-threads" || !w.Write || w.Approve {
+		t.Fatalf("config: %+v", w)
+	}
+}

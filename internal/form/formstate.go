@@ -317,6 +317,7 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 	w := *c
 	w.FormID = f.ID
 	w.FormIgnored = TrustedConfig().Apply(&w)
+	w.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)
 	w.Runtime = f.ebac().Runtime
 	w.Trigger = f.Keys[trigger.FormKey]
 	for _, k := range model.SourceReads[w.SourceName()] {
@@ -579,7 +580,11 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	} else {
 		local = s.readPRsLocal(w.FormID)
 	}
+	creating := false
 	err = s.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, sys EbacState) (map[string]json.RawMessage, []string) {
+		if _, had := cur[model.CriticKey]; !had {
+			creating = true // this save creates the critic: ebac records its authority (#11)
+		}
 		merged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])
 		if merr != nil {
 			merged, c = cfgRaw, nil // an unreadable form critic: ours is the only sound one
@@ -642,6 +647,11 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 	})
 	if err != nil {
 		return err
+	}
+	if creating {
+		if err := s.RegisterAuthority(w); err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("critic %s created but its authority not recorded (it will not run): %w", w.Name, err)
+		}
 	}
 	// After the form, never before: the file is never ahead of the entries
 	// the form holds. A failed write does not fail the round: the file stays
@@ -879,6 +889,7 @@ func adoptWritten(w *model.Critic, written json.RawMessage) {
 	// The written key carries whatever a seat merged in mid-round: the
 	// trusted fields are applied again (review e025e175 M2).
 	fresh.FormIgnored = TrustedConfig().Apply(&fresh)
+	fresh.FormIgnored = append(fresh.FormIgnored, applyAuthority(&fresh)...)
 	*w = fresh
 }
 
@@ -913,4 +924,73 @@ func deepCopyCritic(w *model.Critic) *model.Critic {
 	var c model.Critic
 	_ = json.Unmarshal(b, &c)
 	return &c
+}
+
+// authorityDir holds ebac's own creation records of critics' authority
+// (<state>/authority/<form id>.json, written only by `ebac add-*` through
+// RegisterAuthority); NewStore sets it. "" = none (tests).
+var authorityDir string
+
+// applyAuthority overlays w's authority from the trusted config, else from
+// ebac's creation record; with neither, w is marked NoAuthority (not run)
+// and its write/approve and approval settings are cleared (fail closed).
+func applyAuthority(w *model.Critic) []string {
+	if a := TrustedConfig().Critics[w.FormID].Authority; a != nil {
+		return a.Apply(w)
+	}
+	if a, ok := readAuthority(w.FormID); ok {
+		return a.Apply(w)
+	}
+	w.NoAuthority = true
+	least := model.AuthorityOf(w)
+	least.Write, least.Approve = false, false
+	least.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""
+	least.InputsForm, least.BoardForm = "", ""
+	_ = least.Apply(w)
+	return nil
+}
+
+func authorityPath(formID string) (string, bool) {
+	id := strings.TrimPrefix(formID, "@")
+	if authorityDir == "" || id == "" || strings.ContainsAny(id, "/.") {
+		return "", false
+	}
+	return filepath.Join(authorityDir, id+".json"), true
+}
+
+func readAuthority(formID string) (model.Authority, bool) {
+	p, ok := authorityPath(formID)
+	if !ok {
+		return model.Authority{}, false
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return model.Authority{}, false
+	}
+	var a model.Authority
+	if json.Unmarshal(raw, &a) != nil {
+		return model.Authority{}, false
+	}
+	return a, true
+}
+
+// RegisterAuthority records a critic's authority as ebac creates it (the
+// add-* commands, before the first save). It never overwrites a record: a
+// critic's authority is changed in the trusted config, not by a re-add.
+func (s *Store) RegisterAuthority(w *model.Critic) error {
+	p, ok := authorityPath(w.FormID)
+	if !ok {
+		return fmt.Errorf("authority record for %q: no state dir or bad form id", w.FormID)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(model.AuthorityOf(w))
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("authority record for %s: %w", w.FormID, err)
+	}
+	defer f.Close()
+	_, err = f.Write(b)
+	return err
 }

@@ -206,9 +206,11 @@ func cmdSetWrite(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	w.Write = *on
-	if err := st.SaveCritic(ctx, w); err != nil {
-		return err
+	if w.Write != *on {
+		// #11: write is authority; it comes only from ebac's trusted config
+		// (keyed by the role form id) or ebac's creation record, never from
+		// a form or a later command (a passkey-grant raise is backlog #12).
+		return fmt.Errorf("%s: write is set in ebac's trusted config (trusted.critics.%q.authority.write), not by ebac set-write", w.Name, w.FormID)
 	}
 	if *on {
 		fmt.Printf("%s: WRITE granted — the seat may reply, comment and push on:\n", w.Name)

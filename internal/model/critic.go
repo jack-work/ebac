@@ -203,6 +203,9 @@ type Critic struct {
 	// FormIgnored names the form-stored fields the trusted configuration
 	// replaced (Trusted.Apply): ebac ls flags them.
 	FormIgnored []string `json:"-"`
+	// NoAuthority: neither the trusted config nor ebac's creation record
+	// names this critic's authority; it is not run (fail closed, #11).
+	NoAuthority bool `json:"-"`
 
 	// Source names the upstream this critic translates (source.go); empty
 	// means github-pr.

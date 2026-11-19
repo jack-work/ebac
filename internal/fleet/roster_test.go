@@ -190,3 +190,10 @@ func TestIgnoredFormConfigIsFlagged(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestNoAuthorityIsFlagged(t *testing.T) {
+	w := &model.Critic{Name: "x", FormID: "@f1", NoAuthority: true}
+	if got := health(w, RosterRow{Seat: "abc"}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil); got != "no trusted authority for @f1: not run (add it to ebac's trusted config)" {
+		t.Fatalf("%q", got)
+	}
+}

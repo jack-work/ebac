@@ -223,8 +223,8 @@ func (s *Scheduler) sync(ws []*model.Critic, now time.Time) {
 	s.listed = now
 	seen := map[string]bool{}
 	for _, w := range ws {
-		if w.Runtime.Stopped || w.Runtime.Archived {
-			continue
+		if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {
+			continue // a critic with no trusted authority is not run (#11)
 		}
 		seen[w.Name] = true
 		e, ok := s.entries[w.Name]

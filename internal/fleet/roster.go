@@ -187,6 +187,8 @@ func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat, bea
 		return "no seat cast"
 	case strings.HasSuffix(row.Seat, "(unreachable)"):
 		return "seat aria is gone; re-cast"
+	case w.NoAuthority:
+		return model.NoAuthorityNote(w.FormID)
 	case len(w.FormIgnored) > 0:
 		return model.IgnoredNote(w.FormIgnored)
 	case beatErr != nil:

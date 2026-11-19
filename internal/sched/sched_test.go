@@ -486,3 +486,16 @@ func TestWithRoleFollowsAbsorptionEndsOnRetirement(t *testing.T) {
 		}
 	}
 }
+
+// A critic with no trusted authority is never scheduled (fail closed). RED if it is.
+func TestNoAuthorityIsNotScheduled(t *testing.T) {
+	c := newClock()
+	none, ok := critic("none", time.Minute), critic("ok", time.Minute)
+	none.NoAuthority = true
+	s := sched(c, ledger(t, c), newFake(), none, ok)
+	s.Tick(context.Background())
+	snap := s.Snapshot()
+	if _, in := snap["none"]; in || len(snap) != 1 {
+		t.Fatalf("scheduled %v", keys(snap))
+	}
+}

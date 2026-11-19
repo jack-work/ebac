@@ -1,0 +1,84 @@
+package model
+
+import "fmt"
+
+// Authority is every critic field that decides what ebac DOES on someone's
+// behalf (#11; reviews e025e175 H1, 6ae24e1e): which plugin and sandbox
+// grants it runs with (Source), its mode, whether it may write or approve,
+// the band-grants credential and principal its approvals need and who may
+// tap them, where approval asks may come from, and the outside forms it
+// writes. A critic's FORM is seat-writable, so these come only from ebac's
+// trusted configuration (keyed by role form id) or from ebac's own record
+// made when the critic was created; a form value is ignored and flagged.
+type Authority struct {
+	Source     string `json:"source"`
+	Mode       Mode   `json:"mode"`
+	Write      bool   `json:"write,omitempty"`
+	Approve    bool   `json:"approve,omitempty"`
+	Grant      string `json:"grant,omitempty"`
+	Principal  string `json:"principal,omitempty"`
+	Approver   string `json:"approver,omitempty"`
+	AskFrom    string `json:"ask_from,omitempty"`
+	Chat       string `json:"chat,omitempty"`
+	ChatAlias  string `json:"chat_alias,omitempty"`
+	InputsForm string `json:"inputs_form,omitempty"`
+	BoardForm  string `json:"board_form,omitempty"`
+}
+
+// AuthorityOf reads a critic's authority fields.
+func AuthorityOf(w *Critic) Authority {
+	a := Authority{Source: w.Source, Mode: w.Mode, Write: w.Write, Approve: w.Approve, InputsForm: w.InputsForm, BoardForm: w.BoardForm}
+	if r := w.Requests; r != nil {
+		a.Grant, a.Principal, a.AskFrom, a.Chat, a.ChatAlias = r.Grant, r.Principal, r.AskFrom, r.Chat, r.ChatAlias
+	}
+	if o := w.OrgApprove; o != nil {
+		a.Grant, a.Principal, a.Approver = o.Grant, o.Principal, o.Approver
+	}
+	return a
+}
+
+// Apply sets w's authority fields to a and returns the names of the fields
+// whose form value differed (ignored; ebac ls flags them).
+func (a Authority) Apply(w *Critic) []string {
+	var ignored []string
+	set := func(name string, form, trusted string, dst *string) {
+		if form != trusted {
+			ignored = append(ignored, name)
+		}
+		*dst = trusted
+	}
+	setb := func(name string, form, trusted bool, dst *bool) {
+		if form != trusted {
+			ignored = append(ignored, name)
+		}
+		*dst = trusted
+	}
+	set("source", w.Source, a.Source, &w.Source)
+	if w.Mode != a.Mode {
+		ignored = append(ignored, "mode")
+	}
+	w.Mode = a.Mode
+	setb("write", w.Write, a.Write, &w.Write)
+	setb("approve", w.Approve, a.Approve, &w.Approve)
+	set("inputs_form", w.InputsForm, a.InputsForm, &w.InputsForm)
+	set("board_form", w.BoardForm, a.BoardForm, &w.BoardForm)
+	if r := w.Requests; r != nil {
+		set("approve_requests.grant", r.Grant, a.Grant, &r.Grant)
+		set("approve_requests.principal", r.Principal, a.Principal, &r.Principal)
+		set("approve_requests.ask_from", r.AskFrom, a.AskFrom, &r.AskFrom)
+		set("approve_requests.chat", r.Chat, a.Chat, &r.Chat)
+		set("approve_requests.chat_alias", r.ChatAlias, a.ChatAlias, &r.ChatAlias)
+	}
+	if o := w.OrgApprove; o != nil {
+		set("org_approve.grant", o.Grant, a.Grant, &o.Grant)
+		set("org_approve.principal", o.Principal, a.Principal, &o.Principal)
+		set("org_approve.approver", o.Approver, a.Approver, &o.Approver)
+	}
+	return ignored
+}
+
+// NoAuthorityNote is the ebac ls health of a critic with no trusted
+// authority: it is not run (fail closed).
+func NoAuthorityNote(formID string) string {
+	return fmt.Sprintf("no trusted authority for %s: not run (add it to ebac's trusted config)", formID)
+}

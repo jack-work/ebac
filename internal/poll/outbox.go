@@ -36,7 +36,7 @@ func NewPostID(now time.Time) string {
 // authorize says why a post may not go out, or "" if it may.
 func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) string {
 	if !w.Write && w.Mode != model.ModeReviewer {
-		return "this critic is read-only: posting needs `ebac set-write --on`"
+		return "this critic is read-only: write comes from ebac's trusted config (authority.write), not from its form"
 	}
 	if w.Mode == model.ModeKeel {
 		return authorizeKeel(w, p)
