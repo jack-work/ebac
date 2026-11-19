@@ -92,13 +92,23 @@ func TestKeelReplyPostsToTheThreadWithMarkerAndWriterHeaders(t *testing.T) {
 	}
 }
 
-func TestKeelNewThreadOnALineReturnsTheNewThreadID(t *testing.T) {
-	wr := &fakeWriter{reply: map[string]string{"POST " + tpath: `{"id":"n42","anchor":{}}`}}
+const lpath = "/api/r/notes-captains-log/locate"
+
+func TestKeelNewThreadOnALineLocatesMainThenPostsAtThatRev(t *testing.T) {
+	wr := &fakeWriter{reply: map[string]string{"POST " + tpath: `{"id":"n42","anchor":{}}`,
+		"POST " + lpath: `{"found":true,"rev":"081b8b4a"}`}}
 	p := &model.Post{PR: repo, Path: "2026/11/19/x.md", Line: 7, Body: "finding", ByAria: aria, ByRole: role}
 	runPosts(t, nil, wr, map[string]*model.Post{"f1": p})
-	c := wr.calls[0]
+	if len(wr.calls) != 2 {
+		t.Fatalf("calls %+v", wr.calls)
+	}
+	l, c := wr.calls[0], wr.calls[1]
+	if l.path != lpath || l.body["rev"] != "main" || l.body["view"] != "file" || l.body["path"] != "2026/11/19/x.md" {
+		t.Fatalf("locate %+v", l)
+	}
 	lines, _ := json.Marshal(c.body["lines"])
-	if c.method != "POST" || c.path != tpath || c.body["path"] != "2026/11/19/x.md" || string(lines) != "[7,7]" || c.body["rev"] != nil {
+	if c.method != "POST" || c.path != tpath || c.body["path"] != "2026/11/19/x.md" || string(lines) != "[7,7]" ||
+		c.body["rev"] != "081b8b4a" || c.body["origin"] != nil {
 		t.Fatalf("call %+v", c)
 	}
 	if p.Sent == nil || p.Sent.URL != "keel:notes/captains-log#n42" {
@@ -106,10 +116,13 @@ func TestKeelNewThreadOnALineReturnsTheNewThreadID(t *testing.T) {
 	}
 }
 
-func TestKeelNewThreadWithRevAnchorsOnTheDiff(t *testing.T) {
+func TestKeelNewThreadWithRevAnchorsOnTheDiffWithoutLocate(t *testing.T) {
 	wr := &fakeWriter{reply: map[string]string{"POST " + tpath: `{"id":"d1"}`}}
 	p := &model.Post{PR: repo, Path: "src/a.rs", Line: 930, Rev: "552ad24e", Body: "nit", ByAria: aria, ByRole: role}
 	runPosts(t, nil, wr, map[string]*model.Post{"f2": p})
+	if len(wr.calls) != 1 {
+		t.Fatalf("calls %+v", wr.calls)
+	}
 	c := wr.calls[0]
 	origin, _ := json.Marshal(c.body["origin"])
 	if c.body["rev"] != "552ad24e" || string(origin) != `{"rev":"552ad24e","view":"diff"}` {
@@ -117,8 +130,17 @@ func TestKeelNewThreadWithRevAnchorsOnTheDiff(t *testing.T) {
 	}
 }
 
+func TestKeelNewThreadOnALineMainLacksIsRefused(t *testing.T) {
+	wr := &fakeWriter{reply: map[string]string{"POST " + lpath: `{"found":false}`}}
+	p := &model.Post{PR: repo, Path: "a.md", Line: 99, Body: "x", ByAria: aria, ByRole: role}
+	runPosts(t, nil, wr, map[string]*model.Post{"f4": p})
+	if len(wr.calls) != 1 || p.Refused != "keel has no line 99 in a.md at main" || p.Sent != nil {
+		t.Fatalf("calls %d post %+v", len(wr.calls), p)
+	}
+}
+
 func TestKeelNewThreadWithoutAnIDIsAnErrorNotASend(t *testing.T) {
-	wr := &fakeWriter{reply: map[string]string{"POST " + tpath: `{"ok":true}`}}
+	wr := &fakeWriter{reply: map[string]string{"POST " + tpath: `{"ok":true}`, "POST " + lpath: `{"found":true,"rev":"r"}`}}
 	p := &model.Post{PR: repo, Path: "a.md", Line: 1, Body: "x", ByAria: aria, ByRole: role}
 	runPosts(t, nil, wr, map[string]*model.Post{"f3": p})
 	if p.Sent != nil || !strings.Contains(p.Error, "no id") {

@@ -122,15 +122,32 @@ func sendPost(ctx context.Context, wr Writer, w *model.Critic, id string, post *
 				err = write(ctx, wr, "POST", writePath(repo)+"/threads/"+url.PathEscape(tid)+"/comments", post,
 					map[string]any{"body": body}, nil)
 			} else {
-				nt := map[string]any{"body": body, "path": post.Path, "lines": []int{post.Line, post.Line}}
+				// keel anchors a new thread at a commit: the given diff rev, or
+				// main's, which locate resolves (and refuses a line not there).
+				rev := post.Rev
+				if rev == "" {
+					var loc struct {
+						Found bool   `json:"found"`
+						Rev   string `json:"rev"`
+					}
+					err = write(ctx, wr, "POST", writePath(repo)+"/locate", post,
+						map[string]any{"rev": "main", "path": post.Path, "view": "file", "lines": []int{post.Line, post.Line}}, &loc)
+					if err == nil && (!loc.Found || loc.Rev == "") {
+						post.Refused = fmt.Sprintf("keel has no line %d in %s at main", post.Line, post.Path)
+						return
+					}
+					rev = loc.Rev
+				}
+				nt := map[string]any{"body": body, "path": post.Path, "lines": []int{post.Line, post.Line}, "rev": rev}
 				if post.Rev != "" {
-					nt["rev"] = post.Rev
 					nt["origin"] = map[string]string{"view": "diff", "rev": post.Rev}
 				}
 				var got struct {
 					ID string `json:"id"`
 				}
-				err = write(ctx, wr, "POST", writePath(repo)+"/threads", post, nt, &got)
+				if err == nil {
+					err = write(ctx, wr, "POST", writePath(repo)+"/threads", post, nt, &got)
+				}
 				if err == nil && got.ID == "" {
 					err = fmt.Errorf("keel created a thread but returned no id")
 				}
