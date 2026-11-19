@@ -23,8 +23,8 @@ func TestDaemonDefaultsAreTheStewardsNumbers(t *testing.T) {
 	if r := c["rest"]; r.PerHour != 600 || r.Burst != 60 || r.Floor != 0 {
 		t.Fatalf("rest %+v", r)
 	}
-	if BeatEvery != time.Minute {
-		t.Fatalf("beat every %s", BeatEvery)
+	if sched.BeatEvery != time.Minute {
+		t.Fatalf("beat every %s", sched.BeatEvery)
 	}
 }
 
@@ -55,12 +55,12 @@ func TestLiveBeatMintsOnceAndWrites(t *testing.T) {
 	fig := figaro.NewFigaro("")
 	kind := fmt.Sprintf("ebac.daemon-livetest-%d", time.Now().UnixNano())
 	at := time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC)
-	id, err := writeBeat(ctx, fig, kind, "ebac-livetest-beat", "", Beat{At: at, EveryS: 60, Critics: map[string]sched.Entry{"a": {Err: "x"}}})
+	id, err := writeBeat(ctx, fig, kind, "ebac-livetest-beat", "", sched.Beat{At: at, EveryS: 60, Critics: map[string]sched.Entry{"a": {Err: "x"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	livetest.Remove(t, fig, id)
-	id2, err := writeBeat(ctx, fig, kind, "ebac-livetest-beat", "", Beat{At: at.Add(time.Minute), EveryS: 60})
+	id2, err := writeBeat(ctx, fig, kind, "ebac-livetest-beat", "", sched.Beat{At: at.Add(time.Minute), EveryS: 60})
 	if err != nil || id2 != id {
 		t.Fatalf("second beat: %s %v, want the same form %s", id2, err, id)
 	}
@@ -69,7 +69,7 @@ func TestLiveBeatMintsOnceAndWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(f["beat"])
-	var got Beat
+	var got sched.Beat
 	_ = json.Unmarshal(b, &got)
 	if f["kind"] != kind || !got.At.Equal(at.Add(time.Minute)) || got.EveryS != 60 {
 		t.Fatalf("form kind %v beat %s", f["kind"], b)

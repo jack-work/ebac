@@ -122,3 +122,25 @@ func TestRetireCriticTimers(t *testing.T) {
 		})
 	}
 }
+
+// list-unit-files exits 1 when no unit matches: that is "none left", not an error; another failure still is one.
+func TestRetireWithNoTimersLeftIsNotAnError(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		script string
+		err    bool
+	}{
+		{"exit 1, no output: none left", "#!/bin/sh\nexit 1\n", false},
+		{"exit 2: a real failure", "#!/bin/sh\nexit 2\n", true},
+	} {
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(c.script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin)
+		got, err := RetireCriticTimers()
+		if (err != nil) != c.err || len(got) != 0 {
+			t.Fatalf("%s: retired %v err %v, want error=%v", c.name, got, err, c.err)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/internal/sched"
 )
 
 // The roster is a special role: one form holding a view of every active PR
@@ -79,6 +80,8 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 	}
 	var rows []RosterRow
 	var sum RosterSummary
+	beat, _ := ReadBeat(ctx, fig) // nil: no heartbeat form (health says so)
+	now := time.Now()
 	for _, w := range critics {
 		if w.Runtime.Archived {
 			continue
@@ -116,7 +119,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 				row.Awaiting += c.AwaitingUs
 			}
 		}
-		row.Health = health(w, row, time.Now())
+		row.Health = health(w, row, now, beat)
 		if row.Health != "ok" {
 			sum.Unhealthy++
 		}
@@ -169,7 +172,7 @@ func SeatOf(ctx context.Context, fig seatReader, w *model.Critic) (seat string, 
 	return "", false, nil
 }
 
-func health(w *model.Critic, row RosterRow, now time.Time) string {
+func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat) string {
 	switch {
 	case w.Runtime.Stopped:
 		return "stopped: " + w.Runtime.StopReason
@@ -177,8 +180,12 @@ func health(w *model.Critic, row RosterRow, now time.Time) string {
 		return "no seat cast"
 	case strings.HasSuffix(row.Seat, "(unreachable)"):
 		return "seat aria is gone; re-cast"
-	case lateBy(w, now) > 0:
-		return fmt.Sprintf("late: last round %s ago, polls every %s", now.Sub(w.Runtime.LastPolled).Round(time.Second), w.Interval())
+	case beat == nil:
+		return "no ebacd heartbeat (is ebacd running?)"
+	case beatStale(beat, now) > 0:
+		return fmt.Sprintf("ebacd heartbeat %s old: scheduler down", now.Sub(beat.At).Round(time.Second))
+	case lateBy(w, beat, now) > 0:
+		return fmt.Sprintf("late: last round %s ago, polls every %s", now.Sub(beat.Critics[w.Name].Last).Round(time.Second), w.Interval())
 	case w.Runtime.ConsecutiveFailures > 0:
 		return fmt.Sprintf("%d consecutive failures", w.Runtime.ConsecutiveFailures)
 	case len(w.Runtime.PendingEvents) > 0 && w.Runtime.RetryCount > 0:
@@ -284,15 +291,49 @@ func modeLabel(w *model.Critic) string {
 	return s
 }
 
-// LateFactor: a live critic whose last round is older than this many
-// intervals is late (ebacd is not scheduling it, or its rounds fail to end).
+// LateFactor: a live critic whose last round (as ebacd's heartbeat records
+// it) is older than this many intervals is late: ebacd defers it, or its
+// rounds do not end. The critic's own last_polled is NOT the instrument: a
+// quiet round persists nothing, so it lags by hours on a healthy critic.
 const LateFactor = 4
 
 // lateBy is how far past LateFactor intervals a live critic's last round is
-// (0: on time, never polled, stopped or archived).
-func lateBy(w *model.Critic, now time.Time) time.Duration {
-	if w.Runtime.Stopped || w.Runtime.Archived || w.Runtime.LastPolled.IsZero() {
+// (0: on time, not yet run by this ebacd, stopped or archived).
+func lateBy(w *model.Critic, beat *sched.Beat, now time.Time) time.Duration {
+	e, ok := beat.Critics[w.Name]
+	if w.Runtime.Stopped || w.Runtime.Archived || !ok || e.Last.IsZero() {
 		return 0
 	}
-	return max(0, now.Sub(w.Runtime.LastPolled)-LateFactor*w.Interval())
+	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())
+}
+
+// beatStale is how far past twice its own period the heartbeat is (0: fresh).
+func beatStale(b *sched.Beat, now time.Time) time.Duration {
+	every := time.Duration(b.EveryS) * time.Second
+	if every <= 0 {
+		every = sched.BeatEvery
+	}
+	return max(0, now.Sub(b.At)-2*every)
+}
+
+// ReadBeat is ebacd's heartbeat (the one form of kind sched.BeatKind); nil, nil
+// when there is none.
+func ReadBeat(ctx context.Context, fig *figaro.Figaro) (*sched.Beat, error) {
+	found, err := FindFormsByKind(ctx, fig, sched.BeatKind)
+	if err != nil || len(found) != 1 {
+		return nil, err
+	}
+	f, err := fig.Form(ctx, found[0])
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(f["beat"])
+	if err != nil {
+		return nil, err
+	}
+	var b sched.Beat
+	if err := json.Unmarshal(raw, &b); err != nil || b.At.IsZero() {
+		return nil, err
+	}
+	return &b, nil
 }

@@ -3,43 +3,61 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"github.com/gluck/ebac/internal/sched"
 	"testing"
 	"time"
 
 	"github.com/gluck/ebac/internal/model"
 )
 
-// A live critic whose last round is older than 4 intervals is late (ebacd not scheduling it, or its rounds not
-// ending); exactly 4 intervals is on time; never polled, stopped or archived is not late. RED if LateFactor or the
-// comparison moves.
-func TestLateCriticIsNeverHealthy(t *testing.T) {
+// Health reads ebacd's heartbeat, never last_polled (a quiet round persists nothing, so last_polled lags by hours on
+// a healthy critic: 11-19, three critics read "late" while polling). Late = the heartbeat's last round older than 4
+// intervals; exactly 4 is on time; a critic this ebacd has not run yet, stopped or archived is not late; no
+// heartbeat, or one older than twice its period, is the scheduler's fault and says so. RED if health goes back to
+// last_polled, or LateFactor or the stale bound moves.
+func TestHealthReadsTheHeartbeat(t *testing.T) {
 	now := time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC)
 	row := RosterRow{Seat: "abc123"}
+	fresh := func(last time.Duration) *sched.Beat {
+		b := &sched.Beat{At: now.Add(-30 * time.Second), EveryS: 60, Critics: map[string]sched.Entry{}}
+		if last >= 0 {
+			b.Critics["x"] = sched.Entry{Last: now.Add(-last)}
+		}
+		return b
+	}
 	for _, c := range []struct {
 		name    string
-		ago     time.Duration // since LastPolled; 0 = never polled
+		beat    *sched.Beat
 		stopped bool
+		polled  time.Duration // last_polled age: must not matter
 		health  string
 	}{
-		{"exactly four 5-minute intervals is on time", 20 * time.Minute, false, "ok"},
-		{"one second past four intervals is late", 20*time.Minute + time.Second, false, "late: last round 20m1s ago, polls every 5m0s"},
-		{"never polled is not late", 0, false, "ok"},
-		{"stopped is not late", time.Hour, true, "stopped: "},
+		{"exactly four 5-minute intervals is on time", fresh(20 * time.Minute), false, 0, "ok"},
+		{"one second past four intervals is late", fresh(20*time.Minute + time.Second), false, 0, "late: last round 20m1s ago, polls every 5m0s"},
+		{"a stale last_polled with a recent heartbeat round is ok", fresh(time.Minute), false, 5 * time.Hour, "ok"},
+		{"not yet run by this ebacd is not late", fresh(-1), false, 5 * time.Hour, "ok"},
+		{"stopped is not late", fresh(time.Hour), true, 0, "stopped: "},
+		{"no heartbeat says so", nil, false, 0, "no ebacd heartbeat (is ebacd running?)"},
+		{"a heartbeat two periods old is still fresh", &sched.Beat{At: now.Add(-2 * time.Minute), EveryS: 60}, false, 0, "ok"},
+		{"a heartbeat past two periods is a dead scheduler", &sched.Beat{At: now.Add(-2*time.Minute - time.Second), EveryS: 60}, false, 0, "ebacd heartbeat 2m1s old: scheduler down"},
 	} {
 		w := &model.Critic{Name: "x", EverySec: 300}
-		if c.ago > 0 {
-			w.Runtime.LastPolled = now.Add(-c.ago)
+		if c.polled > 0 {
+			w.Runtime.LastPolled = now.Add(-c.polled)
 		}
 		w.Runtime.Stopped = c.stopped
-		if got := health(w, row, now); got != c.health {
+		if got := health(w, row, now, c.beat); got != c.health {
 			t.Errorf("%s: %q, want %q", c.name, got, c.health)
 		}
+	}
+	if LateFactor != 4 {
+		t.Fatalf("LateFactor %d", LateFactor)
 	}
 }
 
 func TestUnreachableSeatIsNeverHealthy(t *testing.T) {
 	for _, seat := range []string{"(empty)", "abc123 (unreachable)"} {
-		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, time.Now()); got == "ok" {
+		if got := health(&model.Critic{Name: "x"}, RosterRow{Seat: seat}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}); got == "ok" {
 			t.Errorf("seat %q scored healthy", seat)
 		}
 	}
@@ -104,16 +122,16 @@ func TestAlertCriticSeatIsTheAlertRole(t *testing.T) {
 		}
 		return RosterRow{Seat: seat}
 	}
-	if w := keel("@alert"); health(w, row(w), time.Now()) != "ok" {
-		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), time.Now()), row(w).Seat)
+	if w := keel("@alert"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "ok" {
+		t.Fatalf("--alert critic with a live alert role: %q (seat %q)", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}), row(w).Seat)
 	}
-	if w := keel("@void"); health(w, row(w), time.Now()) != "no seat cast" {
-		t.Fatalf("empty alert role: %q", health(w, row(w), time.Now()))
+	if w := keel("@void"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "no seat cast" {
+		t.Fatalf("empty alert role: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}))
 	}
-	if w := keel("@stale"); health(w, row(w), time.Now()) == "ok" {
+	if w := keel("@stale"); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) == "ok" {
 		t.Fatalf("dead alert holder scored healthy")
 	}
-	if w := keel(""); health(w, row(w), time.Now()) != "no seat cast" {
-		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), time.Now()))
+	if w := keel(""); health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}) != "no seat cast" {
+		t.Fatalf("control: a seatless critic without --alert: %q", health(w, row(w), time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}))
 	}
 }

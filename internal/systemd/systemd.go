@@ -1,6 +1,7 @@
 package systemd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -279,6 +280,10 @@ func unitPath(home string) string {
 // back (ebac reconcile R3 of the older ebac re-arms them).
 func RetireCriticTimers() ([]string, error) {
 	out, err := systemctlOut("list-unit-files", "ebac@*.timer", "--no-legend", "--no-pager")
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 && strings.TrimSpace(out) == "" {
+		return nil, nil // list-unit-files exits 1 when no unit matches: none left
+	}
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("list ebac@ timers: %v", err)
 	}

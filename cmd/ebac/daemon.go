@@ -91,21 +91,6 @@ func (g *figaroGuard) listed(err error) error {
 	return nil
 }
 
-// BeatKind marks ebacd's heartbeat form.
-const BeatKind = "ebac.daemon"
-
-// BeatEvery is how often ebacd writes its heartbeat form: a reader that sees
-// beat.at older than 2 x BeatEvery knows the scheduler is dead.
-const BeatEvery = time.Minute
-
-// Beat is the heartbeat form's one key, beat.
-type Beat struct {
-	At      time.Time                          `json:"at"`
-	EveryS  int                                `json:"every_s"`
-	Critics map[string]sched.Entry             `json:"critics"`
-	Buckets map[string]map[string]budget.Level `json:"buckets"`
-}
-
 func cmdDaemon(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	cfgPath := fs.String("config", "/etc/ebac/config.json", "ebacd configuration (budgets); absent = the built-in defaults")
@@ -165,8 +150,8 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 
 	beatID := ""
 	beat := func() {
-		b := Beat{At: time.Now().UTC(), EveryS: int(BeatEvery.Seconds()), Critics: s.Snapshot(), Buckets: ledger.Levels()}
-		id, err := writeBeat(ctx, st.Fig, BeatKind, "ebac-ebacd", beatID, b)
+		b := sched.Beat{At: time.Now().UTC(), EveryS: int(sched.BeatEvery.Seconds()), Critics: s.Snapshot(), Buckets: ledger.Levels()}
+		id, err := writeBeat(ctx, st.Fig, sched.BeatKind, "ebac-ebacd", beatID, b)
 		if err != nil {
 			fmt.Printf("ebacd: heartbeat: %v\n", err)
 			return
@@ -175,7 +160,7 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 	}
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
-	hb := time.NewTicker(BeatEvery)
+	hb := time.NewTicker(sched.BeatEvery)
 	defer hb.Stop()
 	s.Tick(ctx)
 	beat()
@@ -201,7 +186,7 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 
 // writeBeat writes the heartbeat to its form (kind ebac.daemon, minted once),
 // finding it again if it is gone.
-func writeBeat(ctx context.Context, fig *figaro.Figaro, kind, name, id string, b Beat) (string, error) {
+func writeBeat(ctx context.Context, fig *figaro.Figaro, kind, name, id string, b sched.Beat) (string, error) {
 	if id == "" {
 		found, err := fleet.FindFormsByKind(ctx, fig, kind)
 		if err != nil {

@@ -23,10 +23,8 @@ P2-onspend	internal/poll/poll.go	63	\t\tp.OnSpend(rep.Spend)		./internal/poll	Te
 F1-rest	internal/forge/gql.go	39	if rest := s.All - s.Calls; rest > 0 {	if rest := s.All; rest > 0 {	./internal/forge	TestSpendBudgetWireBytes
 F2-resetAt-query	internal/forge/gql.go	76	" rateLimit{cost remaining resetAt} "	" rateLimit{cost remaining} "	./internal/forge	TestWithRateLimitAsksTheReset
 F3-resetAt-parse	internal/forge/gql.go	104	\t\tg.spend.ResetAt = rl.ResetAt		./internal/forge	TestBranchTipsOneCall
-Y1-template-skip	internal/systemd/systemd.go	292	if !ok || name == "" || model.ValidName(name) != nil {	if !ok {	./internal/systemd	TestRetireCriticTimers
-Y2-dropins	internal/systemd/systemd.go	301	if err := RemoveTimerDropIns(name); err != nil {	if err := error(nil); err != nil {	./internal/systemd	TestRetireCriticTimers
-R1-late	internal/fleet/roster.go	297	return max(0, now.Sub(w.Runtime.LastPolled)-LateFactor*w.Interval())	return 0	./internal/fleet	TestLateCritic
-R2-latefactor	internal/fleet/roster.go	289	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestLateCritic
+Y1-template-skip	internal/systemd/systemd.go	297	if !ok || name == "" || model.ValidName(name) != nil {	if !ok {	./internal/systemd	TestRetireCriticTimers
+Y2-dropins	internal/systemd/systemd.go	306	if err := RemoveTimerDropIns(name); err != nil {	if err := error(nil); err != nil {	./internal/systemd	TestRetireCriticTimers
 D1-default-40	cmd/ebac/daemon.go	41	"graphql": {PerHour: 40, Burst: 10, Floor: 1000},	"graphql": {PerHour: 41, Burst: 10, Floor: 1000},	./cmd/ebac	TestDaemonDefaults
 D2-bad-config	cmd/ebac/daemon.go	59	return DaemonConfig{}, fmt.Errorf("%s: %w", path, err)	return DefaultDaemonConfig(), nil	./cmd/ebac	TestDaemonConfigFile
 L1-env-name	internal/figaro/lease.go	148	getenv("EBAC_LIFETIME_SOCK")	getenv("EBAC_LIFETIME")	./internal/figaro	TestLifetimeSock
@@ -34,10 +32,15 @@ L2-default	internal/figaro/lease.go	144	const DefaultLifetimeSock = "/run/user/1
 G1-redial	cmd/ebac/daemon.go	86	\t\t_ = g.reset()\n		./cmd/ebac	TestFigaroGuard
 G2-bound	cmd/ebac/daemon.go	88	\tif g.fails >= MaxListFailures {	\tif false {	./cmd/ebac	TestFigaroGuard
 G3-success-resets	cmd/ebac/daemon.go	81	\t\tg.fails = 0\n		./cmd/ebac	TestFigaroGuard
-Y3-continue	internal/systemd/systemd.go	299	\t\t\terrs = append(errs, err.Error())\n\t\t}\n\t\tif err := RemoveTimerDropIns	\t\t\treturn retired, err\n\t\t}\n\t\tif err := RemoveTimerDropIns	./internal/systemd	TestRetireCriticTimers
+Y3-continue	internal/systemd/systemd.go	304	\t\t\terrs = append(errs, err.Error())\n\t\t}\n\t\tif err := RemoveTimerDropIns	\t\t\treturn retired, err\n\t\t}\n\t\tif err := RemoveTimerDropIns	./internal/systemd	TestRetireCriticTimers
 W1-wake-draw	internal/budget/budget.go	226	if fits && lv.Wake >= e {	if false {	./internal/budget	TestReserveTable
 W2-wake-wait	internal/budget/budget.go	235	\t\t\t\tw = min(w, fill(e-lv.Wake, wr))\n	\t\t\t\tw = min(w, fill(e-lv.Wake, wr)+time.Hour)\n	./internal/budget	TestReserveTable
 W3-settle-wake	internal/budget/budget.go	288	\t\tif g.Wake[name] {	\t\tif false {	./internal/budget	TestSettleChargesThePoolTheGrantDrewOn
 W4-wake-refill-cap	internal/budget/budget.go	177	lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)	lv.Wake = math.Min(wb+100, lv.Wake+dt*wr/3600)	./internal/budget	TestRefillFillsBothPools
 O1-cadence	internal/sched/sched.go	176	\t\treturn next\n	\t\t_ = next\n	./internal/sched	TestFirstRoundKeepsCadence
 O2-overdue-spread	internal/sched/sched.go	178	\treturn now.Add(jitter(w.Interval()))	\treturn now.Add(jitter(2 * time.Minute))	./internal/sched	TestFirstRoundKeepsCadence
+H1-late-from-beat	internal/fleet/roster.go	307	return max(0, now.Sub(e.Last)-LateFactor*w.Interval())	return 0	./internal/fleet	TestHealthReadsTheHeartbeat
+H2-stale-bound	internal/fleet/roster.go	316	return max(0, now.Sub(b.At)-2*every)	return max(0, now.Sub(b.At)-3*every)	./internal/fleet	TestHealthReadsTheHeartbeat
+H3-no-beat	internal/fleet/roster.go	183	\tcase beat == nil:	\tcase false:	./internal/fleet	TestHealthReadsTheHeartbeat
+Y4-exit1-none	internal/systemd/systemd.go	284	ee.ExitCode() == 1	ee.ExitCode() == 99	./internal/systemd	TestRetireWithNoTimersLeft
+R2-latefactor	internal/fleet/roster.go	298	const LateFactor = 4	const LateFactor = 5	./internal/fleet	TestHealthReadsTheHeartbeat
