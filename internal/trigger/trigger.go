@@ -317,7 +317,6 @@ func senderIs(name string, e model.Event) bool {
 func (rs Rules) Apply(events []model.Event, roles map[string]string) (kept, dropped []model.Event) {
 	for _, e := range events {
 		act := Keep
-		e.Route = ""
 		for _, r := range rs {
 			if r.Default {
 				act, e.Route = r.Action, r.To
