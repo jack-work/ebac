@@ -18,8 +18,8 @@ S7-stopped	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archive
 S8-cred	internal/sched/sched.go	395	return "github:" + host	return ""	./internal/sched	TestCredentialAndClass
 S9-class-approve	internal/sched/sched.go	405	case model.SourceApprove, model.SourceOrgApprove, "teams-chat", "keel-threads":	case "teams-chat", "keel-threads":	./internal/sched	TestCredentialAndClass
 S10-est	internal/sched/sched.go	358	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
-P1-lock-held	internal/poll/poll.go	99	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
-P2-onspend	internal/poll/poll.go	68	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
+P1-lock-held	internal/poll/poll.go	104	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
+P2-onspend	internal/poll/poll.go	73	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
 F1-rest	internal/forge/gql.go	39	if rest := s.All - s.Calls; rest > 0 {	if rest := s.All; rest > 0 {	./internal/forge	TestSpendBudgetWireBytes
 F2-resetAt-query	internal/forge/gql.go	76	" rateLimit{cost remaining resetAt} "	" rateLimit{cost remaining} "	./internal/forge	TestWithRateLimitAsksTheReset
 F3-resetAt-parse	internal/forge/gql.go	104	\t\tg.spend.ResetAt = rl.ResetAt		./internal/forge	TestBranchTipsOneCall
@@ -49,17 +49,17 @@ U2-read-error	internal/fleet/roster.go	353	\t\treturn nil, fmt.Errorf("read %s: 
 U3-two-forms	internal/fleet/roster.go	349	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U4-no-beat	internal/fleet/roster.go	364	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 T1-clears-seat	internal/form/formstate.go	675	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
-E1-until-boundary	internal/model/critic.go	595	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
-E2-renew	internal/model/critic.go	585	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
-E3-allclosed-needs-prs	internal/model/critic.go	605	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
-E4-warn-once	internal/model/critic.go	619	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
-E5-warn-window	internal/model/critic.go	576	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
-E6-purge-default	internal/model/critic.go	627	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
-E7-ended-no-repurge	internal/model/critic.go	632	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
+E1-until-boundary	internal/model/critic.go	590	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./internal/model	TestEndReasonTable
+E2-renew	internal/model/critic.go	580	\t\tbase = *w.Stop.RenewedAt\n		./internal/model	TestEndReasonTable|TestEndWarning
+E3-allclosed-needs-prs	internal/model/critic.go	600	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./internal/model	TestEndReasonTable
+E4-warn-once	internal/model/critic.go	614	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./internal/model	TestEndWarning
+E5-warn-window	internal/model/critic.go	571	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./internal/model	TestEndWarning
+E6-purge-default	internal/model/critic.go	622	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./internal/model	TestPurgeDue|TestEndLabel
+E7-ended-no-repurge	internal/model/critic.go	627	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./internal/model	TestPurgeDue
 E8-sched-end	internal/sched/sched.go	202	\t\t\tif reason := w.EndReason(now); reason != "" {	\t\t\tif reason := ""; reason != "" {	./internal/sched	TestEndsAreEnforced
 E9-sched-purge	internal/sched/sched.go	171	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
 E10-sched-retry	internal/sched/sched.go	166	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
-E11-kill-order	internal/poll/poll.go	790	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
+E11-kill-order	internal/poll/poll.go	796	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
 E12-none-refused	cmd/ebac/critic.go	601	\t\t\treturn fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")	\t\t\tcontinue	./cmd/ebac	TestApplyEnd
 R3-default-7d	internal/model/critic.go	52	\t\tExpiresAfterSec:        7 * 86400,	\t\tExpiresAfterSec:        8 * 86400,	./internal/model	TestDefaultStopIsTransient
 R8-withrole-alone	cmd/ebac/critic.go	590	\t\t\t\treturn fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")	\t\t\t\t_ = 0	./cmd/ebac	TestApplyEndWithRole
@@ -84,7 +84,7 @@ P2-path-replaced	cmd/ebac/sudo.go	97	\treturn setenv("PATH", sudoPATH)	\treturn 
 P5-path-kept	cmd/ebac/sudo.go	97	\treturn setenv("PATH", sudoPATH)	\treturn setenv("PATH", getenv("PATH"))	./cmd/ebac	TestSudoGateWiring
 P6-default-path	cmd/ebac/sudo.go	84	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin"	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin:/nix/store"	./cmd/ebac	TestSudoGateWiring
 P7-maingate-path	cmd/ebac/sudo.go	101	func mainGate() error { return sudoGate(os.Args[1:], os.Getenv, os.Setenv) }	func mainGate() error { return refuseSudoFlags(os.Getenv("SUDO_UID"), os.Args[1:]) }	./cmd/ebac	TestMainGateReplacesPath
-P4-main-calls-gate	cmd/ebac/main.go	141	\tif err := mainGate(); err != nil {	\tif err := error(nil); err != nil {	./cmd/ebac	TestMainRefusesUnderSudo
+P4-main-calls-gate	cmd/ebac/main.go	152	\tif err := mainGate(); err != nil {	\tif err := error(nil); err != nil {	./cmd/ebac	TestMainRefusesUnderSudo
 H1-harness-post	internal/brief/project.go	72	[--event COMMENT|APPROVE] --body-file - < <file>`	[--event COMMENT|APPROVE] --body-file <file>`	./cmd/ebac	TestTaughtCommandsPassTheDoor
 H3-issue	internal/brief/project.go	87	--title '<title>' --body-file - < <path>	--title '<title>' --body-file <path>	./cmd/ebac	TestTaughtCommandsPassTheDoor
 H2-review-brief	internal/brief/brief.go	316	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file - < <file>	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file <file>	./cmd/ebac	TestTaughtCommandsPassTheDoor
