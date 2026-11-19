@@ -11,9 +11,9 @@ import (
 // One row per trusted field: a form value is ignored and named; the trusted value (or none) is what the critic gets;
 // a form value equal to the trusted one is not flagged. RED if any field reads from the form again.
 func TestTrustedApplyIgnoresFormValues(t *testing.T) {
-	tr := Trusted{ForgeHosts: []string{"microsoft.ghe.com", "github.com"}, Critics: map[string]TrustedCritic{
-		"keel-ok": {KeelURL: "https://keel.example", TokenCmd: []string{"hush", "oauth", "get", "ebac"}},
-		"rev-ok":  {Clone: "/srv/clone", WorktreeRoot: "/srv/wt", Notes: "AGENTS.md"},
+	tr := Trusted{ForgeHosts: []string{"microsoft.ghe.com", "github.com"}, BandHubSocket: "/run/band-hub/sock", Critics: map[string]TrustedCritic{
+		"@keel-ok": {KeelURL: "https://keel.example", TokenCmd: []string{"hush", "oauth", "get", "ebac"}},
+		"@rev-ok":  {Clone: "/srv/clone", WorktreeRoot: "/srv/wt", Notes: "AGENTS.md"},
 	}}
 	cases := []struct {
 		name    string
@@ -23,11 +23,11 @@ func TestTrustedApplyIgnoresFormValues(t *testing.T) {
 	}{
 		{"form token_cmd and url ignored, none trusted", Critic{Name: "keel-x", Source: "keel-threads", Keel: &KeelRef{URL: "https://evil", TokenCmd: []string{"touch", "/tmp/pwned"}}},
 			"keel.url,keel.token_cmd", func(w Critic) bool { return w.Keel.URL == "" && len(w.Keel.TokenCmd) == 0 }},
-		{"trusted keel values replace the form's", Critic{Name: "keel-ok", Source: "keel-threads", Keel: &KeelRef{URL: "https://evil", TokenCmd: []string{"sh"}}},
+		{"trusted keel values replace the form's", Critic{Name: "keel-ok", FormID: "@keel-ok", Source: "keel-threads", Keel: &KeelRef{URL: "https://evil", TokenCmd: []string{"sh"}}},
 			"keel.url,keel.token_cmd", func(w Critic) bool {
 				return w.Keel.URL == "https://keel.example" && slices.Equal(w.Keel.TokenCmd, []string{"hush", "oauth", "get", "ebac"})
 			}},
-		{"form equal to trusted is not flagged", Critic{Name: "keel-ok", Source: "keel-threads", Keel: &KeelRef{URL: "https://keel.example", TokenCmd: []string{"hush", "oauth", "get", "ebac"}}},
+		{"form equal to trusted is not flagged", Critic{Name: "keel-ok", FormID: "@keel-ok", Source: "keel-threads", Keel: &KeelRef{URL: "https://keel.example", TokenCmd: []string{"hush", "oauth", "get", "ebac"}}},
 			"", func(w Critic) bool { return w.Keel.URL == "https://keel.example" }},
 		{"keel branches token_cmd ignored", Critic{Name: "aether-work", Source: SourceKeelBranches, Branches: &KeelBranches{URL: "https://evil", TokenCmd: []string{"sh", "-c", "x"}}},
 			"keel_branches.url,keel_branches.token_cmd", func(w Critic) bool { return w.Branches.URL == "" && len(w.Branches.TokenCmd) == 0 }},
@@ -41,10 +41,16 @@ func TestTrustedApplyIgnoresFormValues(t *testing.T) {
 			"", func(w Critic) bool { return w.Host == "" }},
 		{"form clone/root/notes ignored, none trusted", Critic{Name: "rev-x", Worktree: &Worktree{Clone: "/tmp/c", Root: "/tmp/r"}, Notes: "/etc/shadow"},
 			"worktree.clone,worktree.root,notes", func(w Critic) bool { return w.Worktree == nil && w.Notes == "" }},
-		{"trusted clone/root/notes used", Critic{Name: "rev-ok", Worktree: &Worktree{Clone: "/tmp/c"}},
+		{"trusted clone/root/notes used", Critic{Name: "rev-ok", FormID: "@rev-ok", Worktree: &Worktree{Clone: "/tmp/c"}},
 			"worktree.clone", func(w Critic) bool {
 				return w.Worktree != nil && w.Worktree.Clone == "/srv/clone" && w.Worktree.Root == "/srv/wt" && w.Notes == "AGENTS.md"
 			}},
+		{"band-hub socket from the form ignored", Critic{Name: "band-state", Source: SourceBandHub, Band: &BandRef{Socket: "/run/band-grants/request.sock"}},
+			"band_hub.socket", func(w Critic) bool { return w.Band.Socket == "/run/band-hub/sock" }},
+		{"a seat renaming its critic onto another's profile gets nothing (keyed by form id)", Critic{Name: "keel-ok", FormID: "@seat-form", Source: "keel-threads", Keel: &KeelRef{}},
+			"", func(w Critic) bool { return w.Keel.URL == "" && len(w.Keel.TokenCmd) == 0 }},
+		{"releases api from the form ignored", Critic{Name: "r", Source: SourceReleases, Releases: &ReleasesRef{Repo: "a/b", API: "http://127.0.0.1:9"}},
+			"releases_watch.api", func(w Critic) bool { return w.Releases.API == "" }},
 		{"figaro_socket ignored", Critic{Name: "r", Source: SourceReleases, FigaroSock: "/tmp/sock"},
 			"figaro_socket", func(w Critic) bool { return w.FigaroSock == "" }},
 	}
@@ -70,5 +76,17 @@ func TestLoadTrusted(t *testing.T) {
 	_ = os.WriteFile(p, []byte(`{"trusted":`), 0o600)
 	if _, err := LoadTrusted(p); err == nil {
 		t.Fatal("a torn config loaded")
+	}
+}
+
+// What goes back onto the (seat-readable) form carries none of the trusted values. RED if Strip leaves one.
+func TestStripBlanksTrustedFields(t *testing.T) {
+	w := &Critic{Host: "microsoft.ghe.com", Notes: "n", FigaroSock: "/s", Keel: &KeelRef{URL: "u", TokenCmd: []string{"t"}},
+		Branches: &KeelBranches{URL: "u", TokenCmd: []string{"t"}}, Band: &BandRef{Socket: "/b"}, Releases: &ReleasesRef{API: "a"},
+		Worktree: &Worktree{Clone: "c", Root: "r"}}
+	Strip(w)
+	if w.Notes != "" || w.FigaroSock != "" || w.Keel.URL != "" || w.Keel.TokenCmd != nil || w.Branches.URL != "" || w.Branches.TokenCmd != nil ||
+		w.Band.Socket != "" || w.Releases.API != "" || w.Worktree != nil || w.Host != "microsoft.ghe.com" {
+		t.Fatalf("%+v", w)
 	}
 }

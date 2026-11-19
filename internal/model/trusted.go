@@ -18,8 +18,15 @@ import (
 type Trusted struct {
 	// ForgeHosts are the hosts a critic may name; the first is the default.
 	ForgeHosts []string `json:"forge_hosts"`
-	// Critics are the per-critic trusted values, by critic name.
+	// Critics are the per-critic trusted values, keyed by the critic's ROLE
+	// FORM id (@...): never by its name, which lives in the seat-writable
+	// critic key (review 5fd38 #1: a seat could rename itself onto another
+	// critic's profile).
 	Critics map[string]TrustedCritic `json:"critics,omitempty"`
+	// BandHubSocket is the hub socket every band-hub critic reads (a form
+	// value would unhide another socket in the plugin's sandbox: review
+	// e025e175 M1).
+	BandHubSocket string `json:"band_hub_socket,omitempty"`
 }
 
 // TrustedCritic is one critic's trusted values (all optional).
@@ -32,7 +39,12 @@ type TrustedCritic struct {
 }
 
 // DefaultTrusted: the one forge host ebac reads today, and nothing per critic.
-func DefaultTrusted() Trusted { return Trusted{ForgeHosts: []string{"microsoft.ghe.com"}} }
+func DefaultTrusted() Trusted {
+	return Trusted{ForgeHosts: []string{"microsoft.ghe.com"}, BandHubSocket: DefaultBandHubSocket}
+}
+
+// DefaultBandHubSocket is band-hub's metadata socket (bandstate.DefaultSocket).
+const DefaultBandHubSocket = "/run/band-hub/sock"
 
 // TrustedConfigPath is ebac's configuration file.
 const TrustedConfigPath = "/etc/ebac/config.json"
@@ -59,6 +71,9 @@ func LoadTrusted(path string) (Trusted, error) {
 	if len(f.Trusted.ForgeHosts) == 0 {
 		f.Trusted.ForgeHosts = DefaultTrusted().ForgeHosts
 	}
+	if f.Trusted.BandHubSocket == "" {
+		f.Trusted.BandHubSocket = DefaultBandHubSocket
+	}
 	return *f.Trusted, nil
 }
 
@@ -79,7 +94,7 @@ func (t Trusted) Apply(w *Critic) []string {
 	if w.Host == "" && len(t.ForgeHosts) > 0 && !nonForge(w) {
 		w.Host = t.ForgeHosts[0]
 	}
-	tc := t.Critics[w.Name]
+	tc := t.Critics[w.FormID]
 	if k := w.Keel; k != nil {
 		note("keel.url", k.URL != "" && k.URL != tc.KeelURL)
 		note("keel.token_cmd", len(k.TokenCmd) > 0 && !slices.Equal(k.TokenCmd, tc.TokenCmd))
@@ -100,6 +115,14 @@ func (t Trusted) Apply(w *Critic) []string {
 	}
 	note("notes", w.Notes != "" && w.Notes != tc.Notes)
 	w.Notes = tc.Notes
+	if b := w.Band; b != nil {
+		note("band_hub.socket", b.Socket != "" && b.Socket != t.BandHubSocket)
+		b.Socket = t.BandHubSocket
+	}
+	if rw := w.Releases; rw != nil {
+		note("releases_watch.api", rw.API != "")
+		rw.API = "" // the public api.github.com (review 5fd38 #3)
+	}
 	note("figaro_socket", w.FigaroSock != "")
 	w.FigaroSock = ""
 	return ignored
@@ -117,4 +140,23 @@ func nonForge(w *Critic) bool {
 // IgnoredNote is the ebac ls flag for ignored form fields.
 func IgnoredNote(fields []string) string {
 	return "form config ignored: " + strings.Join(fields, ",")
+}
+
+// Strip blanks the trusted fields of a critic about to be written to its
+// form: they come from the configuration on every load, and the form is
+// seat-readable (review 5fd38 #4). Host stays (allowlisted, not a secret).
+func Strip(w *Critic) {
+	if k := w.Keel; k != nil {
+		k.URL, k.TokenCmd = "", nil
+	}
+	if b := w.Branches; b != nil {
+		b.URL, b.TokenCmd = "", nil
+	}
+	if b := w.Band; b != nil {
+		b.Socket = ""
+	}
+	if r := w.Releases; r != nil {
+		r.API = ""
+	}
+	w.Worktree, w.Notes, w.FigaroSock = nil, "", ""
 }

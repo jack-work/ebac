@@ -679,7 +679,9 @@ func retireKeys(w *model.Critic, cur, set map[string]json.RawMessage) []string {
 
 // criticConfig is a critic without the fields that live elsewhere.
 func criticConfig(w *model.Critic) map[string]any {
-	b, _ := json.Marshal(w)
+	c := deepCopyCritic(w)
+	model.Strip(c) // the trusted fields never go back onto the seat-readable form
+	b, _ := json.Marshal(c)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
 	delete(m, "runtime")
@@ -874,6 +876,9 @@ func adoptWritten(w *model.Critic, written json.RawMessage) {
 		return
 	}
 	fresh.FormID, fresh.Runtime, fresh.Trigger, fresh.LegacyQuiet, fresh.Reads = w.FormID, w.Runtime, w.Trigger, w.LegacyQuiet, w.Reads
+	// The written key carries whatever a seat merged in mid-round: the
+	// trusted fields are applied again (review e025e175 M2).
+	fresh.FormIgnored = TrustedConfig().Apply(&fresh)
 	*w = fresh
 }
 
@@ -900,4 +905,12 @@ func TrustedConfig() model.Trusted {
 		trusted = t
 	})
 	return trusted
+}
+
+// deepCopyCritic copies a critic through JSON (Strip must not touch the caller's).
+func deepCopyCritic(w *model.Critic) *model.Critic {
+	b, _ := json.Marshal(w)
+	var c model.Critic
+	_ = json.Unmarshal(b, &c)
+	return &c
 }
