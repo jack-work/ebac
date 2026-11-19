@@ -138,7 +138,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
-	if err := refuseSudoFlags(os.Getenv("SUDO_UID"), os.Args[1:]); err != nil {
+	if err := sudoGate(os.Args[1:], os.Getenv, os.Setenv); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 		os.Exit(2)
 	}

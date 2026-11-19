@@ -26,7 +26,7 @@ func TestSudoDoorRefusesEveryPathFlag(t *testing.T) {
 		}
 	}
 	// The census: every flag the audit found that picks a binary, socket, host, URL, config, credential or path.
-	want := []string{"bin", "body-file", "clone", "config", "gh", "host", "keel-url", "notes", "socket", "token-cmd", "worktree-root"}
+	want := []string{"approver", "bin", "body-file", "clone", "config", "credential", "gh", "grant", "host", "keel-url", "notes", "principal", "socket", "token-cmd", "worktree-root"}
 	if len(sudoRefused) != len(want) {
 		t.Fatalf("%d refused flags, want %d (%v)", len(sudoRefused), len(want), want)
 	}
@@ -37,15 +37,15 @@ func TestSudoDoorRefusesEveryPathFlag(t *testing.T) {
 	}
 }
 
-// What passes through the door: harmless flags, --body-file - (stdin) in both forms, a refused flag's NAME as a
-// value, and anything after "--". RED if the stdin exception, the value/flag distinction or "--" goes.
+// What passes through the door: harmless flags and --body-file - (stdin) in both forms. A refused name anywhere,
+// also after "--" or as another flag's value, is refused (review d9d993be F1, F2: main's global extraction and Go's
+// flag package both read past those). RED if the stdin exception goes or a "--" stops the scan.
 func TestSudoDoorLetsHarmlessArgumentsThrough(t *testing.T) {
 	for _, args := range [][]string{
 		{"show", "--critic", "author-jack"},
 		{"set", "--critic", "x", "--end", "expires=30d"},
 		{"post", "--critic", "x", "--pr", "a/b#1", "--body-file", "-"},
 		{"post", "--critic", "x", "--pr", "a/b#1", "--body-file=-"},
-		{"post", "--critic", "x", "--", "--gh", "/x"},
 		{"ls"},
 	} {
 		if err := refuseSudoFlags("1000", args); err != nil {
@@ -59,5 +59,45 @@ func TestSudoDoorLetsHarmlessArgumentsThrough(t *testing.T) {
 	}
 	if err := refuseSudoFlags("1000", []string{"post", "--body-file", "/var/lib/ebac/x"}); err == nil {
 		t.Error("--body-file with a path was let through")
+	}
+}
+
+func TestSudoDoorScansPastDoubleDashAndValuePositions(t *testing.T) {
+	for _, args := range [][]string{
+		{"show", "--critic", "x", "--", "--socket", "/nonexistent/x.sock"},
+		{"add-keel", "--name", "--", "--token-cmd", "X"},
+		{"post", "--critic", "x", "--", "--gh", "/x"},
+	} {
+		if err := refuseSudoFlags("1000", args); err == nil {
+			t.Errorf("%v let through", args)
+		}
+	}
+}
+
+// Under the door PATH keeps only store, system and wrapper entries (sudo keeps the caller's PATH: review F3).
+// RED if a caller directory survives or a trusted one is dropped.
+func TestSudoPathKeepsOnlyTrustedEntries(t *testing.T) {
+	in := "/home/gluck/bin:/nix/store/abc-gh/bin:/tmp/evil:/run/current-system/sw/bin:/run/wrappers/bin:/etc/profiles/per-user/ebac/bin:/etc/profiles/per-user/gluck/bin:/run/current-system/sw/binX"
+	want := "/nix/store/abc-gh/bin:/run/current-system/sw/bin:/run/wrappers/bin:/etc/profiles/per-user/ebac/bin"
+	if got := sudoPath(in); got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// main's gate: with SUDO_UID it refuses a path flag and narrows PATH; without it, it does neither. RED if main stops
+// calling the scan, or the PATH narrowing goes (review F7: the wiring was untested).
+func TestSudoGateWiring(t *testing.T) {
+	env := map[string]string{"SUDO_UID": "1000", "PATH": "/tmp/evil:/nix/store/x/bin"}
+	get := func(k string) string { return env[k] }
+	set := func(k, v string) error { env[k] = v; return nil }
+	if err := sudoGate([]string{"show", "--socket", "/x"}, get, set); err == nil {
+		t.Fatal("a path flag passed the gate under sudo")
+	}
+	if err := sudoGate([]string{"show", "--critic", "x"}, get, set); err != nil || env["PATH"] != "/nix/store/x/bin" {
+		t.Fatalf("under sudo: err %v PATH %q", err, env["PATH"])
+	}
+	env = map[string]string{"PATH": "/tmp/evil"}
+	if err := sudoGate([]string{"show", "--socket", "/x"}, get, set); err != nil || env["PATH"] != "/tmp/evil" {
+		t.Fatalf("without sudo: err %v PATH %q", err, env["PATH"])
 	}
 }
