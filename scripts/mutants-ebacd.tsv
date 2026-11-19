@@ -32,3 +32,7 @@ D1-default-40	cmd/ebac/daemon.go	41	"graphql": {PerHour: 40, Burst: 10, Floor: 1
 D2-bad-config	cmd/ebac/daemon.go	59	return DaemonConfig{}, fmt.Errorf("%s: %w", path, err)	return DefaultDaemonConfig(), nil	./cmd/ebac	TestDaemonConfigFile
 L1-env-name	internal/figaro/lease.go	148	getenv("EBAC_LIFETIME_SOCK")	getenv("EBAC_LIFETIME")	./internal/figaro	TestLifetimeSock
 L2-default	internal/figaro/lease.go	144	const DefaultLifetimeSock = "/run/user/1000/figaro-lifetime/sock"	const DefaultLifetimeSock = "/run/user/1000/figaro-lifetime.sock"	./internal/figaro	TestLifetimeSock
+G1-redial	cmd/ebac/daemon.go	86	\t\t_ = g.reset()\n		./cmd/ebac	TestFigaroGuard
+G2-bound	cmd/ebac/daemon.go	88	\tif g.fails >= MaxListFailures {	\tif false {	./cmd/ebac	TestFigaroGuard
+G3-success-resets	cmd/ebac/daemon.go	81	\t\tg.fails = 0\n		./cmd/ebac	TestFigaroGuard
+Y3-continue	internal/systemd/systemd.go	299	\t\t\terrs = append(errs, err.Error())\n\t\t}\n\t\tif err := RemoveTimerDropIns	\t\t\treturn retired, err\n\t\t}\n\t\tif err := RemoveTimerDropIns	./internal/systemd	TestRetireCriticTimers

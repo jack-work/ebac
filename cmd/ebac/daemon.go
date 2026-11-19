@@ -61,6 +61,36 @@ func loadDaemonConfig(path string) (DaemonConfig, error) {
 	return c, nil
 }
 
+// MaxListFailures: ebacd exits non-zero after this many critic listings fail
+// in a row (one a second), so Restart=always starts it afresh; a transport
+// failure also drops the figaro connection at once so the next tick re-dials.
+// 11-19: a figaro bounce closed ebacd's cached connection and every tick
+// failed "connection closed" until a restart.
+const MaxListFailures = 60
+
+// figaroGuard re-dials figaro after a transport failure and counts listings
+// that fail in a row.
+type figaroGuard struct {
+	reset func() error // drops the cached connections (figaro.Figaro.Close)
+	fails int
+}
+
+// listed records one listing's outcome and says whether ebacd must exit.
+func (g *figaroGuard) listed(err error) error {
+	if err == nil {
+		g.fails = 0
+		return nil
+	}
+	g.fails++
+	if figaro.Unavailable(err) {
+		_ = g.reset()
+	}
+	if g.fails >= MaxListFailures {
+		return fmt.Errorf("figaro unreachable for %d listings in a row (last: %v): exiting so the unit restarts", g.fails, err)
+	}
+	return nil
+}
+
 // BeatKind marks ebacd's heartbeat form.
 const BeatKind = "ebac.daemon"
 
@@ -108,9 +138,17 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("ebacd: %v\n", err) // starts with empty buckets: it errs toward spending less
 	}
 
+	guard := &figaroGuard{reset: st.Fig.Close}
+	var fatal error
 	base := poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, GH: g.gh, Host: g.host, BackoffDir: st.Root}
 	s := &sched.Scheduler{
-		List: func(ctx context.Context) ([]*model.Critic, error) { return st.ListCritics(ctx) },
+		List: func(ctx context.Context) ([]*model.Critic, error) {
+			ws, err := st.ListCritics(ctx)
+			if f := guard.listed(err); f != nil {
+				fatal = f
+			}
+			return ws, err
+		},
 		Run: func(ctx context.Context, name string, settle func([]budget.Spend)) error {
 			p := base // one Poller per round: OnSpend settles THIS round's grant
 			p.OnSpend = settle
@@ -149,6 +187,12 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 			return nil
 		case <-tick.C:
 			s.Tick(ctx)
+			if fatal != nil {
+				fmt.Printf("ebacd: %v\n", fatal)
+				stop()
+				s.Wait()
+				return fatal
+			}
 		case <-hb.C:
 			beat()
 		}

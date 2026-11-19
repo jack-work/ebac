@@ -79,6 +79,9 @@ func TestRetireCriticTimers(t *testing.T) {
 			"author-jack,review-1",
 			"list-unit-files ebac@*.timer --no-legend --no-pager|stop ebac@author-jack.timer|is-enabled ebac@author-jack.timer|disable --now ebac@author-jack.timer|stop ebac@review-1.timer|is-enabled ebac@review-1.timer|disable --now ebac@review-1.timer"},
 		{"none left", "", "", "list-unit-files ebac@*.timer --no-legend --no-pager"},
+		{"a failing disable does not stop the rest", "ebac@a.timer enabled enabled\\nebac@b.timer enabled enabled\\n",
+			"a,b",
+			"list-unit-files ebac@*.timer --no-legend --no-pager|stop ebac@a.timer|is-enabled ebac@a.timer|disable --now ebac@a.timer|stop ebac@b.timer|is-enabled ebac@b.timer|disable --now ebac@b.timer"},
 		{"a path-like name is not ours", "ebac@../x.timer enabled enabled\n", "", "list-unit-files ebac@*.timer --no-legend --no-pager"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -86,7 +89,7 @@ func TestRetireCriticTimers(t *testing.T) {
 			t.Setenv("HOME", home)
 			bin := t.TempDir()
 			log := filepath.Join(bin, "calls")
-			script := "#!/bin/sh\nshift\necho \"$*\" >> " + log + "\ncase \"$1\" in\nlist-unit-files) printf '" + c.listing + "';;\nis-enabled) echo enabled;;\nesac\n"
+			script := "#!/bin/sh\nshift\necho \"$*\" >> " + log + "\ncase \"$*\" in\n\"disable --now ebac@a.timer\") echo Removed; exit 1;;\nesac\ncase \"$1\" in\nlist-unit-files) printf '" + c.listing + "';;\nis-enabled) echo enabled;;\nesac\n"
 			if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -96,8 +99,8 @@ func TestRetireCriticTimers(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, err := RetireCriticTimers()
-			if err != nil {
-				t.Fatalf("%s: %v", c.name, err)
+			if wantErr := strings.Contains(c.listing, "ebac@a.timer"); (err != nil) != wantErr {
+				t.Fatalf("%s: err %v, want error=%v", c.name, err, wantErr)
 			}
 			if strings.Join(got, ",") != c.retired {
 				t.Fatalf("%s: retired %q, want %q", c.name, got, c.retired)
@@ -113,7 +116,7 @@ func TestRetireCriticTimers(t *testing.T) {
 				t.Fatalf("%s: calls\n%s\nwant\n%s", c.name, got, c.calls)
 			}
 			_, statErr := os.Stat(dd)
-			if (c.retired != "") != os.IsNotExist(statErr) {
+			if strings.Contains(c.retired, "author-jack") != os.IsNotExist(statErr) {
 				t.Fatalf("%s: drop-ins left=%v", c.name, statErr == nil)
 			}
 		})

@@ -75,3 +75,31 @@ func TestLiveBeatMintsOnceAndWrites(t *testing.T) {
 		t.Fatalf("form kind %v beat %s", f["kind"], b)
 	}
 }
+
+// A transport failure drops the figaro connection at once (the next tick re-dials); any other failure does not;
+// 59 failed listings in a row keep ebacd running, the 60th stops it; one success resets the count. RED if the
+// reset, the bound or the reset-on-success goes.
+func TestFigaroGuardRedialsAndBoundsListFailures(t *testing.T) {
+	resets := 0
+	g := &figaroGuard{reset: func() error { resets++; return nil }}
+	if err := g.listed(fmt.Errorf("list forms: connection closed")); err != nil || resets != 1 {
+		t.Fatalf("transport failure: err %v resets %d, want nil 1", err, resets)
+	}
+	if err := g.listed(fmt.Errorf("decode critic: bad json")); err != nil || resets != 1 {
+		t.Fatalf("non-transport failure reset the connection: resets %d", resets)
+	}
+	if err := g.listed(nil); err != nil || g.fails != 0 {
+		t.Fatalf("a success did not reset the count: %d", g.fails)
+	}
+	for i := 1; i < 60; i++ {
+		if err := g.listed(fmt.Errorf("connection closed")); err != nil {
+			t.Fatalf("failure %d stopped ebacd: %v", i, err)
+		}
+	}
+	if err := g.listed(fmt.Errorf("connection closed")); err == nil {
+		t.Fatal("the 60th failure in a row did not stop ebacd")
+	}
+	if MaxListFailures != 60 {
+		t.Fatalf("bound %d", MaxListFailures)
+	}
+}

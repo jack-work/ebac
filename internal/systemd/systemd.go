@@ -282,7 +282,7 @@ func RetireCriticTimers() ([]string, error) {
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("list ebac@ timers: %v", err)
 	}
-	var retired []string
+	var retired, errs []string
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) == 0 {
@@ -292,13 +292,19 @@ func RetireCriticTimers() ([]string, error) {
 		if !ok || name == "" || model.ValidName(name) != nil {
 			continue // the template itself (ebac@.timer), or not ours
 		}
+		// Each timer on its own: one that fails does not keep the rest armed
+		// (11-19: disable printed "Removed ..." and exited non-zero on the
+		// first, and the rest stayed enabled).
 		if err := DisableTimer(name); err != nil {
-			return retired, err
+			errs = append(errs, err.Error())
 		}
 		if err := RemoveTimerDropIns(name); err != nil {
-			return retired, err
+			errs = append(errs, err.Error())
 		}
 		retired = append(retired, name)
+	}
+	if len(errs) > 0 {
+		return retired, fmt.Errorf("%d error(s): %s", len(errs), strings.Join(errs, "; "))
 	}
 	return retired, nil
 }
