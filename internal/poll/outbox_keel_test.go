@@ -14,11 +14,12 @@ func TestAuthorizeKeelArms(t *testing.T) {
 	ok := func(p model.Post) model.Post { p.PR, p.ByAria, p.ByRole = "notes/captains-log", aria, role; return p }
 
 	accept := map[string]model.Post{
-		"reply":            ok(model.Post{ReplyTo: "t1", Body: "x"}),
-		"reply + resolve":  ok(model.Post{ReplyTo: "t1", Body: "x", Resolve: true}),
-		"resolve alone":    ok(model.Post{ReplyTo: "t1", Resolve: true}),
-		"new thread":       ok(model.Post{Path: "2026/11/19/a.md", Line: 3, Body: "x"}),
-		"new thread + rev": ok(model.Post{Path: "handoffs/x.md", Line: 1, Rev: "abc", Body: "x"}),
+		"reply":                  ok(model.Post{ReplyTo: "t1", Body: "x"}),
+		"reply + resolve":        ok(model.Post{ReplyTo: "t1", Body: "x", Resolve: true}),
+		"resolve alone":          ok(model.Post{ReplyTo: "t1", Resolve: true}),
+		"new thread":             ok(model.Post{Path: "2026/11/19/a.md", Line: 3, Body: "x"}),
+		"new thread + rev":       ok(model.Post{Path: "handoffs/x.md", Line: 1, Rev: "abc", Body: "x"}),
+		"16000 chars of 2 bytes": ok(model.Post{ReplyTo: "t1", Body: strings.Repeat("é", KeelBodyMax)}),
 	}
 	for name, p := range accept {
 		if why := Authorize(w, nil, "jack", &p); why != "" {
