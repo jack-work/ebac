@@ -60,4 +60,4 @@ E8-sched-end	internal/sched/sched.go	172	\t\t\tif reason := w.EndReason(now); re
 E9-sched-purge	internal/sched/sched.go	165	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
 E10-sched-retry	internal/sched/sched.go	160	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
 E11-kill-order	internal/poll/poll.go	790	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
-E12-applyend-none-alone	cmd/ebac/critic.go	581	\t\t\tif len(items) != 1 {	\t\t\tif false {	./cmd/ebac	TestApplyEnd
+E12-none-refused	cmd/ebac/critic.go	583	\t\t\treturn fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")	\t\t\tcontinue	./cmd/ebac	TestApplyEnd

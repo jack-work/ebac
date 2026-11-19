@@ -235,7 +235,7 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 	askName := fs.String("ask-name", "", "approve critic: the asker's name in the review body and ping (\"\" = the chat alias)")
 	logins := fs.String("logins", "", "org-approve critic: the org's GHE logins, comma-separated (replaces the list)")
 	breaks := fs.String("known-breaks", "", "org-approve critic: check names allowed red (main-wide known breaks), comma-separated; \"\" clears")
-	end := fs.String("end", "", "the critic's end, replacing it: until=2026-12-01 | all-closed[:6h] | expires=30d | none (comma-joined: the earliest wins)")
+	end := fs.String("end", "", "the critic's end, replacing it: until=2026-12-01 | all-closed[:6h] | expires=30d (comma-joined: the earliest wins); no critic lives forever")
 	renew := fs.Bool("renew", false, "restart an expires_after end from now")
 	purgeAt := fs.String("purge-at", "", "an archived critic: when its forms are killed (2026-11-26 or RFC3339)")
 	_ = fs.Parse(args)
@@ -566,21 +566,21 @@ func cmdAck(ctx context.Context, g globals, args []string) error {
 }
 
 // applyEnd replaces a critic's end with spec: comma-joined until=<date>,
-// all-closed[:<grace>], expires=<D>, or none alone. Bad specs change nothing.
+// all-closed[:<grace>], expires=<D>. There is no "none": no critic lives
+// forever (the Boss, 11-19); a spec that leaves no end is refused. Bad specs
+// change nothing.
 func applyEnd(w *model.Critic, spec string) error {
 	st := w.Stop
 	st.Deadline, st.ExpiresAfterSec, st.RenewedAt, st.UntilAllClosed = nil, 0, nil, false
 	items := strings.Split(spec, ",")
 	if strings.TrimSpace(spec) == "" {
-		return fmt.Errorf("--end: empty (give none to clear)")
+		return fmt.Errorf("--end: empty: give until=<date>, all-closed[:grace] or expires=<D>")
 	}
 	for _, it := range items {
 		it = strings.TrimSpace(it)
 		switch {
 		case it == "none":
-			if len(items) != 1 {
-				return fmt.Errorf("--end: none stands alone")
-			}
+			return fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")
 		case strings.HasPrefix(it, "until="):
 			t, err := parseWhen(strings.TrimPrefix(it, "until="))
 			if err != nil {
@@ -603,7 +603,7 @@ func applyEnd(w *model.Critic, spec string) error {
 			}
 			st.ExpiresAfterSec = int(d.Seconds())
 		default:
-			return fmt.Errorf("--end %q: want until=<date>, all-closed[:grace], expires=<D> or none", it)
+			return fmt.Errorf("--end %q: want until=<date>, all-closed[:grace] or expires=<D>", it)
 		}
 	}
 	w.Stop = st
