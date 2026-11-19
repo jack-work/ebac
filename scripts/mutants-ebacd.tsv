@@ -71,16 +71,16 @@ F1-absorbed-not-ended	internal/sched/sched.go	189	\t\t\tcase cur != w.Stop.WithR
 F2-hop-bound	internal/fleet/role.go	30	\t\tif hop > MaxRoleHops {	\t\tif hop > 100*MaxRoleHops {	./internal/fleet	TestFollowRole
 F3-cycle	internal/fleet/role.go	27	\t\tif seen[cur] {	\t\tif seen[cur] && false {	./internal/fleet	TestFollowRole
 F4-absorbed-refused-at-set	internal/fleet/role.go	62	\tcase cur != id:\n\t\treturn fmt.Errorf("%s was absorbed into %s: name that role", id, cur)	\tcase cur != id && false:\n\t\treturn fmt.Errorf("%s was absorbed into %s: name that role", id, cur)	./internal/fleet	TestIsRosterRole
-D1-socket-listed	cmd/ebac/sudo.go	18	\t"socket":        "a socket ebac dials (figaro, band-hub, band-grants)",\n		./cmd/ebac	TestSudoDoor
-D2-token-cmd-listed	cmd/ebac/sudo.go	22	\t"token-cmd":     "a command ebac runs to obtain a bearer token",\n		./cmd/ebac	TestSudoDoor
-D3-eq-form	cmd/ebac/sudo.go	54	\t\tif k, v, ok := strings.Cut(name, "="); ok {	\t\tif k, v, ok := strings.Cut(name, "="); false && ok {	./cmd/ebac	TestSudoDoor
-D4-single-dash	cmd/ebac/sudo.go	52	\t\tname := strings.TrimLeft(a, "-")	\t\tname := strings.TrimPrefix(a, "--")	./cmd/ebac	TestSudoDoor
-D5-stdin-only	cmd/ebac/sudo.go	65	\t\t\tif val == "-" {	\t\t\tif val != "" {	./cmd/ebac	TestSudoDoor
-D6-sudo-keyed	cmd/ebac/sudo.go	44	\tif sudoUID == "" {\n\t\treturn nil\n\t}	\tif sudoUID == "never" {\n\t\treturn nil\n\t}	./cmd/ebac	TestSudoDoor
-D7-double-dash-stops	cmd/ebac/sudo.go	49	\t\tif !strings.HasPrefix(a, "-") || a == "-" || a == "--" {	\t\tif a == "--" {\n\t\t\treturn nil\n\t\t}\n\t\tif !strings.HasPrefix(a, "-") || a == "-" {	./cmd/ebac	TestSudo
-P3-gate-scans	cmd/ebac/sudo.go	93	\tif err := refuseSudoFlags(uid, args); err != nil {\n\t\treturn err\n\t}	\t_ = refuseSudoFlags	./cmd/ebac	TestSudo
-P4-main-calls-gate	cmd/ebac/main.go	141	\tif err := sudoGate(os.Args[1:], os.Getenv, os.Setenv); err != nil {	\tif err := error(nil); err != nil {	./cmd/ebac	TestMainRefusesUnderSudo
-D8-credential-listed	cmd/ebac/sudo.go	28	\t"credential":    "the band-grants credential ebac asks for",\n		./cmd/ebac	TestSudo
-P2-path-replaced	cmd/ebac/sudo.go	96	\treturn setenv("PATH", sudoPATH)	\treturn nil	./cmd/ebac	TestSudoGateWiring
-P5-path-kept	cmd/ebac/sudo.go	96	\treturn setenv("PATH", sudoPATH)	\treturn setenv("PATH", getenv("PATH"))	./cmd/ebac	TestSudoGateWiring
-P6-default-path	cmd/ebac/sudo.go	83	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin"	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin:/nix/store"	./cmd/ebac	TestSudoGateWiring
+D1-socket-listed	cmd/ebac/sudo.go	19	\t"socket":        "a socket ebac dials (figaro, band-hub, band-grants)",\n		./cmd/ebac	TestSudoDoor
+D2-token-cmd-listed	cmd/ebac/sudo.go	23	\t"token-cmd":     "a command ebac runs to obtain a bearer token",\n		./cmd/ebac	TestSudoDoor
+D3-eq-form	cmd/ebac/sudo.go	55	\t\tif k, v, ok := strings.Cut(name, "="); ok {	\t\tif k, v, ok := strings.Cut(name, "="); false && ok {	./cmd/ebac	TestSudoDoor
+D4-single-dash	cmd/ebac/sudo.go	53	\t\tname := strings.TrimLeft(a, "-")	\t\tname := strings.TrimPrefix(a, "--")	./cmd/ebac	TestSudoDoor
+D5-stdin-only	cmd/ebac/sudo.go	66	\t\t\tif val == "-" {	\t\t\tif val != "" {	./cmd/ebac	TestSudoDoor
+D6-sudo-keyed	cmd/ebac/sudo.go	45	\tif sudoUID == "" {\n\t\treturn nil\n\t}	\tif sudoUID == "never" {\n\t\treturn nil\n\t}	./cmd/ebac	TestSudoDoor
+D7-double-dash-stops	cmd/ebac/sudo.go	50	\t\tif !strings.HasPrefix(a, "-") || a == "-" || a == "--" {	\t\tif a == "--" {\n\t\t\treturn nil\n\t\t}\n\t\tif !strings.HasPrefix(a, "-") || a == "-" {	./cmd/ebac	TestSudo
+P3-gate-scans	cmd/ebac/sudo.go	94	\tif err := refuseSudoFlags(uid, args); err != nil {\n\t\treturn err\n\t}	\t_ = refuseSudoFlags	./cmd/ebac	TestSudo
+D8-credential-listed	cmd/ebac/sudo.go	29	\t"credential":    "the band-grants credential ebac asks for",\n		./cmd/ebac	TestSudo
+P2-path-replaced	cmd/ebac/sudo.go	97	\treturn setenv("PATH", sudoPATH)	\treturn nil	./cmd/ebac	TestSudoGateWiring
+P5-path-kept	cmd/ebac/sudo.go	97	\treturn setenv("PATH", sudoPATH)	\treturn setenv("PATH", getenv("PATH"))	./cmd/ebac	TestSudoGateWiring
+P6-default-path	cmd/ebac/sudo.go	84	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin"	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin:/nix/store"	./cmd/ebac	TestSudoGateWiring
+P7-maingate-path	cmd/ebac/sudo.go	101	func mainGate() error { return sudoGate(os.Args[1:], os.Getenv, os.Setenv) }	func mainGate() error { return refuseSudoFlags(os.Getenv("SUDO_UID"), os.Args[1:]) }	./cmd/ebac	TestMainGateReplacesPath

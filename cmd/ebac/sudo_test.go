@@ -116,3 +116,16 @@ func TestMainRefusesUnderSudo(t *testing.T) {
 		t.Fatalf("exit %v, output:\n%s", err, out)
 	}
 }
+
+// main's gate on the real environment replaces PATH (not just refuses flags): RED if main's gate stops calling
+// sudoGate (review 21cfc5d0 F7 residual: the subprocess test only saw the refusal).
+func TestMainGateReplacesPath(t *testing.T) {
+	t.Setenv("SUDO_UID", "1000")
+	t.Setenv("PATH", "/tmp/evil")
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	os.Args = []string{"ebac", "show", "--critic", "x"}
+	if err := mainGate(); err != nil || os.Getenv("PATH") != sudoPATH {
+		t.Fatalf("err %v PATH %q, want %q", err, os.Getenv("PATH"), sudoPATH)
+	}
+}

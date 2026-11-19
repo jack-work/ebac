@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -95,3 +96,6 @@ func sudoGate(args []string, getenv func(string) string, setenv func(string, str
 	}
 	return setenv("PATH", sudoPATH)
 }
+
+// mainGate is main's call into the door, on the real argv and environment.
+func mainGate() error { return sudoGate(os.Args[1:], os.Getenv, os.Setenv) }

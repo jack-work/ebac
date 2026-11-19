@@ -138,7 +138,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
-	if err := sudoGate(os.Args[1:], os.Getenv, os.Setenv); err != nil {
+	if err := mainGate(); err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 		os.Exit(2)
 	}
