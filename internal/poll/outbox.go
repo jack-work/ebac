@@ -37,6 +37,9 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 	if !w.Write && w.Mode != model.ModeReviewer {
 		return "this critic is read-only: posting needs `ebac set-write --on`"
 	}
+	if w.Mode == model.ModeKeel {
+		return authorizeKeel(w, p)
+	}
 	if p.React != "" {
 		if p.ReplyTo == "" {
 			return "react needs reply_to: the thread whose opening comment gets the reaction"
@@ -235,4 +238,61 @@ func (p *Poller) post(ctx context.Context, w *model.Critic, snap *model.Snapshot
 			post.Error = "the plugin returned no result for this post"
 		}
 	}
+}
+
+// KeelBodyMax is keel-web's comment limit (16384 chars) less room for the
+// door's stamp and the post marker.
+const KeelBodyMax = 16000
+
+// authorizeKeel is Authorize for a keel critic: a reply (reply_to), a new
+// thread on a file line (path + line, optional rev), and resolve (reply_to).
+// keel has no reviews, events or reactions. The writing seat must be named:
+// keel's door stamps every comment with it.
+func authorizeKeel(w *model.Critic, p *model.Post) string {
+	if w.Keel == nil {
+		return "keel critic without a repo"
+	}
+	if p.PR != w.Keel.Repo {
+		return fmt.Sprintf("%q is not this critic's keel repo (%s)", p.PR, w.Keel.Repo)
+	}
+	if p.Event != "" {
+		return "keel has no reviews: event is not allowed"
+	}
+	if p.React != "" {
+		return "keel has no reactions"
+	}
+	if why := model.KeelWriter(p.ByAria, p.ByRole); why != "" {
+		return why
+	}
+	if p.Resolve && p.ReplyTo == "" {
+		return "resolve needs reply_to: the thread to resolve"
+	}
+	if !p.Resolve && !p.HasBody() {
+		return "empty body"
+	}
+	if len([]rune(p.Body)) > KeelBodyMax {
+		return fmt.Sprintf("body is %d chars: keel takes at most %d", len([]rune(p.Body)), KeelBodyMax)
+	}
+	if why := Disclosure(p.Body); why != "" {
+		return why
+	}
+	if (p.Path == "") != (p.Line == 0) {
+		return "a new thread needs both path and line"
+	}
+	if p.Line < 0 {
+		return "line must be positive"
+	}
+	if p.ReplyTo != "" && p.Path != "" {
+		return "give reply_to or path/line, not both"
+	}
+	if p.ReplyTo == "" && p.Path == "" {
+		return "a keel post needs reply_to (a reply) or path + line (a new thread)"
+	}
+	if p.Rev != "" && p.Path == "" {
+		return "rev anchors a new thread: it needs path and line"
+	}
+	if p.Path != "" && !model.KeelPathMatches(p.Path, w.Keel.Paths) {
+		return fmt.Sprintf("path %s is outside this critic's paths %v", p.Path, w.Keel.Paths)
+	}
+	return ""
 }

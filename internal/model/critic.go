@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -500,6 +501,23 @@ type KeelRef struct {
 	Feed      bool     `json:"feed,omitempty"`
 	URL       string   `json:"url,omitempty"`
 	TokenCmd  []string `json:"token_cmd,omitempty"`
+}
+
+// KeelPathMatches applies a keel critic's path globs: path.Match, and dir/**
+// for a subtree; no globs = every path.
+func KeelPathMatches(p string, globs []string) bool {
+	if len(globs) == 0 {
+		return true
+	}
+	for _, g := range globs {
+		if dir, ok := strings.CutSuffix(g, "/**"); ok && strings.HasPrefix(p, dir+"/") {
+			return true
+		}
+		if ok, _ := path.Match(g, p); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // KeelState lives under system.ebac.runtime: the seat never sees it.

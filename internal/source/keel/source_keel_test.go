@@ -143,8 +143,8 @@ func TestKeelPathFilter(t *testing.T) {
 		t.Fatal("an out-of-scope thread reached the index")
 	}
 	for p, want := range map[string]bool{"README.md": true, "doc/x.md": true, "docs/x.md": false, "x/README.md": false} {
-		if got := pathMatches(p, r.Paths); got != want {
-			t.Errorf("pathMatches(%q) = %v, want %v", p, got, want)
+		if got := model.KeelPathMatches(p, r.Paths); got != want {
+			t.Errorf("model.KeelPathMatches(%q) = %v, want %v", p, got, want)
 		}
 	}
 }

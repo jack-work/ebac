@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 	"time"
@@ -19,13 +18,16 @@ import (
 
 // Source translates one keel repo's comment threads into a critic's inbox and
 // wakes the seat when the waited-on author answers, like GitHub threads. It
-// only reads: the door forwards GET threads and nothing else.
+// reads through the read door; the outbox (post.<id>: replies, new threads on
+// a file line, resolves) goes through the write door (post.go).
 //
 // It is the ebac-keel plugin.
 type Plugin struct {
 	// Client, when set, is used as is (tests); otherwise it is built from the
 	// critic's keel ref.
 	Client *Client
+	// Writer, when set, replaces the write door (tests).
+	Writer Writer
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
@@ -39,7 +41,23 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		if cl == nil {
 			cl = ForRef(w.Keel)
 		}
-		return round(ctx, cl, w, req.Seat, req.Keys), nil
+		rep := round(ctx, cl, w, req.Seat, req.Keys)
+		rep.Outbox = w.Write
+		return rep, nil
+	case plugin.OpPost:
+		if w.Keel == nil || w.Keel.Repo == "" {
+			return nil, fmt.Errorf("%s: keel critic without a repo", w.Name)
+		}
+		cl := pl.Client
+		if cl == nil {
+			cl = ForRef(w.Keel)
+		}
+		wr := pl.Writer
+		if wr == nil {
+			wr = WriteDoor{Socket: WriteSocket()}
+		}
+		sendPosts(ctx, cl, wr, w, req.Posts)
+		return &plugin.Reply{Posts: req.Posts}, nil
 	case plugin.OpBrief:
 		return &plugin.Reply{Brief: keelBrief(w, plugin.Unwire(req.Pending))}, nil
 	}
@@ -153,22 +171,6 @@ func knownPrincipal(author string, ref *model.KeelRef) bool {
 	return false
 }
 
-// pathMatches applies the critic's globs: path.Match, and dir/** for a subtree.
-func pathMatches(p string, globs []string) bool {
-	if len(globs) == 0 {
-		return true
-	}
-	for _, g := range globs {
-		if dir, ok := strings.CutSuffix(g, "/**"); ok && strings.HasPrefix(p, dir+"/") {
-			return true
-		}
-		if ok, _ := path.Match(g, p); ok {
-			return true
-		}
-	}
-	return false
-}
-
 // keelDiff compares a fetch with what was seen. The first round only records.
 // A new or edited comment by a waited-on author in an open thread wakes; any
 // other comment and a resolve or reopen are recorded; the seat's own comments
@@ -184,7 +186,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 	sort.Strings(paths)
 	repo := model.PRKey(ref.Repo)
 	for _, p := range paths {
-		if !pathMatches(p, ref.Paths) {
+		if !model.KeelPathMatches(p, ref.Paths) {
 			continue
 		}
 		for _, t := range byPath[p] {
@@ -249,7 +251,7 @@ func indexEntry(p string, t Thread) IndexEntry {
 func buildIndex(ref *model.KeelRef, byPath map[string][]Thread) map[string]IndexEntry {
 	index := map[string]IndexEntry{}
 	for p, ts := range byPath {
-		if !pathMatches(p, ref.Paths) {
+		if !model.KeelPathMatches(p, ref.Paths) {
 			continue
 		}
 		for _, t := range ts {
@@ -356,7 +358,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 	repo := model.PRKey(ref.Repo)
 	done := map[string]bool{}
 	for _, e := range evs {
-		if e.Seq <= after || !pathMatches(e.Path, ref.Paths) {
+		if e.Seq <= after || !model.KeelPathMatches(e.Path, ref.Paths) {
 			continue
 		}
 		switch e.Kind {

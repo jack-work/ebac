@@ -30,6 +30,9 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	react := fs.String("react", "", "with --reply-to: react to the comment that opened the thread (+1 -1 laugh hooray confused heart rocket eyes)")
 	bodyFile := fs.String("body-file", "", "file holding the body (- for stdin); optional with --resolve")
 	id := fs.String("id", "", "post id (default: generated)")
+	rev := fs.String("rev", "", "keel: with --path/--line, anchor the new thread on the diff view at this commit")
+	byAria := fs.String("by-aria", "", "keel: the writing seat's aria id (keel stamps it on the comment)")
+	byRole := fs.String("by-role", "", "keel: the writing seat's role name (keel stamps it on the comment)")
 	_ = fs.Parse(args)
 
 	var body []byte
@@ -65,7 +68,8 @@ func cmdPost(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	post := &model.Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react}
+	post := &model.Post{PR: *pr, Body: string(body), ReplyTo: *replyTo, Path: *path, Line: *line, Event: strings.ToUpper(*event), Resolve: *resolve, React: *react,
+		Rev: *rev, ByAria: *byAria, ByRole: *byRole}
 	if why := poll.Authorize(w, snap, "", post); why != "" {
 		return fmt.Errorf("refused: %s", why)
 	}

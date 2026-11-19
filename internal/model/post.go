@@ -3,6 +3,7 @@ package model
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -32,6 +33,14 @@ type Post struct {
 	Resolve bool `json:"resolve,omitempty"`
 	// React, with ReplyTo, reacts to the comment that opened that thread.
 	React string `json:"react,omitempty"`
+	// Rev, keel only, with Path and Line: anchor the new thread on the diff
+	// view at this commit instead of the file at main's head.
+	Rev string `json:"rev,omitempty"`
+	// ByAria and ByRole, keel only: the seat that wrote the post. keel's
+	// write door stamps every comment with them ("jack via Figaro <aria8>
+	// (<role>): "), so the thread names its writer, never ebac.
+	ByAria string `json:"by_aria,omitempty"`
+	ByRole string `json:"by_role,omitempty"`
 
 	Sent     *PostReceipt `json:"sent,omitempty"`
 	Resolved string       `json:"resolved,omitempty"` // when the thread was resolved
@@ -46,6 +55,24 @@ type PostReceipt struct {
 	At  string `json:"at"`
 	// Recovered: the marker was already on the forge, so nothing was posted.
 	Recovered bool `json:"recovered,omitempty"`
+}
+
+var (
+	keelAria = regexp.MustCompile(`^[0-9a-f]{8,32}$`)
+	keelRole = regexp.MustCompile(`^[a-z-]{1,40}$`)
+)
+
+// KeelWriter says why a keel post's writer is not one keel's write door
+// accepts ("" when it is): by_aria 8-32 hex, by_role 1-40 of [a-z-]. The
+// door stamps both onto the comment, so a post never goes out unmarked.
+func KeelWriter(aria, role string) string {
+	if !keelAria.MatchString(aria) {
+		return fmt.Sprintf("by_aria %q: the writing seat's aria id, 8-32 lowercase hex", aria)
+	}
+	if !keelRole.MatchString(role) {
+		return fmt.Sprintf("by_role %q: the writing seat's role, 1-40 of a-z and -", role)
+	}
+	return ""
 }
 
 func (p *Post) HasBody() bool { return strings.TrimSpace(p.Body) != "" }
