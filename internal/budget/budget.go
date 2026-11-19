@@ -49,8 +49,28 @@ type Config struct {
 	// Credentials maps a credential id to its limits by name ("graphql",
 	// "rest"). A credential not listed is unmetered.
 	Credentials map[string]map[string]Limit `json:"credentials"`
-	// Keep is the fraction of a bucket's burst a class may not spend into.
+	// Keep is the fraction of the shared pool's burst a class may not spend into.
 	Keep map[Class]float64 `json:"keep"`
+	// WakeShare is the fraction of each limit (rate and burst) set aside as
+	// the wake pool: only wake-critical rounds draw on it, so no scan or
+	// backfill debt can defer them. 0 = DefaultWakeShare.
+	WakeShare float64 `json:"wake_share,omitempty"`
+}
+
+// DefaultWakeShare: a fifth of each limit is wake-critical's own.
+const DefaultWakeShare = 0.2
+
+func (c Config) wakeShare() float64 {
+	if c.WakeShare > 0 {
+		return c.WakeShare
+	}
+	return DefaultWakeShare
+}
+
+// pools splits lim into the shared pool and the wake pool (rate per hour, burst).
+func (c Config) pools(lim Limit) (sharedRate, sharedBurst, wakeRate, wakeBurst float64) {
+	w := c.wakeShare()
+	return lim.PerHour * (1 - w), lim.Burst * (1 - w), lim.PerHour * w, lim.Burst * w
 }
 
 // DefaultKeep: wake-critical drains to 0, scan keeps 20 %, backfill 50 %.
@@ -75,9 +95,11 @@ type Spend struct {
 	ResetAt   time.Time `json:"reset_at,omitzero"` // zero = not reported
 }
 
-// Level is one bucket's state, persisted and shown.
+// Level is one limit's state, persisted and shown: the shared pool (Tokens)
+// and the wake pool (Wake).
 type Level struct {
 	Tokens    float64   `json:"tokens"`
+	Wake      float64   `json:"wake"`
 	At        time.Time `json:"at"`
 	Remaining int       `json:"remaining"` // account-wide, last reported; -1 = never
 	ResetAt   time.Time `json:"reset_at,omitzero"`
@@ -85,8 +107,12 @@ type Level struct {
 
 // Grant is a reservation: settle it once the round has run.
 type Grant struct {
-	Cred string
-	Est  map[string]float64
+	Cred  string
+	Class Class
+	Est   map[string]float64
+	// Wake names the limits this grant drew from the wake pool (the rest
+	// came from the shared pool); Settle corrects the pool it drew on.
+	Wake map[string]bool
 }
 
 // Ledger is the buckets. Safe for concurrent use.
@@ -108,7 +134,8 @@ func Open(cfg Config, path string, now func() time.Time) (*Ledger, error) {
 	for cred, lims := range cfg.Credentials {
 		l.levels[cred] = map[string]*Level{}
 		for name, lim := range lims {
-			l.levels[cred][name] = &Level{Tokens: lim.Burst, At: t, Remaining: -1}
+			_, sb, _, wb := cfg.pools(lim)
+			l.levels[cred][name] = &Level{Tokens: sb, Wake: wb, At: t, Remaining: -1}
 		}
 	}
 	if path == "" {
@@ -125,7 +152,7 @@ func Open(cfg Config, path string, now func() time.Time) (*Ledger, error) {
 	if err != nil {
 		for _, lims := range l.levels {
 			for _, lv := range lims {
-				lv.Tokens = 0
+				lv.Tokens, lv.Wake = 0, 0
 			}
 		}
 		return l, fmt.Errorf("budget ledger %s unreadable, every bucket starts empty: %w", path, err)
@@ -134,65 +161,98 @@ func Open(cfg Config, path string, now func() time.Time) (*Ledger, error) {
 		for name, lv := range lims {
 			if cur, ok := l.levels[cred][name]; ok && lv != nil {
 				*cur = *lv
-				if cur.Tokens > l.cfg.Credentials[cred][name].Burst {
-					cur.Tokens = l.cfg.Credentials[cred][name].Burst
-				}
+				_, sb, _, wb := cfg.pools(l.cfg.Credentials[cred][name])
+				cur.Tokens, cur.Wake = math.Min(cur.Tokens, sb), math.Min(cur.Wake, wb)
 			}
 		}
 	}
 	return l, nil
 }
 
-// refill brings lv up to now at lim's rate, capped at its burst.
-func refill(lv *Level, lim Limit, now time.Time) {
+// refill brings both pools up to now at their rates, each capped at its burst.
+func (c Config) refill(lv *Level, lim Limit, now time.Time) {
 	if dt := now.Sub(lv.At).Seconds(); dt > 0 {
-		lv.Tokens = math.Min(lim.Burst, lv.Tokens+dt*lim.PerHour/3600)
+		sr, sb, wr, wb := c.pools(lim)
+		lv.Tokens = math.Min(sb, lv.Tokens+dt*sr/3600)
+		lv.Wake = math.Min(wb, lv.Wake+dt*wr/3600)
 		lv.At = now
 	}
 }
 
+// fill is how long a pool at rate per hour takes to gain short tokens.
+func fill(short, rate float64) time.Duration {
+	if rate <= 0 {
+		return time.Hour
+	}
+	return time.Duration(math.Ceil(short*3600/rate*1e3)) * time.Millisecond
+}
+
 // Reserve asks for est (by limit name) on cred for a round of class cl. It
 // returns a Grant, or the time to ask again. An unmetered credential, or a
-// limit the credential does not meter, is always granted. An estimate above
-// a bucket's burst asks only for the burst, so a large round is not starved
-// forever; settling charges what it really spent.
+// limit the credential does not meter, is always granted.
+//
+// A wake-critical round that fits the wake pool draws on it first, so scan
+// and backfill debt in the shared pool never defers it; otherwise it draws on
+// the shared pool down to zero, and waits only for whichever pool fills
+// first. Scan and backfill draw only on the shared pool and leave their keep
+// share of it. An estimate above the shared pool's burst asks only for that
+// burst, so a large round is not starved forever; settling charges what it
+// really spent.
 func (l *Ledger) Reserve(cred string, cl Class, est map[string]float64) (Grant, time.Time, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	lims, metered := l.cfg.Credentials[cred]
 	if !metered {
-		return Grant{Cred: cred, Est: est}, time.Time{}, true
+		return Grant{Cred: cred, Class: cl, Est: est}, time.Time{}, true
 	}
 	var wait time.Time
+	fromWake := map[string]bool{}
 	for name, lim := range lims {
 		lv := l.levels[cred][name]
-		refill(lv, lim, now)
+		l.cfg.refill(lv, lim, now)
 		if lim.Floor > 0 && lv.Remaining >= 0 && lv.Remaining < lim.Floor && lv.ResetAt.After(now) {
 			wait = later(wait, lv.ResetAt)
 			continue
 		}
-		need, asked := math.Min(est[name], lim.Burst), est[name] > 0
-		if !asked {
+		e := est[name]
+		if e <= 0 {
 			continue
 		}
-		keep := l.cfg.keep(cl) * lim.Burst
-		if short := need + keep - lv.Tokens; short > 0 {
-			if lim.PerHour <= 0 {
-				wait = later(wait, now.Add(time.Hour))
+		sr, sb, wr, wb := l.cfg.pools(lim)
+		need := math.Min(e, sb)
+		if cl == WakeCritical {
+			fits := e <= wb
+			if fits && lv.Wake >= e {
+				fromWake[name] = true
 				continue
 			}
-			wait = later(wait, now.Add(time.Duration(math.Ceil(short*3600/lim.PerHour*1e3))*time.Millisecond))
+			if lv.Tokens >= need {
+				continue
+			}
+			w := fill(need-lv.Tokens, sr)
+			if fits {
+				w = min(w, fill(e-lv.Wake, wr))
+			}
+			wait = later(wait, now.Add(w))
+			continue
+		}
+		if short := need + l.cfg.keep(cl)*sb - lv.Tokens; short > 0 {
+			wait = later(wait, now.Add(fill(short, sr)))
 		}
 	}
 	if !wait.IsZero() {
 		return Grant{}, wait, false
 	}
 	for name := range lims {
-		l.levels[cred][name].Tokens -= est[name]
+		if fromWake[name] {
+			l.levels[cred][name].Wake -= est[name]
+		} else {
+			l.levels[cred][name].Tokens -= est[name]
+		}
 	}
 	l.save()
-	return Grant{Cred: cred, Est: est}, time.Time{}, true
+	return Grant{Cred: cred, Class: cl, Est: est, Wake: fromWake}, time.Time{}, true
 }
 
 // Settle charges a granted round what it really spent: the difference from
@@ -224,8 +284,12 @@ func (l *Ledger) Settle(g Grant, spent []Spend) {
 	}
 	for name, lim := range lims {
 		lv := l.levels[g.Cred][name]
-		refill(lv, lim, now)
-		lv.Tokens += g.Est[name] - got[name]
+		l.cfg.refill(lv, lim, now)
+		if g.Wake[name] {
+			lv.Wake += g.Est[name] - got[name]
+		} else {
+			lv.Tokens += g.Est[name] - got[name]
+		}
 	}
 	l.save()
 }
@@ -240,7 +304,7 @@ func (l *Ledger) Levels() map[string]map[string]Level {
 		out[cred] = map[string]Level{}
 		for name, lim := range lims {
 			lv := l.levels[cred][name]
-			refill(lv, lim, now)
+			l.cfg.refill(lv, lim, now)
 			out[cred][name] = *lv
 		}
 	}

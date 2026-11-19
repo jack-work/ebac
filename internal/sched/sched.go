@@ -25,10 +25,6 @@ const (
 	// DefaultListEvery is how often the critic set is re-read: a new critic
 	// starts within this, a removed one stops.
 	DefaultListEvery = time.Minute
-	// StartSpread bounds the first round of every critic after a start: each
-	// is due at a jittered moment within min(its interval, StartSpread), so
-	// a restart does not fire every critic in the same second.
-	StartSpread = 2 * time.Minute
 	// defaultEst is the first estimate of a critic never settled.
 	defaultEst = 1
 )
@@ -153,8 +149,7 @@ func (s *Scheduler) sync(ws []*model.Critic, now time.Time) {
 		seen[w.Name] = true
 		e, ok := s.entries[w.Name]
 		if !ok {
-			spread := min(w.Interval(), StartSpread)
-			e = &Entry{Next: now.Add(s.Jitter(spread)), Est: map[string]float64{}}
+			e = &Entry{Next: firstDue(w, now, s.Jitter), Est: map[string]float64{}}
 			s.entries[w.Name] = e
 		}
 		e.interval, e.Cred, e.Class = w.Interval(), Credential(w), ClassOf(w)
@@ -169,6 +164,18 @@ func (s *Scheduler) sync(ws []*model.Critic, now time.Time) {
 			delete(s.entries, name)
 		}
 	}
+}
+
+// firstDue is when a critic newly seen (at start, or newly added) runs first:
+// one interval after its last round if that is still ahead, so a restart keeps
+// its cadence; an OVERDUE critic (never polled, or its interval passed while
+// ebacd was down) at a jittered moment within one interval, so after a long
+// outage the overdue rounds spread out instead of draining the budget at once.
+func firstDue(w *model.Critic, now time.Time, jitter func(time.Duration) time.Duration) time.Time {
+	if next := w.Runtime.LastPolled.Add(w.Interval()); !w.Runtime.LastPolled.IsZero() && next.After(now) {
+		return next
+	}
+	return now.Add(jitter(w.Interval()))
 }
 
 // dueNames is the critics due now and not running, most overdue first.

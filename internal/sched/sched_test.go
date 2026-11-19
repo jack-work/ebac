@@ -116,26 +116,29 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// RED if the defaults move: pool 4, round deadline 10 min, re-list every minute, start spread 2 min.
+// RED if the defaults move: pool 4, round deadline 10 min, re-list every minute.
 func TestDefaultsAreTheStatedNumbers(t *testing.T) {
-	if DefaultPool != 4 || DefaultRoundTimeout != 10*time.Minute || DefaultListEvery != time.Minute || StartSpread != 2*time.Minute {
-		t.Fatalf("pool %d deadline %s list %s spread %s", DefaultPool, DefaultRoundTimeout, DefaultListEvery, StartSpread)
+	if DefaultPool != 4 || DefaultRoundTimeout != 10*time.Minute || DefaultListEvery != time.Minute {
+		t.Fatalf("pool %d deadline %s list %s", DefaultPool, DefaultRoundTimeout, DefaultListEvery)
 	}
 }
 
-// RED if a restart fires every critic at once: each first round is jittered within min(interval, 2 min).
-func TestFirstRoundIsSpreadWithinMinOfIntervalAndTwoMinutes(t *testing.T) {
+// A newly seen critic keeps its cadence when its last round is less than an interval old; an overdue one (never
+// polled, or its interval passed while ebacd was down) runs at a jittered moment within ONE interval. RED if the
+// spread shrinks back to a fixed window (a boot stampede) or the cadence is lost.
+func TestFirstRoundKeepsCadenceOrSpreadsOverdueOverOneInterval(t *testing.T) {
 	c := newClock()
-	s := sched(c, ledger(t, c), newFake(), critic("slow", 5*time.Minute), critic("fast", 30*time.Second))
+	recent := critic("recent", 5*time.Minute)
+	recent.Runtime.LastPolled = c.now().Add(-time.Minute)
+	stale := critic("stale", 30*time.Minute)
+	stale.Runtime.LastPolled = c.now().Add(-6 * time.Hour)
+	s := sched(c, ledger(t, c), newFake(), recent, stale, critic("never", 5*time.Minute))
 	s.Tick(context.Background())
 	snap := s.Snapshot()
-	for name, want := range map[string]time.Duration{"slow": time.Minute, "fast": 15 * time.Second} {
+	for name, want := range map[string]time.Duration{"recent": 4 * time.Minute, "stale": 15 * time.Minute, "never": 150 * time.Second} {
 		if got := snap[name].Next.Sub(c.now()); got != want {
 			t.Errorf("%s first due in %s, want %s", name, got, want)
 		}
-	}
-	if f := s.Run; f == nil {
-		t.Fatal("no runner")
 	}
 }
 
@@ -147,7 +150,7 @@ func TestADueCriticRunsAndIsDueAgainOneIntervalAfterItEnds(t *testing.T) {
 	if f.count("a") != 0 {
 		t.Fatal("ran before it was due")
 	}
-	c.add(time.Minute)
+	c.add(150 * time.Second)
 	s.Tick(context.Background())
 	waitFor(t, "a started", func() bool { return f.count("a") == 1 })
 	f.ch("a") <- nil
@@ -163,7 +166,7 @@ func TestACriticNeverRunsTwiceAtOnce(t *testing.T) {
 	c := newClock()
 	f := newFake()
 	s := sched(c, ledger(t, c), f, critic("a", 30*time.Second))
-	s.Tick(context.Background()) // lists: due in 15 s
+	s.Tick(context.Background()) // lists: never polled, due within its 30 s interval (jitter d/2 = 15 s)
 	c.add(15 * time.Second)
 	s.Tick(context.Background())
 	s.Tick(context.Background())
@@ -188,7 +191,7 @@ func TestThePoolBoundsConcurrentRounds(t *testing.T) {
 	}
 	s := sched(c, ledger(t, c), f, ws...)
 	s.Pool = 2
-	s.Tick(context.Background()) // lists: all due in 15 s
+	s.Tick(context.Background()) // lists: all due in 15 s (jitter d/2 of 30 s)
 	c.add(time.Minute)
 	done := 0
 	for done < 6 {
@@ -218,16 +221,16 @@ func TestAShortBucketDefersTheRoundToItsRefill(t *testing.T) {
 		t.Fatal("drain")
 	}
 	f := newFake()
-	s := sched(c, l, f, critic("a", 5*time.Minute)) // scan: keeps 2, asks 1; a minute refills 2/3 -> short 7/3 -> 210 s
-	s.Tick(context.Background())                    // lists: due in 1 min
-	c.add(time.Minute)
+	s := sched(c, l, f, critic("a", 5*time.Minute)) // shared pool 8 drained to -2; 150 s refill 4/3 -> -2/3; scan keeps 1.6, asks 1 -> short 49/15 -> 367.5 s
+	s.Tick(context.Background())                    // lists: due in 2.5 min (jitter d/2 of 5 min)
+	c.add(150 * time.Second)
 	s.Tick(context.Background())
 	if f.count("a") != 0 {
 		t.Fatal("ran on an empty bucket")
 	}
 	e := s.Snapshot()["a"]
-	if got := e.Next.Sub(c.now()); got != 210*time.Second || !strings.Contains(e.Deferred, "short") {
-		t.Fatalf("deferred %s (%q), want 210s", got, e.Deferred)
+	if got := e.Next.Sub(c.now()); got != 367500*time.Millisecond || !strings.Contains(e.Deferred, "short") {
+		t.Fatalf("deferred %s (%q), want 367.5s", got, e.Deferred)
 	}
 }
 
@@ -302,7 +305,7 @@ func TestAHungRoundReleasesItsSlotAndIsNotRunAgain(t *testing.T) {
 	}
 }
 
-// RED if spend is not settled, or the estimate stops following it: est 1, spent 5 -> next est 3; tokens 10 - 5 = 5.
+// RED if spend is not settled, or the estimate stops following it: est 1, spent 5 -> next est 3; shared 8 - 5 = 3.
 func TestARoundSettlesItsSpendAndTheEstimateFollows(t *testing.T) {
 	c := newClock()
 	l := ledger(t, c)
@@ -313,8 +316,8 @@ func TestARoundSettlesItsSpendAndTheEstimateFollows(t *testing.T) {
 	waitFor(t, "a started", func() bool { return f.count("a") == 1 })
 	f.ch("a") <- []budget.Spend{{Limit: "graphql", N: 5, Remaining: 4000}}
 	s.Wait()
-	if got := l.Levels()[ghe]["graphql"]; got.Tokens != 5 || got.Remaining != 4000 {
-		t.Fatalf("bucket %+v, want tokens 5 remaining 4000", got)
+	if got := l.Levels()[ghe]["graphql"]; got.Tokens != 3 || got.Wake != 2 || got.Remaining != 4000 {
+		t.Fatalf("bucket %+v, want shared 3 wake 2 remaining 4000", got)
 	}
 	if est := s.Snapshot()["a"].Est; est["graphql"] != 3 || est["rest"] != 1 {
 		t.Fatalf("estimate %v, want graphql 3 rest 1", est)
