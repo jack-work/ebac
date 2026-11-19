@@ -64,6 +64,6 @@ E12-none-refused	cmd/ebac/critic.go	601	\t\t\treturn fmt.Errorf("--end none: ref
 R3-default-7d	internal/model/critic.go	52	\t\tExpiresAfterSec:        7 * 86400,	\t\tExpiresAfterSec:        8 * 86400,	./internal/model	TestDefaultStopIsTransient
 R4-unreadable-not-gone	internal/fleet/role.go	24	\t\treturn false, "", fmt.Errorf("role %s unreadable: %w", id, err)	\t\treturn false, "unreadable", nil	./internal/fleet	TestRoleStanding
 R5-moved-to	internal/fleet/role.go	26	\tif to, ok := f["moved-to"]; ok && to != nil {	\tif to, ok := f["moved-to"]; false && ok && to != nil {	./internal/fleet	TestRoleStanding|TestIsRosterRole
-R6-needs-target-aria	internal/fleet/role.go	46	\tif f["target-aria"] == nil {	\tif false {	./internal/fleet	TestIsRosterRole
-R7-sched-unknown-skips	internal/sched/sched.go	180	\t\t\t\tfmt.Fprintf(s.Out, "%s: with-role end not judged: %v\n", w.Name, err)\n\t\t\t\tcontinue	\t\t\t\tpresent = false	./internal/sched	TestWithRoleEnds
 R8-withrole-alone	cmd/ebac/critic.go	590	\t\t\t\treturn fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")	\t\t\t\t_ = 0	./cmd/ebac	TestApplyEndWithRole
+R6-needs-target-aria	internal/fleet/role.go	46	\tif f["target-aria"] == nil {	\tif f["target-aria"] == "never" {	./internal/fleet	TestIsRosterRole
+R7-sched-unknown-skips	internal/sched/sched.go	178	\t\t\tpresent, why, err := s.Role(ctx, w.Stop.WithRole)\n\t\t\tif err != nil {	\t\t\tpresent, why, err := s.Role(ctx, w.Stop.WithRole)\n\t\t\tif err != nil && false {	./internal/sched	TestWithRoleEnds
