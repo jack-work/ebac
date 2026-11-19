@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -99,5 +102,26 @@ func TestSudoGateWiring(t *testing.T) {
 	env = map[string]string{"PATH": "/tmp/evil"}
 	if err := sudoGate([]string{"show", "--socket", "/x"}, get, set); err != nil || env["PATH"] != "/tmp/evil" {
 		t.Fatalf("without sudo: err %v PATH %q", err, env["PATH"])
+	}
+}
+
+// TestMainHelper runs main() with EBAC_MAIN_ARGS when EBAC_MAIN_HELPER=1 (used by TestMainRefusesUnderSudo).
+func TestMainHelper(t *testing.T) {
+	if os.Getenv("EBAC_MAIN_HELPER") != "1" {
+		t.Skip("helper: runs only as a subprocess of TestMainRefusesUnderSudo")
+	}
+	os.Args = append([]string{"ebac"}, strings.Fields(os.Getenv("EBAC_MAIN_ARGS"))...)
+	main()
+}
+
+// The real binary's main refuses a path flag under SUDO_UID with exit 2 and the door's message, before it dials
+// anything. RED if main stops calling the gate (review F7).
+func TestMainRefusesUnderSudo(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainHelper$")
+	cmd.Env = append(os.Environ(), "EBAC_MAIN_HELPER=1", "SUDO_UID=1000", "EBAC_MAIN_ARGS=show --critic x --socket /nonexistent/x.sock")
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 || !strings.Contains(string(out), "--socket refused through the sudo door (SUDO_UID=1000)") {
+		t.Fatalf("exit %v, output:\n%s", err, out)
 	}
 }
