@@ -110,3 +110,5 @@ A7-ls-flag	internal/fleet/roster.go	190	\tcase w.NoAuthority:\n\t\treturn model.
 A8-apply-write	internal/model/authority.go	61	\tsetb("write", w.Write, a.Write, &w.Write)\n		./internal/model	TestAuthorityApply
 A9-apply-source	internal/model/authority.go	56	\tset("source", w.Source, a.Source, &w.Source)\n		./internal/model	TestAuthorityApply
 A10-apply-approver	internal/model/authority.go	75	\t\tset("org_approve.approver", o.Approver, a.Approver, &o.Approver)\n		./internal/model	TestAuthorityApply
+S1-missing-once	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif true {	./internal/poll	TestMissingStampKey
+S2-other-always	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif !stampKeyMissingLogged.Swap(true) {	./internal/poll	TestMissingStampKey

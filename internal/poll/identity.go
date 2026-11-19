@@ -3,8 +3,11 @@ package poll
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gluck/ebac/internal/identity"
 	"github.com/gluck/ebac/internal/model"
@@ -92,6 +95,9 @@ func (p *Poller) withReviewCheck(ctx context.Context, w *model.Critic) map[strin
 	return keys
 }
 
+// stampKeyMissingLogged: the missing stamp key was reported once this process.
+var stampKeyMissingLogged atomic.Bool
+
 func (p *Poller) reviewCheck(ctx context.Context, w *model.Critic, rawCfg, rawVerdicts json.RawMessage) model.KeelReviewCheck {
 	var chk model.KeelReviewCheck
 	var cfg model.KeelReviewConfig
@@ -100,7 +106,11 @@ func (p *Poller) reviewCheck(ctx context.Context, w *model.Critic, rawCfg, rawVe
 	}
 	key, err := identity.LoadKey(identity.KeyPath(), false)
 	if err != nil {
-		fmt.Fprintf(p.Out, "%s: review check: %v\n", w.Name, err)
+		// No key yet is normal until the first ebac review makes one: say so
+		// once per process, not every round. Any other failure every time.
+		if !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {
+			fmt.Fprintf(p.Out, "%s: review check: %v\n", w.Name, err)
+		}
 		return chk
 	}
 	chk.Config = identity.Verify(key, cfg.Stamp, model.KeelConfigStampFields(w.FormID, w.Name, w.Keel.Repo, cfg)...)
