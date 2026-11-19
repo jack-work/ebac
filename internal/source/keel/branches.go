@@ -82,6 +82,19 @@ func (c *Client) Span(ctx context.Context, repo, base, head string) (*Span, erro
 	return &sp, nil
 }
 
+// LogPath is the newest n commits reachable from rev that touch path.
+func (c *Client) LogPath(ctx context.Context, repo, rev, path string, n int) ([]Commit, error) {
+	body, err := c.get(ctx, repoPath(repo, "log")+"?"+url.Values{"rev": {rev}, "path": {path}, "n": {strconv.Itoa(n)}}.Encode(), 0)
+	if err != nil {
+		return nil, err
+	}
+	var cs []Commit
+	if err := json.Unmarshal(body, &cs); err != nil || cs == nil {
+		return nil, fmt.Errorf("keel GET log %s %s: want a list (%v): %s", rev, path, err, snippet(body))
+	}
+	return cs, nil
+}
+
 // Log is the newest n commits reachable from rev (n at most 500).
 func (c *Client) Log(ctx context.Context, repo, rev string, n int) ([]Commit, error) {
 	body, err := c.get(ctx, repoPath(repo, "log")+"?"+url.Values{"rev": {rev}, "n": {strconv.Itoa(n)}}.Encode(), 0)

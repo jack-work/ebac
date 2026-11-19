@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/plugin"
@@ -70,7 +71,30 @@ func TestReadReviewParsesAndRefuses(t *testing.T) {
 	}
 }
 
+// logDoor answers keel's log for one path and records the query.
+type logDoor struct{ got *string }
+
+func (d logDoor) Where() string { return "log" }
+func (d logDoor) Get(_ context.Context, path string, _ time.Duration) (int, []byte, error) {
+	*d.got = path
+	return 200, []byte(`[{"sha":"a1b2c3","parents":[],"author":"jack","time":1,"subject":"edit d.md"}]`), nil
+}
+
+func TestDocRevAsksKeelsLogForThePathOnMain(t *testing.T) {
+	var got string
+	rev, err := DocRev(context.Background(), &Client{T: logDoor{&got}}, "notes/captains-log", "2026/11/19/d.md")
+	if err != nil || rev != "a1b2c3" {
+		t.Fatalf("rev %q err %v", rev, err)
+	}
+	if want := "/api/r/notes-captains-log/log?n=1&path=2026%2F11%2F19%2Fd.md&rev=main"; got != want {
+		t.Fatalf("query %q, want %q", got, want)
+	}
+}
+
 func TestReviewRoundWritesOnlyOnChangeAndKeepsTheOpenCount(t *testing.T) {
+	old := DocRev
+	DocRev = func(context.Context, *Client, string, string) (string, error) { return "", nil }
+	defer func() { DocRev = old }()
 	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
 	st := &model.KeelState{}
 	keys := map[string]json.RawMessage{

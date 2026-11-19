@@ -469,10 +469,19 @@ func round(ctx context.Context, cl *Client, w *model.Critic, seat string, keys m
 	return rep
 }
 
-// DocRev is the reviewed doc's current revision: the last commit touching
-// it. "" with no error means keel cannot say (no per-path log on this door):
+// DocRev is the reviewed doc's current revision: the last commit on main
+// touching it (keel's log filtered by path). A doc with no commit yet is "":
 // verdicts are then taken without a revision check, and review_state says so.
-var DocRev = func(ctx context.Context, cl *Client, repo, doc string) (string, error) { return "", nil }
+var DocRev = func(ctx context.Context, cl *Client, repo, doc string) (string, error) {
+	cs, err := cl.LogPath(ctx, repo, "main", doc, 1)
+	if err != nil {
+		return "", err
+	}
+	if len(cs) == 0 {
+		return "", nil
+	}
+	return cs[0].SHA, nil
+}
 
 // reviewRound writes review_state when a review is configured and its state
 // changed; a bad review key goes to review_error.
