@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -88,7 +89,7 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("issue", flag.ExitOnError)
 	name := fs.String("critic", "", "critic name")
 	title := fs.String("title", "", "issue title")
-	bodyFile := fs.String("body-file", "", "path to the issue body")
+	bodyFile := fs.String("body-file", "", "the issue body: - for stdin (the only form through the sudo door), or a path")
 	repo := fs.String("repo", "", "override the critic's issue repo")
 	var labels stringList
 	fs.Var(&labels, "label", "label (repeatable)")
@@ -111,7 +112,12 @@ func cmdIssue(ctx context.Context, g globals, args []string) error {
 	if *title == "" || *bodyFile == "" {
 		return fmt.Errorf("--title and --body-file are both required")
 	}
-	body, err := os.ReadFile(*bodyFile)
+	var body []byte
+	if *bodyFile == "-" {
+		body, err = io.ReadAll(os.Stdin) // the only form the sudo door lets through
+	} else {
+		body, err = os.ReadFile(*bodyFile)
+	}
 	if err != nil {
 		return err
 	}

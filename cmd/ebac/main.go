@@ -94,14 +94,14 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac resume --critic N
   ebac rm     --critic N [--purge]           archive and remove
   ebac ack    --critic N --round R           the seat says it has acted on a delta
-  ebac post   --critic N --pr P [--reply-to T [--react +1] [--resolve] | --path F --line L] [--event E] --body-file F
+  ebac post   --critic N --pr P [--reply-to T [--react +1] [--resolve] | --path F --line L] [--event E] --body-file - < F
                                             queue a comment or review on the form; the next round sends it
   ebac compact --critic N [--dry-run]        rewrite the form without comment bodies (author watch: run one
                                             round now, keeping only tracked PRs; sizes before and after)
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
   ebac selfcheck [--critic N]                harness invariants, for develop mode
-  ebac issue  --critic N --title T --body-file F   file a harness defect
+  ebac issue  --critic N --title T --body-file - < F   file a harness defect
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
   ebac reconcile [--dry-run]                rectify drift between critics/, forms and timers

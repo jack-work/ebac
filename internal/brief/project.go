@@ -69,7 +69,7 @@ func NewHarnessContract(w *model.Critic) HarnessContract {
 	c := HarnessContract{
 		Truncation: fmt.Sprintf("Values here are cut at %d chars with a trailing … (a cut object also has unbalanced braces). Expected, not a bug. On either sign read the real value with `figaro form %s -j` before drawing a conclusion, and never report on an elided value.", FormValueElisionLimit, w.FormID),
 		Rule:       "write ONLY post.<id>, and acknowledge with the ack command (it writes read.<critic>). ebac owns kind, critic, prs, harness and harness_protocol_*: anything written there is overwritten next round.",
-		Post:       fmt.Sprintf("Post through this form, never with gh directly: `ebac post --critic %s --pr <owner/repo#n> [--reply-to <thread id> [--react +1] [--resolve] | --path <file> --line <n>] [--event COMMENT|APPROVE] --body-file <file>`. --react reacts to the comment that opened the thread; --resolve resolves it after the reply; with either, --body-file is optional. A top-level PR comment omits --event; --event submits a review, and so does --path. ebac sends it within one round and writes post.<id>.sent (url), .reacted, .resolved, .refused (why) or .error. A pending (unsubmitted) review of yours on the PR swallows replies unseen and blocks reviews: ebac refuses those until the operator submits or deletes it.", w.Name),
+		Post:       fmt.Sprintf("Post through this form, never with gh directly: `ebac post --critic %s --pr <owner/repo#n> [--reply-to <thread id> [--react +1] [--resolve] | --path <file> --line <n>] [--event COMMENT|APPROVE] --body-file - < <file>` (the body on stdin: through the sudo door --body-file takes only -). --react reacts to the comment that opened the thread; --resolve resolves it after the reply; with either, --body-file is optional. A top-level PR comment omits --event; --event submits a review, and so does --path. ebac sends it within one round and writes post.<id>.sent (url), .reacted, .resolved, .refused (why) or .error. A pending (unsubmitted) review of yours on the PR swallows replies unseen and blocks reviews: ebac refuses those until the operator submits or deletes it.", w.Name),
 		Ack:        fmt.Sprintf("ebac ack --critic %s --round <delta.round> [--note '<one line>']", w.Name),
 		Selfcheck:  fmt.Sprintf("ebac selfcheck --critic %s", w.Name),
 		Authority:  "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
@@ -84,7 +84,7 @@ func NewHarnessContract(w *model.Critic) HarnessContract {
 		c.Authority = "WRITE granted on this critic's pull requests: reply, comment and push to the head branch are allowed. Approve, merge and close are NOT. Any PR not named on this critic stays read-only."
 	}
 	if w.IssueRepo != "" {
-		c.Issue = fmt.Sprintf("ebac issue --critic %s --title '<title>' --body-file <path>   (files into %s)", w.Name, w.IssueRepo)
+		c.Issue = fmt.Sprintf("ebac issue --critic %s --title '<title>' --body-file - < <path>   (files into %s)", w.Name, w.IssueRepo)
 	} else {
 		c.Issue = "no issue repo configured; run: ebac set-issue-repo --critic " + w.Name + " --repo <owner/repo>"
 	}

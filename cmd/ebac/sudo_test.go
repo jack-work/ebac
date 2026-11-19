@@ -6,6 +6,9 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/gluck/ebac/internal/brief"
+	"github.com/gluck/ebac/internal/model"
 )
 
 // One row per refused flag, in both spellings and both value forms: refused through the sudo door, accepted without
@@ -127,5 +130,39 @@ func TestMainGateReplacesPath(t *testing.T) {
 	os.Args = []string{"ebac", "show", "--critic", "x"}
 	if err := mainGate(); err != nil || os.Getenv("PATH") != sudoPATH {
 		t.Fatalf("err %v PATH %q, want %q", err, os.Getenv("PATH"), sudoPATH)
+	}
+}
+
+// Every ebac command the harness and the brief teach a seat must pass the sudo door: each --body-file in that text is
+// "- < <file>" (the body on stdin), and the command, cut at the redirect, is accepted by the door. RED if any taught
+// command goes back to --body-file <file> (a seat following the form would be refused).
+func TestTaughtCommandsPassTheDoor(t *testing.T) {
+	w := &model.Critic{Name: "review-1", Mode: model.ModeReviewer, IssueRepo: "a/b", FormID: "@f"}
+	h := brief.NewHarnessContract(w)
+	text := h.Post + "\n" + h.Issue + "\n" + brief.ProtocolText(w, &model.Snapshot{}, "me")
+	dev := *w
+	dev.Mode = model.ModeDevelop
+	text += "\n" + brief.ProtocolText(&dev, &model.Snapshot{}, "me")
+	var cmds []string
+	for _, line := range strings.Split(text, "\n") {
+		for _, part := range strings.Split(line, "`") {
+			for _, verb := range []string{"ebac post ", "ebac issue "} {
+				if i := strings.Index(part, verb); i >= 0 && strings.Contains(part[i:], "--body-file") {
+					cmds = append(cmds, part[i:])
+				}
+			}
+		}
+	}
+	if len(cmds) < 5 {
+		t.Fatalf("found %d taught --body-file commands, want at least 5 (post, issue, review, inline, develop issue): %q", len(cmds), cmds)
+	}
+	for _, c := range cmds {
+		if !strings.Contains(c, "--body-file - <") {
+			t.Errorf("taught command does not pass the body on stdin: %q", c)
+		}
+		argv := strings.Fields(strings.SplitN(c, "<", 2)[0])
+		if err := refuseSudoFlags("1000", argv[1:]); err != nil {
+			t.Errorf("taught command refused by the door: %q: %v", c, err)
+		}
 	}
 }
