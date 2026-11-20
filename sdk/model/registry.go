@@ -69,12 +69,13 @@ func CheckRegistrations(regs map[string]Registration, live map[string]Registrati
 	return out
 }
 
-// diffKeys names the top-level keys whose JSON values differ (a key absent on
-// one side and empty/zero on the other is equal).
+// diffKeys names the top-level keys whose values differ in the critic ebac
+// would DECODE from each side (review 7d507c69): both are decoded into a
+// Critic and re-encoded, so Go's case-insensitive key matching, duplicate
+// keys and zero values are judged exactly as ebac sees them, and a non-zero
+// value on one side always differs.
 func diffKeys(a, b json.RawMessage) []string {
-	var ma, mb map[string]json.RawMessage
-	_ = json.Unmarshal(a, &ma)
-	_ = json.Unmarshal(b, &mb)
+	ma, mb := canonical(a), canonical(b)
 	keys := map[string]bool{}
 	for k := range ma {
 		keys[k] = true
@@ -84,7 +85,7 @@ func diffKeys(a, b json.RawMessage) []string {
 	}
 	var out []string
 	for k := range keys {
-		if !jsonEqual(ma[k], mb[k]) {
+		if !bytes.Equal(ma[k], mb[k]) {
 			out = append(out, k)
 		}
 	}
@@ -92,41 +93,12 @@ func diffKeys(a, b json.RawMessage) []string {
 	return out
 }
 
-func jsonEqual(a, b json.RawMessage) bool {
-	norm := func(r json.RawMessage) string {
-		if len(bytes.TrimSpace(r)) == 0 {
-			return "null"
-		}
-		var v any
-		if json.Unmarshal(r, &v) != nil {
-			return string(r)
-		}
-		switch x := v.(type) {
-		case nil:
-			return "null"
-		case bool:
-			if !x {
-				return "null"
-			}
-		case string:
-			if x == "" {
-				return "null"
-			}
-		case float64:
-			if x == 0 {
-				return "null"
-			}
-		case []any:
-			if len(x) == 0 {
-				return "null"
-			}
-		case map[string]any:
-			if len(x) == 0 {
-				return "null"
-			}
-		}
-		b, _ := json.Marshal(v)
-		return string(b)
-	}
-	return norm(a) == norm(b)
+// canonical is a critic key as ebac decodes it, re-encoded by top-level key.
+func canonical(raw json.RawMessage) map[string]json.RawMessage {
+	var c Critic
+	_ = json.Unmarshal(raw, &c)
+	b, _ := json.Marshal(c)
+	var m map[string]json.RawMessage
+	_ = json.Unmarshal(b, &m)
+	return m
 }

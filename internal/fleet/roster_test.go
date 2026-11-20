@@ -204,3 +204,12 @@ func TestUndeclaredIsFlagged(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// Undeclared never hides a failure: a failing undeclared critic shows its failure (review 7d507c69 A2).
+func TestUndeclaredDoesNotMaskFailure(t *testing.T) {
+	w := &model.Critic{Name: "x", Undeclared: true}
+	w.Runtime.ConsecutiveFailures = 3
+	if got := health(w, RosterRow{Seat: "abc"}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil); got != "3 consecutive failures" {
+		t.Fatalf("%q", got)
+	}
+}

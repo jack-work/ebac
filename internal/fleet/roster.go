@@ -189,8 +189,6 @@ func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat, bea
 		return "seat aria is gone; re-cast"
 	case w.NoAuthority:
 		return model.NoAuthorityNote(w.FormID)
-	case w.Undeclared:
-		return model.UndeclaredNote
 	case len(w.FormIgnored) > 0:
 		return model.IgnoredNote(w.FormIgnored)
 	case beatErr != nil:
@@ -207,6 +205,10 @@ func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat, bea
 		return fmt.Sprintf("delivery retrying (%d)", w.Runtime.RetryCount)
 	case w.Runtime.LastError != "":
 		return "error: " + model.FirstLine(w.Runtime.LastError)
+	}
+	if w.Undeclared {
+		// Last: a failing critic shows its failure, not only that it is undeclared (review 7d507c69 A2).
+		return model.UndeclaredNote
 	}
 	return "ok"
 }
