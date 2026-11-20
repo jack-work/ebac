@@ -15,3 +15,15 @@ func TestMinEveryLiterals(t *testing.T) {
 		t.Fatalf("MinEvery(no feed) = %s, want 0", got)
 	}
 }
+
+// Socket: EBAC_KEEL_SOCKET wins; unset falls back to the literal default door.
+func TestSocketFromEnvElseDefault(t *testing.T) {
+	t.Setenv("EBAC_KEEL_SOCKET", "/tmp/fake-door.sock")
+	if got := Socket(); got != "/tmp/fake-door.sock" {
+		t.Fatalf("Socket() with env = %q", got)
+	}
+	t.Setenv("EBAC_KEEL_SOCKET", "")
+	if got := Socket(); got != "/run/kweb-ebac/threads.sock" {
+		t.Fatalf("Socket() without env = %q", got)
+	}
+}
