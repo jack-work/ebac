@@ -1,0 +1,23 @@
+{
+ "source": "a busy pull request's review list as GET .../pulls/<n>/reviews returned it (both pages); ids, shas, logins and bodies synthetic",
+ "pr": 4242,
+ "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "request_id": "req-1",
+ "teams_msg_id": "1000000000000",
+ "ask_arrival": "2026-11-20T04:41:54.025Z",
+ "reviews_before": 105,
+ "incident_posts": [
+  {
+   "id": 1,
+   "state_now": "APPROVED",
+   "submitted_at": "2026-11-20T04:42:35Z",
+   "user": "self"
+  },
+  {
+   "id": 2,
+   "state_now": "DISMISSED",
+   "submitted_at": "2026-11-20T04:42:57Z",
+   "user": "self"
+  }
+ ]
+}

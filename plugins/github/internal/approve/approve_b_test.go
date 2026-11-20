@@ -206,3 +206,36 @@ func TestARefiledRequestForAServedAskNeverPosts(t *testing.T) {
 		}
 	}
 }
+
+// Posted (PostedAt set), every read-back succeeds, and no review ever carries the marker (the POST landed nowhere
+// visible). Inside LostAfter: nothing posted, no result. At LostAfter: a final ReadBackFailed "posted at ..." result
+// and one "may have been SENT" ping; after it, nothing is ever posted. Exactly one POST throughout. RED if the
+// LostAfter arm is final only on a read error (mutant L3: the request waits forever).
+func TestAPostNeverSeenWithCleanReadsIsFinalAtLostAfter(t *testing.T) {
+	h, tm := world()
+	h.postLost = true
+	reqs := map[string]json.RawMessage{"r1": reqJSON(good())}
+	l := &ledger{}
+	out, err := l.round(t, h, tm, reqs, now)
+	if err != nil || h.posts() != 1 || len(out.Results) != 0 || l.posts["r1"].PostedAt != "2026-11-12T21:00:00Z" {
+		t.Fatalf("post round: err %v posts %d results %+v record %+v", err, h.posts(), out.Results, l.posts["r1"])
+	}
+	for _, d := range []time.Duration{time.Minute, LostAfter - time.Second} {
+		out, err = l.round(t, h, tm, reqs, now.Add(d))
+		if err != nil || len(out.Results) != 0 || len(out.Pings) != 0 || h.posts() != 1 {
+			t.Fatalf("at +%s: err %v results %+v pings %v posts %d", d, err, out.Results, out.Pings, h.posts())
+		}
+	}
+	out, _ = l.round(t, h, tm, reqs, now.Add(LostAfter))
+	r := out.Results["r1"]
+	if r.OK || r.Reason != ReadBackFailed+"posted at 2026-11-12T21:00:00Z, not read back within 10m0s (no review with its marker); ask again with a new message" ||
+		h.posts() != 1 || len(out.Pings) != 1 || !strings.Contains(out.Pings[0].Text, "may have been SENT") {
+		t.Fatalf("at LostAfter: %+v posts %d pings %+v", r, h.posts(), out.Pings)
+	}
+	decided(reqs, out)
+	for _, d := range []time.Duration{LostAfter + time.Minute, 24 * time.Hour} {
+		if out, _ = l.round(t, h, tm, reqs, now.Add(d)); len(out.Results) != 0 || len(out.Pings) != 0 || h.posts() != 1 {
+			t.Fatalf("after the result, +%s: %+v pings %v posts %d", d, out.Results, out.Pings, h.posts())
+		}
+	}
+}

@@ -38,6 +38,8 @@ MUTANTS = [
     ("C2 org checks re-run after the record", O + "orgapprove.go", "\t\tif a.Post != nil {\n", "\t\tif a.Post != nil && false {\n"),
     ("L1 approve never gives up a lost post", A + "approve.go",
      "\tif perr != nil || p.Now.Sub(t) >= LostAfter {\n", "\tif (perr != nil || p.Now.Sub(t) >= LostAfter) && false {\n"),
+    ("L3 approve gives up a lost post only on a read error", A + "approve.go",
+     "\tif perr != nil || p.Now.Sub(t) >= LostAfter {\n", "\tif perr != nil || (p.Now.Sub(t) >= LostAfter && err != nil) {\n"),
     ("L2 org never gives up a lost post", O + "orgapprove.go",
      "\tif perr != nil || p.Now.Sub(t) >= LostAfter {\n", "\tif (perr != nil || p.Now.Sub(t) >= LostAfter) && false {\n"),
 ]
@@ -60,7 +62,7 @@ def test(tree):
 
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
-    if len(MUTANTS) < 15:
+    if len(MUTANTS) < 16:
         print(f"only {len(MUTANTS)} mutants", file=sys.stderr)
         sys.exit(2)
     ok, fails, out = test(root)
