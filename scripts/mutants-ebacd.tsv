@@ -19,6 +19,9 @@ S9-class-approve	internal/sched/sched.go	405	case model.SourceApprove, model.Sou
 S10-est	internal/sched/sched.go	358	e.Est[lim] = max(defaultEst, (prev+got[lim])/2)	e.Est[lim] = max(defaultEst, prev+0*got[lim])	./internal/sched	TestARoundSettles
 P1-lock-held	internal/poll/poll.go	104	\t\tif held {	\t\tif held && false {	./internal/poll	TestPollSkipsWhenTheRoundIsHeld
 P2-onspend	internal/poll/poll.go	73	\t\tp.OnSpend(rep.Spend)		./internal/poll	TestCallForwards
+F1-rest	sdk/forge/gql.go	38	if rest := s.All - s.Calls; rest > 0 {	if rest := s.All; rest > 0 {	./sdk/forge	TestSpendBudgetWireBytes
+F2-resetAt-query	sdk/forge/gql.go	75	" rateLimit{cost remaining resetAt} "	" rateLimit{cost remaining} "	./sdk/forge	TestWithRateLimitAsksTheReset
+F3-resetAt-parse	sdk/forge/gql.go	103	\t\tg.spend.ResetAt = rl.ResetAt		./sdk/forge	TestBranchTipsOneCall
 Y1-template-skip	internal/systemd/systemd.go	297	if !ok || name == "" || model.ValidName(name) != nil {	if !ok {	./internal/systemd	TestRetireCriticTimers
 Y2-dropins	internal/systemd/systemd.go	306	if err := RemoveTimerDropIns(name); err != nil {	if err := error(nil); err != nil {	./internal/systemd	TestRetireCriticTimers
 D1-default-40	cmd/ebac/daemon.go	41	"graphql": {PerHour: 40, Burst: 10, Floor: 1000},	"graphql": {PerHour: 41, Burst: 10, Floor: 1000},	./cmd/ebac	TestDaemonDefaults
@@ -44,12 +47,20 @@ U1-unreadable-arm	internal/fleet/roster.go	196	\tcase beatErr != nil:	\tcase fal
 U2-read-error	internal/fleet/roster.go	357	\t\treturn nil, fmt.Errorf("read %s: %w", found[0], err)	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U3-two-forms	internal/fleet/roster.go	353	\t\treturn nil, fmt.Errorf("%d heartbeat forms (%s)", len(found), strings.Join(found, ", "))	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
 U4-no-beat	internal/fleet/roster.go	368	\t\treturn nil, fmt.Errorf("%s has no beat", found[0])	\t\treturn nil, nil	./internal/fleet	TestBeatFromArms
-T1-clears-seat	internal/form/formstate.go	674	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
+T1-clears-seat	internal/form/formstate.go	673	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t}\n\treturn nil	\t\tset["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name)\n\t\tif _, ok := cur["target-aria"]; ok {\n\t\t\treturn []string{"target-aria"}\n\t\t}\n\t}\n\treturn nil	./internal/form	TestRetireKeysRenamesAndNeverTouchesTheSeat
+E1-until-boundary	sdk/model/critic.go	596	if d := w.Stop.Deadline; d != nil && !now.Before(*d) {	if d := w.Stop.Deadline; d != nil && now.After(*d) {	./sdk/model	TestEndReasonTable
+E2-renew	sdk/model/critic.go	586	\t\tbase = *w.Stop.RenewedAt\n		./sdk/model	TestEndReasonTable|TestEndWarning
+E3-allclosed-needs-prs	sdk/model/critic.go	606	w.Stop.UntilAllClosed && len(w.PRs) > 0 && w.Runtime.AllClosedSince != nil	w.Stop.UntilAllClosed && w.Runtime.AllClosedSince != nil	./sdk/model	TestEndReasonTable
+E4-warn-once	sdk/model/critic.go	620	\tif f := w.Runtime.EndWarnedFor; f != nil && f.Equal(at) {	\tif false {	./sdk/model	TestEndWarning
+E5-warn-window	sdk/model/critic.go	577	const EndWarnBefore = 3 * 24 * time.Hour	const EndWarnBefore = 4 * 24 * time.Hour	./sdk/model	TestEndWarning
+E6-purge-default	sdk/model/critic.go	628	const DefaultPurgeAfter = 7 * 24 * time.Hour	const DefaultPurgeAfter = 8 * 24 * time.Hour	./sdk/model	TestPurgeDue|TestEndLabel
+E7-ended-no-repurge	sdk/model/critic.go	633	\tif !w.Runtime.Archived || w.Runtime.EndedAt != nil {	\tif !w.Runtime.Archived {	./sdk/model	TestPurgeDue
 E8-sched-end	internal/sched/sched.go	202	\t\t\tif reason := w.EndReason(now); reason != "" {	\t\t\tif reason := ""; reason != "" {	./internal/sched	TestEndsAreEnforced
 E9-sched-purge	internal/sched/sched.go	171	\t\t\tif at, due := w.PurgeDue(); due && !now.Before(at) {	\t\t\tif at, due := w.PurgeDue(); due && false && !now.Before(at) {	./internal/sched	TestEndsAreEnforced
 E10-sched-retry	internal/sched/sched.go	166	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := s.End(ctx, w, ""); err != nil {	\t\tcase w.Runtime.EndedAt != nil:\n\t\t\tif err := error(nil); err != nil {	./internal/sched	TestEndsAreEnforced
 E11-kill-order	internal/poll/poll.go	799	\tif len(failed) > 0 {\n\t\treturn fmt.Errorf("end %s: %d child	\tif false {\n\t\treturn fmt.Errorf("end %s: %d child	./internal/poll	TestEndKills
 E12-none-refused	cmd/ebac/critic.go	593	\t\t\treturn fmt.Errorf("--end none: refused: no critic lives forever; give it an end (expires=30d is renewable with --renew)")	\t\t\tcontinue	./cmd/ebac	TestApplyEnd
+R3-default-7d	sdk/model/critic.go	52	\t\tExpiresAfterSec:        7 * 86400,	\t\tExpiresAfterSec:        8 * 86400,	./sdk/model	TestDefaultStopIsTransient
 R8-withrole-alone	cmd/ebac/critic.go	582	\t\t\t\treturn fmt.Errorf("--end with-role stands alone: a standing critic has no calendar end")	\t\t\t\t_ = 0	./cmd/ebac	TestApplyEndWithRole
 R6-needs-target-aria	internal/fleet/role.go	69	\tif f["target-aria"] == nil {	\tif f["target-aria"] == "never" {	./internal/fleet	TestIsRosterRole
 R4-unreadable-not-retired	internal/fleet/role.go	42	\t\t\treturn "", false, "", fmt.Errorf("role %s unreadable: %w", cur, err)	\t\t\treturn cur, true, "unreadable", nil	./internal/fleet	TestFollowRole
@@ -73,30 +84,45 @@ P5-path-kept	cmd/ebac/sudo.go	97	\treturn setenv("PATH", sudoPATH)	\treturn sete
 P6-default-path	cmd/ebac/sudo.go	84	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin"	var sudoPATH = "/run/current-system/sw/bin:/run/wrappers/bin:/nix/store"	./cmd/ebac	TestSudoGateWiring
 P7-maingate-path	cmd/ebac/sudo.go	101	func mainGate() error { return sudoGate(os.Args[1:], os.Getenv, os.Setenv) }	func mainGate() error { return refuseSudoFlags(os.Getenv("SUDO_UID"), os.Args[1:]) }	./cmd/ebac	TestMainGateReplacesPath
 P4-main-calls-gate	cmd/ebac/main.go	153	\tif err := mainGate(); err != nil {	\tif err := error(nil); err != nil {	./cmd/ebac	TestMainRefusesUnderSudo
+H1-harness-post	sdk/brief/project.go	72	[--event COMMENT|APPROVE] --body-file - < <file>`	[--event COMMENT|APPROVE] --body-file <file>`	./sdk/brief	TestTaughtCommandsPassTheDoor
+H3-issue	sdk/brief/project.go	87	--title '<title>' --body-file - < <path>	--title '<title>' --body-file <path>	./sdk/brief	TestTaughtCommandsPassTheDoor
+H2-review-brief	sdk/brief/brief.go	316	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file - < <file>	--pr <owner/repo#n> --event COMMENT|APPROVE --body-file <file>	./sdk/brief	TestTaughtCommandsPassTheDoor
+T1-keel-from-form	sdk/model/trusted.go	104	\t\tk.URL, k.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./sdk/model	TestTrustedApply
 T2-overlay-called	internal/form/formstate.go	316	\tw.FormIgnored = TrustedConfig().Apply(&w)\n		./internal/source/keel	TestFormTokenCmdIsNeverExecuted
-T4-fail-closed	internal/form/formstate.go	905	\t\t\tt = model.DefaultTrusted()\n	\t\t\tt = model.Trusted{Critics: map[string]model.TrustedCritic{"x": {}}}\n	./internal/form	TestTrustedConfigFailsClosed
+T3-host-allowlist	sdk/model/trusted.go	93	\tif w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	\tif false && w.Host != "" && !slices.Contains(t.ForgeHosts, w.Host) {	./sdk/model	TestTrustedApply
+T4-fail-closed	internal/form/formstate.go	904	\t\t\tt = model.DefaultTrusted()\n	\t\t\tt = model.Trusted{Critics: map[string]model.TrustedCritic{"x": {}}}\n	./internal/form	TestTrustedConfigFailsClosed
 T5-ls-flag	internal/fleet/roster.go	194	\tcase len(w.FormIgnored) > 0:\n\t\treturn model.IgnoredNote(w.FormIgnored)\n		./internal/fleet	TestIgnoredFormConfigIsFlagged
-K3-save-strips	internal/form/formstate.go	682	\tmodel.Strip(c) // the trusted fields never go back onto the seat-readable form\n		./internal/form	TestSaveNever
-K4-adopt-reapplies	internal/form/formstate.go	880	\tfresh.FormIgnored = TrustedConfig().Apply(&fresh)\n		./internal/form	TestSaveNever
+T6-branches-from-form	sdk/model/trusted.go	109	\t\tb.URL, b.TokenCmd = tc.KeelURL, slices.Clone(tc.TokenCmd)\n		./sdk/model	TestTrustedApply
+T7-notes-from-form	sdk/model/trusted.go	120	\tw.Notes = tc.Notes\n		./sdk/model	TestTrustedApply
+K1-keyed-by-name	sdk/model/trusted.go	100	\ttc := t.Critics[w.FormID]	\ttc := t.Critics[w.Name]	./sdk/model	TestTrustedApply
+K2-releases-api	sdk/model/trusted.go	127	\t\trw.API = "" // the public api.github.com (review 5fd38 #3)	\t\t_ = rw	./sdk/model	TestTrustedApply
+K3-save-strips	internal/form/formstate.go	681	\tmodel.Strip(c) // the trusted fields never go back onto the seat-readable form\n		./internal/form	TestSaveNever
+K4-adopt-reapplies	internal/form/formstate.go	879	\tfresh.FormIgnored = TrustedConfig().Apply(&fresh)\n		./internal/form	TestSaveNever
+K5-band-socket	sdk/model/trusted.go	123	\t\tb.Socket = t.BandHubSocket\n		./sdk/model	TestTrustedApply
 A1-authority-overlay	internal/form/formstate.go	317	\tw.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)\n		./internal/form	TestAuthorityComesFrom
-A2-least-write	internal/form/formstate.go	937	\tleast.Write, least.Approve = false, false\n		./internal/form	TestAuthorityComesFrom
-A3-least-grants	internal/form/formstate.go	938	\tleast.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""\n		./internal/form	TestAuthorityComesFrom
-A4-record-once	internal/form/formstate.go	985	os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600	os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600	./internal/form	TestAuthorityComesFrom
-A5-config-first	internal/form/formstate.go	929	\tif a := TrustedConfig().Critics[w.FormID].Authority; a != nil {\n\t\treturn a.Apply(w)\n\t}\n		./internal/form	TestAuthorityComesFrom
+A2-least-write	internal/form/formstate.go	936	\tleast.Write, least.Approve = false, false\n		./internal/form	TestAuthorityComesFrom
+A3-least-grants	internal/form/formstate.go	937	\tleast.Grant, least.Principal, least.Approver, least.AskFrom, least.Chat, least.ChatAlias = "", "", "", "", "", ""\n		./internal/form	TestAuthorityComesFrom
+A4-record-once	internal/form/formstate.go	984	os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600	os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600	./internal/form	TestAuthorityComesFrom
+A5-config-first	internal/form/formstate.go	928	\tif a := TrustedConfig().Critics[w.FormID].Authority; a != nil {\n\t\treturn a.Apply(w)\n\t}\n		./internal/form	TestAuthorityComesFrom
 A6-sched-skip	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {	if w.Runtime.Stopped || w.Runtime.Archived {	./internal/sched	TestNoAuthority
 A7-ls-flag	internal/fleet/roster.go	190	\tcase w.NoAuthority:\n\t\treturn model.NoAuthorityNote(w.FormID)\n		./internal/fleet	TestNoAuthority
+A8-apply-write	sdk/model/authority.go	75	\tsetb("write", w.Write, a.Write, &w.Write)\n		./sdk/model	TestAuthorityApply
+A9-apply-source	sdk/model/authority.go	70	\tset("source", w.Source, a.Source, &w.Source)\n		./sdk/model	TestAuthorityApply
+A10-apply-approver	sdk/model/authority.go	89	\t\tset("org_approve.approver", o.Approver, a.Approver, &o.Approver)\n		./sdk/model	TestAuthorityApply
 S1-missing-once	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif !errors.Is(err, os.ErrNotExist) || true {	./internal/poll	TestMissingStampKey
 S2-other-always	internal/poll/identity.go	111	\t\tif !errors.Is(err, os.ErrNotExist) || !stampKeyMissingLogged.Swap(true) {	\t\tif errors.Is(err, os.ErrNotExist) && !stampKeyMissingLogged.Swap(true) {	./internal/poll	TestMissingStampKey
-A12-least-source-mode	internal/form/formstate.go	940	\tleast.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)\n		./internal/form	TestAuthorityComesFrom
-A13-adopt-authority	internal/form/formstate.go	881	\tfresh.FormIgnored = append(fresh.FormIgnored, applyAuthority(&fresh)...)\n		./internal/form	TestAdoptWrittenReappliesAuthority
+A12-least-source-mode	internal/form/formstate.go	939	\tleast.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)\n		./internal/form	TestAuthorityComesFrom
+A13-adopt-authority	internal/form/formstate.go	880	\tfresh.FormIgnored = append(fresh.FormIgnored, applyAuthority(&fresh)...)\n		./internal/form	TestAdoptWrittenReappliesAuthority
 A14-poll-refuses	internal/poll/poll.go	840	\tif w.NoAuthority {\n\t\treturn fmt.Errorf("%s: %s", w.Name, model.NoAuthorityNote(w.FormID))\n\t}	\t_ = model.NoAuthorityNote	./internal/poll	TestPollRefusesNoAuthority
-A15-record-uses-creation	internal/form/formstate.go	984	\tb, _ := json.Marshal(model.CreationAuthority(w))	\tb, _ := json.Marshal(model.AuthorityOf(w))	./internal/form	TestAuthorityComesFrom
+A15-record-uses-creation	internal/form/formstate.go	983	\tb, _ := json.Marshal(model.CreationAuthority(w))	\tb, _ := json.Marshal(model.AuthorityOf(w))	./internal/form	TestAuthorityComesFrom
 S7-stopped	internal/sched/sched.go	226	if w.Runtime.Stopped || w.Runtime.Archived || w.NoAuthority {	if w.NoAuthority {	./internal/sched	TestStoppedArchived
+R11-chat-id	sdk/model/authority.go	99	\t\tset("chat.id", c.ID, a.TeamsChat, &c.ID)\n		./sdk/model	TestAuthorityReadTargets
+R12-logins	sdk/model/authority.go	96	\t\to.Logins, o.KnownBreaks = slices.Clone(a.Logins), slices.Clone(a.KnownBreaks)\n		./sdk/model	TestAuthorityReadTargets
 LIVE-L1-ls-live	cmd/ebac/show.go	36	\trows, sum, err := fleet.BuildRoster(ctx, st, st.Fig, "")	\trows, sum, age0, err := fleet.ReadRoster(ctx, st, st.Fig)\n\t_ = age0	./cmd/ebac	TestLiveLsShowsASetEndAtOnce
-LIVE-M1-merge	internal/form/formstate.go	582	\t\tmerged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])	\t\tmerged, c, merr := json.RawMessage(cfgRaw), []string(nil), error(nil)\n\t\t_ = base	./internal/form	TestLiveRacingCriticSetSurvivesSave
+LIVE-M1-merge	internal/form/formstate.go	581	\t\tmerged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])	\t\tmerged, c, merr := json.RawMessage(cfgRaw), []string(nil), error(nil)\n\t\t_ = base	./internal/form	TestLiveRacingCriticSetSurvivesSave
+A11-creation-least	sdk/model/authority.go	120	\ta := Authority{Source: w.Source, Mode: mode}	\ta := AuthorityOf(w)	./sdk/model	TestCreationAuthority|TestAuthorityReadTargets
 G1-check-differs	sdk/model/registry.go	60	\t\t\tout = append(out, fmt.Sprintf("%s: critic.%s differs", name, k))\n	\t\t\t_ = k\n	./sdk/model	TestCheckRegistrations
 G2-check-undeclared	sdk/model/registry.go	65	\t\t\tout = append(out, fmt.Sprintf("%s: live (form %s) but undeclared", name, l.Form))\n	\t\t\t_ = l\n	./sdk/model	TestCheckRegistrations
 G3-check-form	sdk/model/registry.go	56	\t\tif l.Form != r.Form {	\t\tif false {	./sdk/model	TestCheckRegistrations
-G4-undeclared-flag	internal/form/formstate.go	318	\tw.Undeclared = undeclared(w.Name, w.FormID)\n		./internal/form	TestUndeclared|TestCriticLoadSetsUndeclared
-G5-undeclared-form	internal/form/formstate.go	1053	\treturn !ok || d.Form != formID	\t_ = d\n\treturn !ok	./internal/form	TestUndeclared
+G5-undeclared-form	internal/form/formstate.go	1052	\treturn !ok || d.Form != formID	\t_ = d\n\treturn !ok	./internal/form	TestUndeclared
 G6-ls-flag	internal/fleet/roster.go	192	\tcase w.Undeclared:\n\t\treturn model.UndeclaredNote\n		./internal/fleet	TestUndeclared
