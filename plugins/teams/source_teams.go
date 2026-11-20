@@ -61,8 +61,19 @@ const (
 )
 
 // teamsBlindAfter is how long the watcher may fail to read the chat before it
-// tells the seat it is not hearing it. A var so a test can shorten it.
+// tells the seat it is not hearing it. A var so a unit test can shorten it;
+// EBAC_TEAMS_BLIND_AFTER (a Go duration) overrides it for one plugin process,
+// which is how core's live tests shorten it across the exec.
 var teamsBlindAfter = 10 * time.Minute
+
+func blindAfter() time.Duration {
+	if v := os.Getenv("EBAC_TEAMS_BLIND_AFTER"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return teamsBlindAfter
+}
 
 var (
 	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</li>`)
@@ -278,7 +289,7 @@ func teamsBrief(w *model.Critic, events []model.Event) string {
 func teamsBlind(rep *plugin.Reply, w *model.Critic, cause error) {
 	st := w.Runtime.Teams
 	since, err := time.Parse(time.RFC3339, st.FailSince)
-	if err != nil || time.Since(since) < teamsBlindAfter {
+	if err != nil || time.Since(since) < blindAfter() {
 		return
 	}
 	if st.Blind && st.BlindErr == cause.Error() {

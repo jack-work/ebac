@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/gluck/ebac/internal/source/teams"
+	"github.com/gluck/ebac/plugins/teams"
 	"github.com/gluck/ebac/sdk/plugin"
 )
 

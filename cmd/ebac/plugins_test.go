@@ -25,11 +25,12 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		t.Skip("no go toolchain on PATH")
 	}
 	dir := t.TempDir()
-	builds := [][]string{{"-o", dir, "../ebac-keel", "../ebac-tomb"}}
+	builds := [][]string{{"-o", dir, "../ebac-keel"}}
 	// A plugin module builds in its own derivation (pkgs/ebac.nix mkEbacPlugin); inside the core's nix build its
 	// module graph is not available, so the cross-module build runs only in a dev tree.
 	if os.Getenv("NIX_BUILD_TOP") == "" {
-		builds = append(builds, []string{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"})
+		builds = append(builds, []string{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
+			[]string{"-C", "../../plugins/teams", "-o", dir, "./cmd/ebac-tomb"})
 	}
 	for _, b := range builds {
 		if out, err := exec.Command("go", append([]string{"build"}, b...)...).CombinedOutput(); err != nil {
