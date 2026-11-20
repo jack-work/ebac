@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gluck/ebac/sdk/bandhub"
+	cfgbandhub "github.com/gluck/ebac/sdk/cfg/bandhub"
 	"net"
 	"net/http"
 	"os"
@@ -383,7 +384,7 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 	fail := false
 	tip := func(_ context.Context, repo string, branches []string) (map[string]string, error) {
 		calls++ // one call for every branch
-		if repo != DefaultRepo || len(branches) == 0 {
+		if repo != cfgbandhub.DefaultRepo || len(branches) == 0 {
 			t.Fatalf("repo %q branches %v", repo, branches)
 		}
 		if fail {

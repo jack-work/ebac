@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"github.com/gluck/ebac/internal/pluginrun"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -10,7 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/internal/livetest"
+	"github.com/gluck/ebac/internal/pluginrun"
+	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
@@ -81,33 +88,8 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
 	}
-	dir := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", dir, "../ebac-bandhub").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-	sock := filepath.Join(t.TempDir(), "hub.sock")
-	l, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/stats":
-			w.Write([]byte(`{"hub":{"now":1794261929938,"node_stale_s":30},"queues":[{"queue":"gate.change","counts":{"ready":1,"leased":0},"wait_s":{"p50":120}}]}`))
-		case "/nodes":
-			w.Write([]byte(`[{"node":"leob","age_s":2,"snapshot":{"workers":{"busy":0,"total":2},"disk":{"free_bytes":858993459200}}}]`))
-		case "/jobs":
-			if r.URL.Query().Get("state") == "ready" {
-				w.Write([]byte(`[{"id":7,"queue":"gate.change","state":"ready","created":1794261829938,"payload":{"template":"gate.change","params":{"sha":"abcdef0123456789","label":"x"}}}]`))
-				return
-			}
-			w.Write([]byte(`[]`))
-		default:
-			http.Error(w, "not for a meta reader", http.StatusForbidden)
-		}
-	})}
-	go srv.Serve(l)
-	t.Cleanup(func() { srv.Close() })
+	dir := buildBandHub(t)
+	sock := fakeBandHub(t)
 
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
 	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)
@@ -183,4 +165,151 @@ func TestRosterPluginBinaryRound(t *testing.T) {
 		t.Fatalf("sandboxed=%v reply: done %v events %d set %v", r.Sandbox != nil, rep.Done, len(rep.Events), rep.Set)
 	}
 	t.Logf("sandboxed=%v role:alpha-leader = %s", r.Sandbox != nil, rep.Set["role:alpha-leader"])
+}
+
+// buildBandHub builds the band-hub plugin from its own module (plugins/bandhub):
+// the core never imports it, it only execs the binary.
+func buildBandHub(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	build := exec.Command("go", "build", "-o", dir, "./cmd/ebac-bandhub")
+	build.Dir = filepath.Join("..", "..", "plugins", "bandhub")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build plugins/bandhub: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ebac-bandhub")); err != nil {
+		t.Fatalf("plugins/bandhub built no ebac-bandhub: %v", err)
+	}
+	return dir
+}
+
+// fakeBandHub serves a minimal hub (one ready job, one node) on a unix socket,
+// the metadata endpoints only, and returns the socket's path.
+func fakeBandHub(t *testing.T) string {
+	t.Helper()
+	sock := filepath.Join(t.TempDir(), "hub.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/stats":
+			w.Write([]byte(`{"hub":{"now":1794261929938,"node_stale_s":30},"queues":[{"queue":"gate.change","counts":{"ready":1,"leased":0},"wait_s":{"p50":120}}]}`))
+		case "/nodes":
+			w.Write([]byte(`[{"node":"leob","age_s":2,"snapshot":{"workers":{"busy":0,"total":2},"disk":{"free_bytes":858993459200}}}]`))
+		case "/jobs":
+			if r.URL.Query().Get("state") == "ready" {
+				w.Write([]byte(`[{"id":7,"queue":"gate.change","state":"ready","created":1794261829938,"payload":{"template":"gate.change","params":{"sha":"abcdef0123456789","label":"x"}}}]`))
+				return
+			}
+			w.Write([]byte(`[]`))
+		default:
+			http.Error(w, "not for a meta reader", http.StatusForbidden)
+		}
+	})}
+	go srv.Serve(l)
+	t.Cleanup(func() { srv.Close() })
+	return sock
+}
+
+// Live: the core polls a band-hub mirror on a real role form. The plugin is a
+// replay of its recorded replies (testdata/bandhub-golden-round.json, the same
+// bytes plugins/bandhub pins in its golden test), so the core's side of the
+// round is tested without a hub or a forge: the mirror's keys land, a key an
+// earlier version wrote is dropped, and the second (quiet) round is reported
+// unchanged and rewrites none of the mirror's keys. Moved here from the plugin
+// when the plugin left the core module: the core may exec it, never import it.
+func TestLiveBandHubMirrorThroughTheCore(t *testing.T) {
+	if os.Getenv("EBAC_LIVE") != "1" {
+		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
+	}
+	var recorded []*plugin.Reply
+	b, err := os.ReadFile(filepath.Join("testdata", "bandhub-golden-round.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &recorded); err != nil || len(recorded) != 2 || len(recorded[0].Set) != 5 {
+		t.Fatalf("recorded replies: %d, err %v", len(recorded), err)
+	}
+	f := figaro.NewFigaro("")
+	t.Cleanup(func() { _ = f.Close() })
+	ctx := context.Background()
+	st, err := form.NewStore(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Root = t.TempDir()
+	id, err := f.FormNew(ctx, "ebac-livetest-bandstate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	livetest.Remove(t, f, id)
+	w := model.Critic{Name: "livetest-bandstate-" + strings.TrimPrefix(id, "@")[:8], FormID: id, CreatedAt: time.Now().UTC(),
+		Source: model.SourceBandHub, Band: &model.BandRef{Socket: model.DefaultBandHubSocket, Utility: []string{"leob", "ross"}}}
+	if err := st.SaveCriticRecordingForTest(ctx, &w); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SeedTrigger(ctx, &w); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetJSON(ctx, id, "live", []string{"4246 old line"}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	round := 0
+	pollOnce := func() {
+		t.Helper()
+		p := &poll.Poller{Store: st, Fig: f, Out: &out, Plugins: replay{recorded: recorded, round: &round}}
+		if err := p.Poll(ctx, w.Name); err != nil {
+			t.Fatalf("poll: %v\n%s", err, out.String())
+		}
+	}
+	mirror := []string{"queues", "nodes", "node_load", "dupes", "updated"}
+	pollOnce()
+	cf, err := st.ReadForm(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range mirror {
+		if _, ok := cf.Keys[k]; !ok {
+			t.Fatalf("key %s missing after round 1\n%s", k, out.String())
+		}
+	}
+	if _, ok := cf.Keys["live"]; ok {
+		t.Fatalf("the dropped key live survived round 1: %s", cf.Keys["live"])
+	}
+	pollOnce()
+	cf2, err := st.ReadForm(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range mirror {
+		if string(cf2.Keys[k]) != string(cf.Keys[k]) {
+			t.Fatalf("a quiet round rewrote %s", k)
+		}
+	}
+	if !strings.Contains(out.String(), "unchanged") {
+		t.Fatalf("second round not reported unchanged:\n%s", out.String())
+	}
+}
+
+// replay answers band-hub rounds with recorded replies, in order, carrying the
+// core's critic (name, form) and the recorded plugin state.
+type replay struct {
+	recorded []*plugin.Reply
+	round    *int
+}
+
+func (r replay) Call(_ context.Context, name string, req plugin.Request) (*plugin.Reply, error) {
+	if name != "bandhub" || req.Op != plugin.OpRound || *r.round >= len(r.recorded) {
+		return nil, fmt.Errorf("replay: unexpected call %s %s (round %d)", name, req.Op, *r.round)
+	}
+	rec := *r.recorded[*r.round]
+	*r.round++
+	c := req.Critic
+	c.Runtime.BandHub = rec.Critic.Runtime.BandHub
+	c.Runtime.LastSuccess = rec.Critic.Runtime.LastSuccess
+	rec.Critic = &c
+	return &rec, nil
 }

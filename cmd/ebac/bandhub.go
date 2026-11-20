@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/bandstate"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
+	cfgbandhub "github.com/gluck/ebac/sdk/cfg/bandhub"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -20,7 +20,7 @@ func cmdAddBandHub(ctx context.Context, g globals, args []string) error {
 	name := fs.String("name", "band-state", "critic name; the role form is ebac-<name>")
 	socket := fs.String("socket", bandhub.DefaultSocket, "the hub's unix socket (this account must be a hub meta reader)")
 	utility := fs.String("utility", "leob,ross", "the hub's utility nodes; every other node is heavy")
-	repo := fs.String("repo", bandstate.DefaultRepo, "repo of the jobs' branch params, for the superseded check")
+	repo := fs.String("repo", cfgbandhub.DefaultRepo, "repo of the jobs' branch params, for the superseded check")
 	every := fs.Duration("every", 45*time.Second, "poll interval")
 	_ = fs.Parse(args)
 	if err := model.ValidName(*name); err != nil {

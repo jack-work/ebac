@@ -1,0 +1,161 @@
+[
+  {
+    "protocol": 1,
+    "critic": {
+      "name": "band-state",
+      "form_id": "@x",
+      "mode": "",
+      "host": "",
+      "created_at": "0001-01-01T00:00:00Z",
+      "prs": null,
+      "source": "band-hub",
+      "band_hub": {
+        "socket": "/run/band-hub/sock",
+        "utility": [
+          "leob",
+          "ross"
+        ]
+      },
+      "stop": {
+        "until_all_closed": false,
+        "archive_grace_sec": 0,
+        "max_consecutive_failures": 0
+      },
+      "runtime": {
+        "round": 0,
+        "last_polled": "0001-01-01T00:00:00Z",
+        "last_success": "2026-11-09T22:06:03.101Z",
+        "consecutive_failures": 0,
+        "pending_since": "0001-01-01T00:00:00Z",
+        "next_retry_at": "0001-01-01T00:00:00Z",
+        "last_delivered": "0001-01-01T00:00:00Z",
+        "last_ping": "0001-01-01T00:00:00Z",
+        "band_hub": {
+          "view": {
+            "queues": [
+              "aether.clippy-pr ready=0 leased=1 oldest_ready=-",
+              "aether.decision ready=0 leased=3 oldest_ready=-",
+              "flake.gate ready=0 leased=1 oldest_ready=-",
+              "gate.change ready=9 leased=2 oldest_ready=4250@20:39Z"
+            ],
+            "nodes": [
+              "barr class=heavy free_slots=3 running=4246 disk_free=230G tier=1",
+              "leob class=utility free_slots=2 running=- disk_free=780G tier=0",
+              "pucc class=heavy free_slots=3 running=4191 disk_free=210G tier=1",
+              "ross class=utility free_slots=3 running=4276 disk_free=910G tier=0",
+              "sego class=heavy free_slots=3 running=4259 disk_free=250G tier=0",
+              "verd class=heavy free_slots=3 running=4168 disk_free=180G tier=1"
+            ],
+            "dupes": []
+          },
+          "slim": true,
+          "rows": true,
+          "updated_at": 1794261963101,
+          "tips_at": "2026-11-09T22:06:03.101Z",
+          "desc_err_at": "0001-01-01T00:00:00Z"
+        },
+        "stopped": false,
+        "archived": false,
+        "archived_at": "0001-01-01T00:00:00Z"
+      }
+    },
+    "set": {
+      "dupes": [],
+      "node_load": {
+        "barr": "barr free_slots=3 running=4246 disk_free=230G",
+        "leob": "leob free_slots=2 running=- disk_free=780G",
+        "pucc": "pucc free_slots=3 running=4191 disk_free=210G",
+        "ross": "ross free_slots=3 running=4276 disk_free=910G",
+        "sego": "sego free_slots=3 running=4259 disk_free=250G",
+        "verd": "verd free_slots=3 running=4168 disk_free=180G"
+      },
+      "nodes": {
+        "barr": "barr class=heavy tier=1",
+        "leob": "leob class=utility tier=0",
+        "pucc": "pucc class=heavy tier=1",
+        "ross": "ross class=utility tier=0",
+        "sego": "sego class=heavy tier=0",
+        "verd": "verd class=heavy tier=1"
+      },
+      "queues": {
+        "aether_clippy-pr": "aether.clippy-pr ready=0 leased=1 oldest_ready=-",
+        "aether_decision": "aether.decision ready=0 leased=3 oldest_ready=-",
+        "flake_gate": "flake.gate ready=0 leased=1 oldest_ready=-",
+        "gate_change": "gate.change ready=9 leased=2 oldest_ready=4250@20:39Z"
+      },
+      "updated": "2026-11-09T22:06:03Z"
+    },
+    "unset": [
+      "live"
+    ],
+    "done": true,
+    "log": [
+      "band-state: round 0 wrote [nodes dupes queues node_load]"
+    ]
+  },
+  {
+    "protocol": 1,
+    "critic": {
+      "name": "band-state",
+      "form_id": "@x",
+      "mode": "",
+      "host": "",
+      "created_at": "0001-01-01T00:00:00Z",
+      "prs": null,
+      "source": "band-hub",
+      "band_hub": {
+        "socket": "/run/band-hub/sock",
+        "utility": [
+          "leob",
+          "ross"
+        ]
+      },
+      "stop": {
+        "until_all_closed": false,
+        "archive_grace_sec": 0,
+        "max_consecutive_failures": 0
+      },
+      "runtime": {
+        "round": 0,
+        "last_polled": "0001-01-01T00:00:00Z",
+        "last_success": "2026-11-09T22:07:03.101Z",
+        "consecutive_failures": 0,
+        "pending_since": "0001-01-01T00:00:00Z",
+        "next_retry_at": "0001-01-01T00:00:00Z",
+        "last_delivered": "0001-01-01T00:00:00Z",
+        "last_ping": "0001-01-01T00:00:00Z",
+        "band_hub": {
+          "view": {
+            "queues": [
+              "aether.clippy-pr ready=0 leased=1 oldest_ready=-",
+              "aether.decision ready=0 leased=3 oldest_ready=-",
+              "flake.gate ready=0 leased=1 oldest_ready=-",
+              "gate.change ready=9 leased=2 oldest_ready=4250@20:39Z"
+            ],
+            "nodes": [
+              "barr class=heavy free_slots=3 running=4246 disk_free=230G tier=1",
+              "leob class=utility free_slots=2 running=- disk_free=780G tier=0",
+              "pucc class=heavy free_slots=3 running=4191 disk_free=210G tier=1",
+              "ross class=utility free_slots=3 running=4276 disk_free=910G tier=0",
+              "sego class=heavy free_slots=3 running=4259 disk_free=250G tier=0",
+              "verd class=heavy free_slots=3 running=4168 disk_free=180G tier=1"
+            ],
+            "dupes": []
+          },
+          "slim": true,
+          "rows": true,
+          "updated_at": 1794261963101,
+          "tips_at": "2026-11-09T22:06:03.101Z",
+          "desc_err_at": "0001-01-01T00:00:00Z"
+        },
+        "stopped": false,
+        "archived": false,
+        "archived_at": "0001-01-01T00:00:00Z"
+      }
+    },
+    "done": true,
+    "log": [
+      "band-state: round 0 unchanged"
+    ]
+  }
+]

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gluck/ebac/sdk/bandhub"
+	cfgbandhub "github.com/gluck/ebac/sdk/cfg/bandhub"
 	"sort"
 	"strings"
 	"time"
@@ -17,9 +18,6 @@ type Config struct {
 	// LoadEvery is the heartbeat cadence; 0 is UpdatedEvery.
 	LoadEvery time.Duration `json:"-"`
 }
-
-// DefaultRepo is where the hub's branch-carrying jobs (aether.*) build from.
-const DefaultRepo = "bic/aether"
 
 // TipEvery bounds forge calls for the superseded check (one GraphQL point a
 // refresh; 15 min since the GHE quota, 11-17: a superseded flag may lag).
@@ -192,7 +190,7 @@ func refreshTips(ctx context.Context, st *State, cfg Config, branches []string, 
 	}
 	repo := cfg.Repo
 	if repo == "" {
-		repo = DefaultRepo
+		repo = cfgbandhub.DefaultRepo
 	}
 	tips, err := tip(ctx, repo, branches)
 	if err != nil {
@@ -220,7 +218,7 @@ func refreshDesc(ctx context.Context, st *State, cfg Config, need map[string][2]
 	}
 	repo := cfg.Repo
 	if repo == "" {
-		repo = DefaultRepo
+		repo = cfgbandhub.DefaultRepo
 	}
 	keys := make([]string, 0, len(need))
 	for k := range need {

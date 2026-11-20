@@ -4,7 +4,7 @@
 package main
 
 import (
-	"github.com/gluck/ebac/internal/bandstate"
+	"github.com/gluck/ebac/plugins/bandhub/internal/bandstate"
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
