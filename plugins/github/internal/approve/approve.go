@@ -342,7 +342,9 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 		return Result{OK: true, ReviewID: rv.ID}, nil
 	}
 	if perr != nil {
-		return refuse("post: " + oneLine(perr.Error()))
+		// The POST may have landed although gh reported an error: sent, so the
+		// ask is used and never posted again.
+		return refuse(ReadBackFailed + "post error: " + oneLine(perr.Error()))
 	}
 	return refuse(ReadBackFailed + "no APPROVED review with its body read back")
 }
