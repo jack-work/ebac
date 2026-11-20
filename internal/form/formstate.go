@@ -315,6 +315,7 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 	w.FormID = f.ID
 	w.FormIgnored = TrustedConfig().Apply(&w)
 	w.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)
+	w.Undeclared = undeclared(w.Name, w.FormID)
 	w.Runtime = f.ebac().Runtime
 	w.Trigger = f.Keys[trigger.FormKey]
 	for _, k := range model.SourceReads[w.SourceName()] {
