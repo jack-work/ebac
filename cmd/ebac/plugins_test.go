@@ -25,10 +25,13 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		t.Skip("no go toolchain on PATH")
 	}
 	dir := t.TempDir()
-	for _, b := range [][]string{
-		{"-o", dir, "../ebac-keel", "../ebac-tomb"},
-		{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
-	} {
+	builds := [][]string{{"-o", dir, "../ebac-keel", "../ebac-tomb"}}
+	// A plugin module builds in its own derivation (pkgs/ebac.nix mkEbacPlugin); inside the core's nix build its
+	// module graph is not available, so the cross-module build runs only in a dev tree.
+	if os.Getenv("NIX_BUILD_TOP") == "" {
+		builds = append(builds, []string{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"})
+	}
+	for _, b := range builds {
 		if out, err := exec.Command("go", append([]string{"build"}, b...)...).CombinedOutput(); err != nil {
 			t.Fatalf("build plugins %v: %v\n%s", b, err, out)
 		}
@@ -52,6 +55,10 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		name, err := pluginrun.For(c.critic.SourceName())
 		if err != nil {
 			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Logf("%s: not built here (plugin module; tested in its own derivation)", name)
+			continue
 		}
 		rep, err := r.Call(context.Background(), name, plugin.Request{Op: plugin.OpBrief, Critic: c.critic, Pending: wake, Me: "me"})
 		if err != nil {
