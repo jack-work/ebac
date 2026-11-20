@@ -1,4 +1,4 @@
-package rosterstate
+package roster
 
 import (
 	"context"

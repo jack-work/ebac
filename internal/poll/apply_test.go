@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gluck/ebac/internal/livetest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/rosterstate"
+	"github.com/gluck/ebac/internal/pluginrun"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
@@ -266,8 +269,9 @@ func TestLiveRosterRoundReadsTheStore(t *testing.T) {
 	}
 	var seen int
 	var lastSet []string
-	fixed := time.Now()
-	h := rosterstate.Plugin{Now: func() time.Time { return fixed }}.Handle
+	// The real plugin, over exec: the roster lives in its own module
+	// (plugins/roster), so core builds its binary rather than importing it.
+	h := buildRosterPlugin(t)
 	spy := func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 		seen = len(req.Arias)
 		rep, err := h(ctx, req)
@@ -313,4 +317,21 @@ func TestLiveRosterRoundReadsTheStore(t *testing.T) {
 		t.Fatalf("round 2 rewrote %d keys of %d: not change-only", len(lastSet), roles)
 	}
 	t.Logf("round 2 wrote %v", lastSet)
+}
+
+// buildRosterPlugin builds plugins/roster's binary into a temp dir and returns
+// a handler that execs it through the core's runner (no sandbox: the test
+// grants nothing the plugin would need).
+func buildRosterPlugin(t *testing.T) plugin.Handler {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "ebac-roster"), "./cmd/ebac-roster")
+	cmd.Dir = filepath.Join("..", "..", "plugins", "roster")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build plugins/roster: %v\n%s", err, out)
+	}
+	r := &pluginrun.Runner{Dir: dir, Timeout: pluginrun.DefaultTimeout, Stderr: os.Stderr}
+	return func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+		return r.Call(ctx, "roster", req)
+	}
 }

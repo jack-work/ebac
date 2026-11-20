@@ -2,7 +2,7 @@
 // aria store: roles and their holders, lieutenants (a role whose holder was
 // forked from another role's holder) and live transient forks. It is the pure
 // half of the ebac-roster plugin: no I/O, so a fixture drives it whole.
-package rosterstate
+package roster
 
 import (
 	"encoding/json"

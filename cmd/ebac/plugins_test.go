@@ -148,8 +148,16 @@ func TestRosterPluginBinaryRound(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
 	}
+	if os.Getenv("NIX_BUILD_TOP") != "" {
+		// A plugin module builds in its own derivation (pkgs/ebac.nix mkEbacPlugin); inside the core's nix
+		// build its module graph is not available, so the cross-module build runs only in a dev tree.
+		t.Skip("ebac-roster is a plugin module: tested in its own derivation")
+	}
 	dir := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", dir, "../ebac-roster").CombinedOutput(); err != nil {
+	// The roster is its own module (plugins/roster): build it from there.
+	build := exec.Command("go", "build", "-o", dir, "./cmd/ebac-roster")
+	build.Dir = filepath.Join("..", "..", "plugins", "roster")
+	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	r := &pluginrun.Runner{Dir: dir, Timeout: pluginrun.DefaultTimeout, Stderr: os.Stderr}

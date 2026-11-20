@@ -4,8 +4,8 @@
 package main
 
 import (
-	"github.com/gluck/ebac/internal/rosterstate"
+	roster "github.com/gluck/ebac/plugins/roster"
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
-func main() { plugin.Serve(rosterstate.Plugin{}.Handle) }
+func main() { plugin.Serve(roster.Plugin{}.Handle) }
