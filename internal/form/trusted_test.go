@@ -112,3 +112,25 @@ func TestAdoptWrittenReappliesAuthority(t *testing.T) {
 		t.Fatalf("adopted %+v", w)
 	}
 }
+
+// With registrations declared, a critic not among them (or at another form) is flagged undeclared; a declared one
+// is not; with none declared nothing is flagged (step 3 before the seed). RED if the flag goes or fires wrongly.
+func TestUndeclaredFlag(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	_ = os.WriteFile(p, []byte(`{"registrations":{"a":{"form":"@a","critic":{}}}}`), 0o600)
+	ResetTrusted(p)
+	t.Cleanup(func() { ResetTrusted(model.TrustedConfigPath) })
+	for _, c := range []struct {
+		name, form string
+		want       bool
+	}{{"a", "@a", false}, {"a", "@other", true}, {"b", "@b", true}} {
+		if got := undeclared(c.name, c.form); got != c.want {
+			t.Errorf("%s at %s: undeclared=%v, want %v", c.name, c.form, got, c.want)
+		}
+	}
+	ResetTrusted(filepath.Join(dir, "absent.json"))
+	if undeclared("b", "@b") {
+		t.Fatal("flagged with nothing declared")
+	}
+}

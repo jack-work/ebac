@@ -197,3 +197,10 @@ func TestNoAuthorityIsFlagged(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestUndeclaredIsFlagged(t *testing.T) {
+	w := &model.Critic{Name: "x", Undeclared: true}
+	if got := health(w, RosterRow{Seat: "abc"}, time.Now(), &sched.Beat{At: time.Now(), EveryS: 60}, nil); got != model.UndeclaredNote {
+		t.Fatalf("%q", got)
+	}
+}
