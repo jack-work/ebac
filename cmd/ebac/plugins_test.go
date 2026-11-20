@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,9 @@ func TestRosterPluginBinaryRound(t *testing.T) {
 // the core never imports it, it only execs the binary.
 func buildBandHub(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("NIX_BUILD_TOP") != "" || strings.Contains(os.Getenv("GOFLAGS"), "-mod=vendor") {
+		t.Skip("SKIP bandhub-binary: inside a nix build (offline, vendored) the core cannot build plugins/bandhub, a separate module; the plugin's own derivation runs its tests")
+	}
 	dir := t.TempDir()
 	build := exec.Command("go", "build", "-o", dir, "./cmd/ebac-bandhub")
 	build.Dir = filepath.Join("..", "..", "plugins", "bandhub")
@@ -279,6 +283,14 @@ func TestLiveBandHubMirrorThroughTheCore(t *testing.T) {
 	if _, ok := cf.Keys["live"]; ok {
 		t.Fatalf("the dropped key live survived round 1: %s", cf.Keys["live"])
 	}
+	c, err := st.LoadCritic(ctx, w.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Runtime.LastError != "" || !sameJSON(c.Runtime.BandHub, recorded[0].Critic.Runtime.BandHub) {
+		t.Fatalf("after round 1 the core did not save the plugin's state: error %q, state %d bytes (want %d)",
+			c.Runtime.LastError, len(c.Runtime.BandHub), len(recorded[0].Critic.Runtime.BandHub))
+	}
 	pollOnce()
 	cf2, err := st.ReadForm(ctx, id)
 	if err != nil {
@@ -305,6 +317,10 @@ func (r replay) Call(_ context.Context, name string, req plugin.Request) (*plugi
 	if name != "bandhub" || req.Op != plugin.OpRound || *r.round >= len(r.recorded) {
 		return nil, fmt.Errorf("replay: unexpected call %s %s (round %d)", name, req.Op, *r.round)
 	}
+	if *r.round > 0 && !sameJSON(req.Critic.Runtime.BandHub, r.recorded[*r.round-1].Critic.Runtime.BandHub) {
+		return nil, fmt.Errorf("replay: round %d got %d bytes of plugin state, not the %d the previous round returned",
+			*r.round+1, len(req.Critic.Runtime.BandHub), len(r.recorded[*r.round-1].Critic.Runtime.BandHub))
+	}
 	rec := *r.recorded[*r.round]
 	*r.round++
 	c := req.Critic
@@ -312,4 +328,18 @@ func (r replay) Call(_ context.Context, name string, req plugin.Request) (*plugi
 	c.Runtime.LastSuccess = rec.Critic.Runtime.LastSuccess
 	rec.Critic = &c
 	return &rec, nil
+}
+
+// sameJSON compares two JSON values as values (the golden is indented and in
+// the plugin's key order; the core stores it compact and re-encoded). Empty is
+// never the same as non-empty.
+func sameJSON(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(va, vb)
 }
