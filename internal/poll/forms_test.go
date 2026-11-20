@@ -391,6 +391,9 @@ func TestLiveChildFormsThroughTheCore(t *testing.T) {
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("round 1: %v\n%s", err, out.String())
 	}
+	if n := load().Runtime.FormsLanded; n != 1 {
+		t.Fatalf("forms_landed %d after one landed write, want 1", n)
+	}
 	child := load().Runtime.Children[key]
 	if child == "" {
 		t.Fatalf("no child recorded\n%s", out.String())

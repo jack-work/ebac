@@ -332,6 +332,34 @@ func (g *GH) BranchTips(ctx context.Context, repo string, branches []string) (ma
 	return out, nil
 }
 
+// GQLError is one entry of a GraphQL response's errors: its type
+// (NOT_FOUND, FORBIDDEN, ...), message and path (aliases and fields).
+type GQLError struct {
+	Type    string
+	Message string
+	Path    []string
+}
+
+// GraphQLPartial runs one aliased GraphQL read and returns its data with the
+// errors GitHub returned beside it: an aliased query answers the aliases it
+// could (a missing PR is null data plus a NOT_FOUND on its path). Only a
+// failed call is an error.
+func (g *GH) GraphQLPartial(ctx context.Context, query string) (json.RawMessage, []GQLError, error) {
+	data, errs, err := g.query(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]GQLError, 0, len(errs))
+	for _, e := range errs {
+		ge := GQLError{Type: e.Type, Message: e.Message}
+		for _, p := range e.Path {
+			ge.Path = append(ge.Path, fmt.Sprint(p))
+		}
+		out = append(out, ge)
+	}
+	return data, out, nil
+}
+
 // GraphQL runs one GraphQL read and returns its data object (rateLimit
 // stripped). A response with errors is an error naming the first one.
 func (g *GH) GraphQL(ctx context.Context, query string) (json.RawMessage, error) {

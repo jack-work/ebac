@@ -77,12 +77,15 @@ type Bots struct {
 	Lair          map[string]Lair `json:"lair,omitempty"` // yugo, ken, mike
 }
 
-// ArchVerdict is one architect verdict (board-snapshot arch_verdicts).
+// ArchVerdict is one architect verdict (board-snapshot arch_verdicts), with
+// where it came from: Via comment (a marked comment) or review, By the login.
 type ArchVerdict struct {
 	Verdict string `json:"verdict"` // approve | changes
 	At      string `json:"at"`
 	AtHead  bool   `json:"at_head"`
 	Sha     string `json:"sha,omitempty"`
+	Via     string `json:"via"`
+	By      string `json:"by"`
 }
 
 // Hold is the architect's review-in-progress comment newer than its last verdict.
@@ -292,7 +295,7 @@ func ParseBots(p *Parsed, pr *PR) {
 			if m == nil {
 				p.Errors = append(p.Errors, "unparseable: architect marker without a verdict: "+c.URL)
 			} else {
-				v := ArchVerdict{Verdict: "approve", At: c.CreatedAt}
+				v := ArchVerdict{Verdict: "approve", At: c.CreatedAt, Via: "comment", By: strings.ToLower(login(c.Author))}
 				if m[1] == "REQUEST_CHANGES" {
 					v.Verdict = "changes"
 				}
@@ -338,7 +341,7 @@ func ParseBots(p *Parsed, pr *PR) {
 			}
 		}
 		if ArchitectLogins[who] && (r.State == "APPROVED" || r.State == "CHANGES_REQUESTED") {
-			v := ArchVerdict{Verdict: "approve", At: r.SubmittedAt, AtHead: sha == head || (rtree != "" && rtree == tree), Sha: sha}
+			v := ArchVerdict{Verdict: "approve", At: r.SubmittedAt, AtHead: sha == head || (rtree != "" && rtree == tree), Sha: sha, Via: "review", By: who}
 			if r.State == "CHANGES_REQUESTED" {
 				v.Verdict = "changes"
 			}

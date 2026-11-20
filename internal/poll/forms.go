@@ -147,6 +147,7 @@ func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Rep
 		return nil
 	}
 	var err error
+	w.Runtime.FormsLanded = 0
 	for _, fw := range rep.Forms {
 		if fw.Inputs && src == model.SourceApprove {
 			err = p.commitResults(ctx, w.InputsForm, fw.Set)
@@ -161,6 +162,7 @@ func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Rep
 			err = fmt.Errorf("%s: form write %s: %w", w.Name, describe(fw), err)
 			break
 		}
+		w.Runtime.FormsLanded++
 	}
 	p.renewChildren(ctx, w)
 	if err == nil {

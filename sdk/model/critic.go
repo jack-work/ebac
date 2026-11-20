@@ -102,6 +102,10 @@ type Runtime struct {
 	// branches: one per work branch), by the plugin's stable key: key -> @id.
 	// Core-owned.
 	Children map[string]string `json:"children,omitempty"`
+	// FormsLanded is how many of the last reply's form writes landed, in
+	// order (landForms stops at the first failure). Core-owned: a plugin
+	// compares it with what it sent and writes the rest again.
+	FormsLanded int `json:"forms_landed,omitempty"`
 	// KeelBranches is a keel-branches critic's state, opaque to the core
 	// (the plugin's keelbranch.State).
 	KeelBranches json.RawMessage `json:"keel_branches,omitempty"`

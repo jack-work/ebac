@@ -209,6 +209,9 @@ func GHOf(pr *PR) GH {
 			continue
 		}
 		who := strings.ToLower(login(r.Author))
+		if who == "" {
+			who = "ghost" // a deleted account, as GitHub shows it
+		}
 		if prev, ok := g.Reviews[who]; ok && prev.At > r.SubmittedAt {
 			continue
 		}

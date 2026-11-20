@@ -23,12 +23,12 @@ const markSel = `number updatedAt headRefOid state isDraft commits(last:1){nodes
 
 // deepSel is everything gh and parsed are built from.
 const deepSel = `number url title body state isDraft mergeable mergeStateStatus headRefOid headRefName baseRefName additions deletions updatedAt createdAt
- author{login} labels(first:20){nodes{name}}
+ author{login} labels(first:20){totalCount nodes{name}}
  ready: timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{... on ReadyForReviewEvent{createdAt}}}
- commits(last:1){nodes{commit{tree{oid} statusCheckRollup{state contexts(first:60){nodes{__typename ... on CheckRun{name conclusion status detailsUrl completedAt} ... on StatusContext{context state targetUrl}}}}}}}
+ commits(last:1){nodes{commit{tree{oid} statusCheckRollup{state contexts(first:60){totalCount nodes{__typename ... on CheckRun{name conclusion status detailsUrl completedAt} ... on StatusContext{context state targetUrl}}}}}}}
  closingIssuesReferences(first:10){nodes{number}}
- reviews(last:30){nodes{author{login} state submittedAt body commit{oid tree{oid}}}}
- comments(last:30){nodes{author{login} body createdAt url}}
+ reviews(last:30){totalCount nodes{author{login} state submittedAt body commit{oid tree{oid}}}}
+ comments(last:30){totalCount nodes{author{login} body createdAt url}}
  reviewThreads(first:50){totalCount nodes{id path isResolved comments(last:1){totalCount nodes{author{login}}}}}`
 
 // Search is one search alias of the marks query: a rule's selector in a repo.
@@ -51,6 +51,9 @@ func Searches(c *Config) []Search {
 	}
 	for _, repo := range c.Repos {
 		for i, r := range c.Rules {
+			if r.Repo != "" && r.Repo != repo {
+				continue
+			}
 			for _, a := range r.Author {
 				add(repo, i, "author:"+a)
 			}
@@ -245,7 +248,8 @@ type PR struct {
 	CreatedAt string `json:"createdAt"`
 	Author    *Login `json:"author"`
 	Labels    struct {
-		Nodes []struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"labels"`
@@ -263,7 +267,8 @@ type PR struct {
 				Rollup *struct {
 					State    string `json:"state"`
 					Contexts struct {
-						Nodes []Context `json:"nodes"`
+						TotalCount int       `json:"totalCount"`
+						Nodes      []Context `json:"nodes"`
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
@@ -275,10 +280,12 @@ type PR struct {
 		} `json:"nodes"`
 	} `json:"closingIssuesReferences"`
 	Reviews struct {
-		Nodes []Review `json:"nodes"`
+		TotalCount int      `json:"totalCount"`
+		Nodes      []Review `json:"nodes"`
 	} `json:"reviews"`
 	Comments struct {
-		Nodes []Comment `json:"nodes"`
+		TotalCount int       `json:"totalCount"`
+		Nodes      []Comment `json:"nodes"`
 	} `json:"comments"`
 	Threads struct {
 		TotalCount int `json:"totalCount"`

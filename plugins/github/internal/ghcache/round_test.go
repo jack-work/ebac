@@ -23,6 +23,13 @@ type fakeGH struct {
 	lsrefs   int
 	failGQL  func(q string) error
 	failRefs error
+	// The core's side: the children it holds and how many of the last reply's writes landed; failLand is the index
+	// of the write that fails to land (-1: none).
+	children map[string]string
+	landed   int
+	failLand int
+	// searchTotal, when set, is every search's issueCount (a search past SearchFirst).
+	searchTotal int
 }
 
 var (
@@ -31,13 +38,16 @@ var (
 	prAliasRe     = regexp.MustCompile(`p(\d+): pullRequest\(number:(\d+)\)\{(\.\.\.D|number updatedAt)`)
 )
 
-func (f *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
+// GraphQLPartial answers as GHE does: a missing PR is null data plus a NOT_FOUND error on [rN, pN] (measured on
+// bic/aether, 2026-11-20; forge's TestGraphQLPartialKeepsTheAnsweredAliases pins the decoding).
+func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, []forge.GQLError, error) {
 	f.calls = append(f.calls, q)
 	if f.failGQL != nil {
 		if err := f.failGQL(q); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
+	var errs []forge.GQLError
 	out := map[string]any{}
 	for _, m := range searchAliasRe.FindAllStringSubmatch(q, -1) {
 		query := strings.ReplaceAll(m[2], `\"`, `"`)
@@ -46,7 +56,11 @@ func (f *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 		for _, n := range f.search[query] {
 			nodes = append(nodes, markOf(f.prs[repo][n]))
 		}
-		out[m[1]] = map[string]any{"issueCount": len(nodes), "nodes": nodes}
+		total := len(nodes)
+		if f.searchTotal > 0 {
+			total = f.searchTotal
+		}
+		out[m[1]] = map[string]any{"issueCount": total, "nodes": nodes}
 	}
 	locs := repoAliasRe.FindAllStringSubmatchIndex(q, -1)
 	for i, loc := range locs {
@@ -61,6 +75,8 @@ func (f *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 			pr := f.prs[repo][n]
 			if pr == nil {
 				prs["p"+m[1]] = nil
+				errs = append(errs, forge.GQLError{Type: "NOT_FOUND", Path: []string{alias, "p" + m[1]},
+					Message: "Could not resolve to a PullRequest with the number of " + m[2] + "."})
 				continue
 			}
 			if m[3] == "...D" {
@@ -71,7 +87,8 @@ func (f *fakeGH) GraphQL(_ context.Context, q string) (json.RawMessage, error) {
 		}
 		out[alias] = prs
 	}
-	return json.Marshal(out)
+	data, err := json.Marshal(out)
+	return data, errs, err
 }
 
 func markOf(pr *PR) map[string]any {
@@ -103,7 +120,7 @@ func world(t *testing.T) *fakeGH {
 	prs := fixturePRs(t)
 	// 116018 was merged at the capture: open it again here so both search hits are live PRs.
 	prs[116018].State, prs[116018].Mergeable, prs[116018].MergeSt = "OPEN", "MERGEABLE", "BLOCKED"
-	w := &fakeGH{t: t, prs: map[string]map[int]*PR{"bic/aether": {116018: prs[116018], 127740: prs[127740], 131611: prs[131611]}},
+	w := &fakeGH{t: t, failLand: -1, children: map[string]string{}, prs: map[string]map[int]*PR{"bic/aether": {116018: prs[116018], 127740: prs[127740], 131611: prs[131611]}},
 		search: map[string][]int{"repo:bic/aether is:pr is:open author:John-Kelliher": {116018, 127740}}}
 	return w
 }
@@ -122,9 +139,38 @@ var t0 = time.Date(2026, 11, 20, 4, 0, 0, 0, time.UTC)
 func round(t *testing.T, gh *fakeGH, st State, c *Config, ttl time.Duration, at time.Time) (Result, int) {
 	t.Helper()
 	before := len(gh.calls)
-	r, err := Run(context.Background(), gh, st, Pass{Config: c, ClosedTTL: ttl, Now: at})
+	kids := map[string]string{}
+	for k, v := range gh.children {
+		kids[k] = v
+	}
+	r, err := Run(context.Background(), gh, st, Pass{Config: c, ClosedTTL: ttl, Now: at, Children: kids, Landed: gh.landed})
 	if err != nil {
 		t.Fatalf("round at %s: %v", at, err)
+	}
+	// The core lands the writes in order and stops at the first failure (landForms); a refused reply (past
+	// MaxChildren) lands nothing.
+	minted := len(gh.children)
+	for _, f := range r.Forms {
+		if _, ok := gh.children[f.Key]; f.Retire && ok {
+			minted--
+		} else if !f.Retire && !ok {
+			minted++
+		}
+	}
+	if minted > 100 {
+		t.Fatalf("round at %s: %d children: the core would refuse the reply", at, minted)
+	}
+	gh.landed = 0
+	for i, f := range r.Forms {
+		if i == gh.failLand {
+			break
+		}
+		if f.Retire {
+			delete(gh.children, f.Key)
+		} else {
+			gh.children[f.Key] = "@" + f.Key
+		}
+		gh.landed++
 	}
 	// Each round's state goes through JSON, as the core stores it.
 	var back State
@@ -287,7 +333,7 @@ func TestAnUnmatchedPRIsUntrackedThenRetired(t *testing.T) {
 // Explicit PR numbers are tracked without a search alias, through the marks query. RED if rule.prs is ignored.
 func TestExplicitPRsAreTracked(t *testing.T) {
 	gh := world(t)
-	c, ttl := cfg(t, `{"repos":["bic/aether"],"rules":[{"prs":[131611],"tier":"cold"}]}`)
+	c, ttl := cfg(t, `{"repos":["bic/aether"],"rules":[{"repo":"bic/aether","prs":[131611],"tier":"cold"}]}`)
 	r, calls := round(t, gh, State{}, c, ttl, t0)
 	if calls != 2 || keys(r) != "aether-pr-131611" || r.Track["bic/aether#131611"].Tier != "cold" {
 		t.Fatalf("explicit: %d calls, writes %q, track %+v", calls, keys(r), r.Track)
@@ -339,7 +385,7 @@ func TestFailedReads(t *testing.T) {
 		return nil
 	}
 	r, _ := round(t, gh, State{}, c, ttl, t0)
-	if len(r.Forms) != 0 || !strings.Contains(strings.Join(r.Log, "\n"), "deep read of 2 PR(s): HTTP 502 (retried next round)") {
+	if len(r.Forms) != 0 || !strings.Contains(strings.Join(r.Log, "\n"), "deep read of 2 PR(s): HTTP 502 (read again next round)") {
 		t.Fatalf("deep failure: writes %q log %q", keys(r), r.Log)
 	}
 	gh.failGQL = nil
@@ -402,34 +448,45 @@ func TestFormSizeCap(t *testing.T) {
 
 // Config: one rejecting row per check, and the accepting shape. RED if a check goes.
 func TestParseConfig(t *testing.T) {
-	if _, ttl, err := ParseConfig(json.RawMessage(hotAuthor)); err != nil || ttl != 7*24*time.Hour {
+	if _, ttl, err := ParseConfig(json.RawMessage(hotAuthor)); err != nil || ttl != 24*time.Hour {
 		t.Fatalf("valid: %v %v", ttl, err)
 	}
 	for _, c := range []struct{ desc, raw, want string }{
 		{"absent", ``, "config: absent (want {repos, rules})"},
 		{"null", `null`, "config: absent (want {repos, rules})"},
-		{"unknown field", `{"repos":["a/b"],"rules":[{"prs":[1]}],"x":1}`, `config: json: unknown field "x"`},
-		{"no repos", `{"repos":[],"rules":[{"prs":[1]}]}`, "config: no repos"},
-		{"repo not owner/name", `{"repos":["aether"],"rules":[{"prs":[1]}]}`, `config: repo "aether" is not owner/name`},
-		{"repo injection", `{"repos":["a/b\" x"],"rules":[{"prs":[1]}]}`, `config: repo "a/b\" x" is not owner/name`},
-		{"same name part", `{"repos":["a/x","b/X"],"rules":[{"prs":[1]}]}`, `config: repos a/x and b/X share the form name part "x"`},
+		{"unknown field", `{"repos":["a/b"],"rules":[{"repo":"a/b","prs":[1]}],"x":1}`, `config: json: unknown field "x"`},
+		{"no repos", `{"repos":[],"rules":[{"repo":"a/b","prs":[1]}]}`, "config: no repos"},
+		{"repo not owner/name", `{"repos":["aether"],"rules":[{"repo":"a/b","prs":[1]}]}`, `config: repo "aether" is not owner/name`},
+		{"repo injection", `{"repos":["a/b\" x"],"rules":[{"repo":"a/b","prs":[1]}]}`, `config: repo "a/b\" x" is not owner/name`},
+		{"same name part", `{"repos":["a/x","b/X"],"rules":[{"repo":"a/b","prs":[1]}]}`, `config: repos a/x and b/X share the form name part "x"`},
 		{"no rules", `{"repos":["a/b"],"rules":[]}`, "config: 0 rules (want 1-10)"},
-		{"11 rules", `{"repos":["a/b"],"rules":[` + strings.Repeat(`{"prs":[1]},`, 10) + `{"prs":[1]}]}`, "config: 11 rules (want 1-10)"},
+		{"11 rules", `{"repos":["a/b"],"rules":[` + strings.Repeat(`{"repo":"a/b","prs":[1]},`, 10) + `{"repo":"a/b","prs":[1]}]}`, "config: 11 rules (want 1-10)"},
 		{"empty rule", `{"repos":["a/b"],"rules":[{"tier":"hot"}]}`, "config: rule 0 selects nothing"},
-		{"bad tier", `{"repos":["a/b"],"rules":[{"prs":[1],"tier":"lukewarm"}]}`, `config: rule 0: tier "lukewarm" (want hot, warm or cold)`},
+		{"bad tier", `{"repos":["a/b"],"rules":[{"repo":"a/b","prs":[1],"tier":"lukewarm"}]}`, `config: rule 0: tier "lukewarm" (want hot, warm or cold)`},
 		{"bad author", `{"repos":["a/b"],"rules":[{"author":["a b"]}]}`, `config: rule 0: author "a b" is not a login`},
 		{"quote in label", `{"repos":["a/b"],"rules":[{"label":["x\"y"]}]}`, `config: rule 0: term "x\"y" (1-100 bytes, no quote, backslash or newline)`},
 		{"101-byte tag", `{"repos":["a/b"],"rules":[{"title_tag":["` + strings.Repeat("t", 101) + `"]}]}`, `config: rule 0: term "` + strings.Repeat("t", 101) + `" (1-100 bytes, no quote, backslash or newline)`},
-		{"pr 0", `{"repos":["a/b"],"rules":[{"prs":[0]}]}`, "config: rule 0: pr 0"},
-		{"bad ttl", `{"repos":["a/b"],"rules":[{"prs":[1]}],"ttl":{"closed":"-1h"}}`, `config: ttl.closed "-1h" is not a positive duration`},
+		{"pr 0", `{"repos":["a/b"],"rules":[{"repo":"a/b","prs":[0]}]}`, "config: rule 0: pr 0"},
+		{"rule repo not in repos", `{"repos":["a/b"],"rules":[{"repo":"a/c","prs":[1]}]}`, `config: rule 0: repo "a/c" is not in repos`},
+		{"prs without a repo", `{"repos":["a/b"],"rules":[{"prs":[1]}]}`, "config: rule 0: prs need a repo"},
+		{"a repo giving no child key", `{"repos":["bic/.github"],"rules":[{"author":["a"]}]}`, `config: repo bic/.github gives child key "-github-pr-9999999999", not [a-z0-9][a-z0-9-], 1-100`},
+		{"max over 90", `{"repos":["a/b"],"rules":[{"author":["a"]}],"max":91}`, "config: max 91 (want 1-90)"},
+		{"max negative", `{"repos":["a/b"],"rules":[{"author":["a"]}],"max":-1}`, "config: max -1 (want 1-90)"},
+		{"bad ttl", `{"repos":["a/b"],"rules":[{"repo":"a/b","prs":[1]}],"ttl":{"closed":"-1h"}}`, `config: ttl.closed "-1h" is not a positive duration`},
 	} {
 		_, _, err := ParseConfig(json.RawMessage(c.raw))
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.desc, err, c.want)
 		}
 	}
+	if c, _, _ := ParseConfig(json.RawMessage(hotAuthor)); c.Max != 80 {
+		t.Fatalf("default max %d, want 80", c.Max)
+	}
+	if c, _, err := ParseConfig(json.RawMessage(`{"repos":["a/b"],"rules":[{"author":["a"]}],"max":90}`)); err != nil || c.Max != 90 {
+		t.Fatalf("max 90: %v", err)
+	}
 	// The cap and a 100-byte term are accepted.
-	ok := `{"repos":["a/b"],"rules":[` + strings.Repeat(`{"prs":[1]},`, 9) + `{"title_tag":["` + strings.Repeat("t", 100) + `"]}]}`
+	ok := `{"repos":["a/b"],"rules":[` + strings.Repeat(`{"repo":"a/b","prs":[1]},`, 9) + `{"title_tag":["` + strings.Repeat("t", 100) + `"]}]}`
 	if _, _, err := ParseConfig(json.RawMessage(ok)); err != nil {
 		t.Fatalf("10 rules, 100-byte tag: %v", err)
 	}

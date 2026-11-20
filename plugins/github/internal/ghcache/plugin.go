@@ -52,7 +52,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 			prev = State{}
 		}
 	}
-	r, err := Run(ctx, gh, prev, Pass{Config: cfg, ClosedTTL: ttl, Now: now()})
+	r, err := Run(ctx, gh, prev, Pass{Config: cfg, ClosedTTL: ttl, Now: now(), Children: w.Runtime.Children, Landed: w.Runtime.FormsLanded})
 	for _, l := range r.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}

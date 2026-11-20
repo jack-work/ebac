@@ -73,6 +73,10 @@ func TestHelperProcess(t *testing.T) {
 	q := fakegql.Query(rest)
 
 	switch scenario {
+	case "partial":
+		// The measured GHE shape of an aliased read naming a missing PR: null data, a NOT_FOUND on its path.
+		os.Stdout.WriteString(`{"data":{"rateLimit":{"cost":1,"remaining":4888,"resetAt":"2026-11-20T05:00:00Z"},"r0":{"p1":{"number":1},"p99999999":null}},` +
+			`"errors":[{"type":"NOT_FOUND","path":["r0","p99999999"],"locations":[{"line":1,"column":2}],"message":"Could not resolve to a PullRequest with the number of 99999999."}]}`)
 	case "compare":
 		// gh api repos/R/compare/BASE...HEAD -q '<jq>': HEAD names the answer; stdout is what the jq prints.
 		var head string
@@ -329,5 +333,26 @@ func TestBranchTipsOneCall(t *testing.T) {
 	if sp := g.Spent(); sp.All != 1 || sp.Calls != 1 || sp.Points != 1 || sp.String() != "graphql 1 call(s), 1 point(s), 4000 left; rest 0 call(s)" ||
 		!sp.ResetAt.Equal(time.Date(2026, 11, 19, 7, 0, 0, 0, time.UTC)) {
 		t.Fatalf("spend %+v %q", sp, sp)
+	}
+}
+
+// An aliased read naming a missing PR answers the others and returns the NOT_FOUND by path, where GraphQL fails the
+// whole call. RED if GraphQLPartial drops the data or the error's type/path.
+func TestGraphQLPartialKeepsTheAnsweredAliases(t *testing.T) {
+	g := fakeGH(t, "partial")
+	data, errs, err := g.GraphQLPartial(context.Background(), `{ r0: repository(owner:"bic",name:"aether"){ p1: pullRequest(number:1){number} p99999999: pullRequest(number:99999999){number} } }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"r0":{"p1":{"number":1},"p99999999":null}}` {
+		t.Fatalf("data %s", data)
+	}
+	if len(errs) != 1 || errs[0].Type != "NOT_FOUND" || strings.Join(errs[0].Path, "/") != "r0/p99999999" ||
+		errs[0].Message != "Could not resolve to a PullRequest with the number of 99999999." {
+		t.Fatalf("errs %+v", errs)
+	}
+	if _, err := g.GraphQL(context.Background(), `{ r0: repository(owner:"bic",name:"aether"){ p1: pullRequest(number:1){number} } }`); err == nil ||
+		err.Error() != "graphql: Could not resolve to a PullRequest with the number of 99999999." {
+		t.Fatalf("GraphQL on the same answer: %v", err)
 	}
 }

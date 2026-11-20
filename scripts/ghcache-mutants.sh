@@ -20,14 +20,21 @@ MUTANTS=(
   "P4|$G/parse.go|if prev, ok := b.Lair[who]; !ok \|\| c.CreatedAt >= prev.At {|if _, ok := b.Lair[who]; !ok {|./$G/"
   "P5|$G/parse.go|if *dst == \"\" {|if true {|./$G/"
   "P6|$G/parse.go|m := ms[len(ms)-1]|m := ms[0]|./$G/"
-  "R1|$G/ghcache.go|if !moved[k] && (e.MarkAt.IsZero() \|\| !now.Before(e.MarkAt.Add(every))) {|if !moved[k] {|./$G/"
-  "R2|$G/ghcache.go|if h, ok := heads[n]; ok && h != e.Mark.Head {|if false {|./$G/"
-  "R3|$G/ghcache.go|case ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| e.Unsettled):|case ok:|./$G/"
+  "R1|$G/ghcache.go|if !moved[k] && (e.MarkAt.IsZero() \|\| !now.Before(e.MarkAt.Add(every))) {|if !moved[k] && (true \|\| e.MarkAt.IsZero() \|\| !now.Before(e.MarkAt.Add(every))) {|./$G/"
+  "R2|$G/ghcache.go|if h, ok := heads[n]; ok && h != e.Mark.Head {|if h, ok := heads[n]; ok && h != e.Mark.Head && false {|./$G/"
+  "R3|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| e.Unsettled))|(ok && (true \|\| m != e.Mark))|./$G/"
   "R4|$G/ghcache.go|case !now.Before(e.EndedAt.Add(p.ClosedTTL)):|case false:|./$G/"
   "R5|$G/ghcache.go|e.Unsettled = pr.State == \"OPEN\" && (pr.Mergeable == \"UNKNOWN\" \|\| pr.MergeSt == \"UNKNOWN\")|e.Unsettled = false|./$G/"
-  "R6|$G/ghcache.go|if size() <= MaxForm {|if true {|./$G/"
+  "R6|$G/ghcache.go|if size() <= MaxForm {|if size() >= 0 {|./$G/"
   "R7|$G/query.go|const DeepBatch = 10|const DeepBatch = 11|./$G/"
   "R8|$G/config.go|HotEvery  = 5 * time.Minute|HotEvery  = 4 * time.Minute|./$G/"
+  "N1|$G/ghcache.go|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" {|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" && false {|./$G/"
+  "N2|$G/ghcache.go|p.Config.Max; over > 0 {|p.Config.Max; over > 1000 {|./$G/"
+  "N3|$G/ghcache.go|if p.Landed < len(prev.Wrote) {|if p.Landed < len(prev.Wrote) && false {|./$G/"
+  "N4|$G/ghcache.go|for k := range p.Children {|for k := range map[string]string{} {|./$G/"
+  "N5|$G/ghcache.go|if c.want > c.got {|if c.want > c.got && false {|./$G/"
+  "N6|$G/config.go|if c.Max < 1 \|\| c.Max > MaxMax {|if c.Max < 1 {|./$G/"
+  "N7|sdk/forge/gh.go|return data, out, nil|return data, nil, nil|./sdk/forge/"
   "R9|$G/config.go|if !termRe.MatchString(t) {|if false {|./$G/"
 )
 bad=0
@@ -44,12 +51,12 @@ if s.count(o) != 1:
 open(p, "w").write(s.replace(o, n))
 EOF
   then echo "$id DIDNT-APPLY"; bad=1; continue; fi
-  mod=.; case $pkg in ./plugins/github/*) mod=plugins/github; pkg=./${pkg#./plugins/github/};; esac
+  mod=.; case $pkg in ./plugins/github/*) mod=plugins/github; pkg=./${pkg#./plugins/github/};; ./sdk/*) mod=sdk; pkg=./${pkg#./sdk/};; esac
   out=$(cd "$mod" && go test -count=1 "$pkg" 2>&1); st=$?
   cp -p "$BK/orig" "$file" && cmp -s "$BK/orig" "$file" || { echo "$file not restored" >&2; exit 2; }
   if grep -q '\[build failed\]\|cannot use\|undefined:' <<<"$out"; then echo "$id DIDNT-COMPILE"; bad=1
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 18 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 25 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad

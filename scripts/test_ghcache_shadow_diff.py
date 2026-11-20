@@ -19,7 +19,9 @@ CACHE = {"gh": {"author": "john-kelliher", "base": "main", "branch": "b", "draft
                 "mergeable": "MERGEABLE", "state": "OPEN", "title": "t" * 200, "updated_at": "2026-11-20T00:00:00Z",
                 "created_at": "2026-11-01T00:00:00Z", "tree": "tt", "lines": [1, 2], "fixes": [1, 3],
                 "checks": {"Aether Rust PR Pipeline": {"state": "pass"}, "banana/premerge": {"state": "pass"}}},
-         "parsed": {"bots": {"architect": [{"verdict": "approve", "at": "x", "at_head": True, "sha": "aa"}]}}}
+         "parsed": {"bots": {"architect": [{"verdict": "approve", "at": "x", "at_head": True, "sha": "aa", "via": "comment", "by": "architect-review"},
+                                           # Ilya's own review: the board never reads it, so it is no disagreement
+                                           {"verdict": "approve", "at": "y", "at_head": True, "sha": "aa", "via": "review", "by": "ilya-grebnov"}]}}}
 
 fails = []
 
@@ -55,9 +57,24 @@ c3["parsed"]["bots"] = {}
 d, _ = sd.compare(BOARD, c3)
 check("checks and arch", [x[0] for x in d], ["arch", "checks.Aether Rust PR Pipeline"])
 
-# PRs on one side only are listed, never compared.
-r = sd.snapshot({"1": BOARD, "2": BOARD}, {"1": CACHE, "3": CACHE}, {}, 0, 900)
-check("sets", (r["both"], r["only_board"], r["only_cache"]), (1, ["2"], ["3"]))
+# A missing sha is None on both sides (Go omits it, the board writes null).
+b4, c4 = copy.deepcopy(BOARD), copy.deepcopy(CACHE)
+b4["arch"][0]["sha"] = None
+del c4["parsed"]["bots"]["architect"][0]["sha"]
+check("sha None vs omitted", sd.compare(b4, c4)[0], [])
 
-print("\n".join(fails) or "ok: 11 checks")
+# A board PR the cache lacks is a "tracked" disagreement (stale past the grace: the proof fails); the cache's extra
+# PRs are only listed.
+seen = {}
+r = sd.snapshot({"1": BOARD, "2": BOARD}, {"1": CACHE, "3": CACHE}, seen, 0, 900)
+check("sets", (r["both"], r["only_board"], r["only_cache"]), (1, ["2"], ["3"]))
+check("only_board open", [(x["pr"], x["field"]) for x in r["open"]], [(2, "tracked")])
+r = sd.snapshot({"1": BOARD, "2": BOARD}, {"1": CACHE, "3": CACHE}, seen, 901, 900)
+check("only_board stale", [(x["pr"], x["field"]) for x in r["stale"]], [(2, "tracked")])
+
+# Forms of another repo are never read: the name filter is <prefix><repo key>-pr-.
+check("repo key", sd.repo_key("bic/aether"), "aether")
+check("repo key odd", sd.repo_key("bic/My.Repo"), "my-repo")
+
+print("\n".join(fails) or "ok: 16 checks")
 sys.exit(1 if fails else 0)

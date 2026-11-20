@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ghcache-shadow-diff: compare the GitHub cache's entity forms with the board's pr.<n> rows (ghcache slice 1 proof).
 
-usage: ghcache-shadow-diff.py [--board @zombie-phrasing] [--prefix ebac-gh-cache-] [--state FILE] [--out FILE]
-                              [--grace SECONDS]
+usage: ghcache-shadow-diff.py [--board @zombie-phrasing] [--repo bic/aether] [--prefix ebac-gh-cache-] [--state FILE]
+                              [--out FILE] [--grace SECONDS]
 
 One snapshot per run (a timer runs it every 5 min for 24 h). For every PR on both sides it compares the fields the
 board and the cache share; a disagreement is STALE when the same (pr, field) has disagreed for longer than --grace
@@ -11,7 +11,11 @@ board and the cache share; a disagreement is STALE when the same (pr, field) has
 Exit 0 with no stale disagreement, 1 with some, 2 when a form cannot be read (tool failure, never "clean").
 
 checks are compared by pipeline state only where both sides name the pipeline; the board reads ADO, the cache GitHub's
-check runs, so a pipeline on one side only is a checks_gap line, not a disagreement.
+check runs, so a pipeline on one side only is a checks_gap line, not a disagreement. Like with like: the board reads
+architect verdicts from marked comments and architect-review's own reviews only, so the cache's are cut to the same
+(via comment, or a review by architect-review); both sides are normalised to {verdict, at, at_head, sha|None}. The
+board covers one repo (--repo): only that repo's forms are read. A board PR the cache lacks is a disagreement on the
+field "tracked" (stale past the grace: the proof fails), the cache's extra PRs are listed only.
 """
 import argparse
 import json
@@ -29,6 +33,11 @@ def form(fid):
     if r.returncode != 0:
         raise RuntimeError(f"figaro state show {fid}: status={r.returncode} {r.stderr.strip()[:200]}")
     return json.loads(r.stdout)
+
+
+def repo_key(repo):
+    """The ghcache child key part of a repo (ghcache.repoKey): its name, lower case, [^a-z0-9-] -> '-'."""
+    return "".join(ch if ch.isascii() and (ch.isalnum() or ch == "-") else "-" for ch in repo.split("/", 1)[1].lower())
 
 
 def cache_forms(prefix):
@@ -51,16 +60,23 @@ def ours(entity):
     row["ready_at"] = gh.get("ready_at") or None
     row["fixes"] = sorted(gh.get("fixes") or [])
     bots = parsed.get("bots") or {}
-    row["arch"] = bots.get("architect") or []
+    row["arch"] = norm_arch(a for a in bots.get("architect") or []
+                            if a.get("via") == "comment" or (a.get("via") == "review" and a.get("by") == "architect-review"))
     row["praxis"] = bots.get("praxis")
     row["checks"] = {k: v.get("state") for k, v in (gh.get("checks") or {}).items()}
     return row
 
 
+def norm_arch(arch):
+    """Both sides' architect verdicts as the same four keys (a missing sha is None on both), oldest first."""
+    return sorted(({"verdict": a.get("verdict"), "at": a.get("at"), "at_head": a.get("at_head"), "sha": a.get("sha") or None}
+                   for a in arch), key=lambda a: (a["at"] or "", a["verdict"] or ""))
+
+
 def theirs(r):
     row = {k: r.get(k) for k in FIELDS}
     row["fixes"] = sorted(r.get("fixes") or [])
-    row["arch"] = [{k: a.get(k) for k in ("verdict", "at", "at_head", "sha")} for a in r.get("arch") or []]
+    row["arch"] = norm_arch(r.get("arch") or [])
     px = r.get("praxis")
     row["praxis"] = px
     row["checks"] = {k: v.get("state") for k, v in (r.get("checks") or {}).items()}
@@ -89,6 +105,12 @@ def snapshot(board, cache, seen, now, grace):
            "only_board": sorted(set(board) - set(cache), key=int), "only_cache": sorted(set(cache) - set(board), key=int),
            "open": [], "stale": [], "checks_gap": []}
     live = set()
+    for n in rec["only_board"]:
+        k = f"{n}:tracked"
+        live.add(k)
+        first = seen.setdefault(k, now)
+        line = {"pr": int(n), "field": "tracked", "board": True, "cache": False, "since": first}
+        rec["stale" if now - first > grace else "open"].append(line)
     for n in both:
         diffs, gap = compare(board[n], cache[n])
         rec["checks_gap"] += [f"{n}:{p} ({side})" for p, side in gap]
@@ -107,6 +129,7 @@ def snapshot(board, cache, seen, now, grace):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="@zombie-phrasing")
+    ap.add_argument("--repo", default="bic/aether")
     ap.add_argument("--prefix", default="ebac-gh-cache-")
     ap.add_argument("--state", default=os.path.expanduser("~/.local/state/ghcache-shadow/seen.json"))
     ap.add_argument("--out", default=os.path.expanduser("~/.local/state/ghcache-shadow/diff.jsonl"))
@@ -115,7 +138,7 @@ def main():
     try:
         board = {str(n): r for n, r in (form(a.board).get("pr") or {}).items()}
         cache = {}
-        for name, fid in cache_forms(a.prefix).items():
+        for name, fid in cache_forms(a.prefix + repo_key(a.repo) + "-pr-").items():
             e = form(fid)
             n = (e.get("gh") or {}).get("number")
             if n:

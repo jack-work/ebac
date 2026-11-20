@@ -24,8 +24,18 @@ const (
 )
 
 // DefaultClosedTTL is how long a closed, merged or no longer tracked PR keeps
-// its form before it is retired (DESIGN 1a: config.ttl.closed, 7 d).
-const DefaultClosedTTL = 7 * 24 * time.Hour
+// its form before it is retired (config.ttl.closed). One day, not DESIGN 1a's
+// 7: one author closes ~200 PRs a week (bic/aether, 2026-11-20), and every
+// kept form counts against the core's MaxChildren.
+const DefaultClosedTTL = 24 * time.Hour
+
+// DefaultMax and MaxMax bound the forms the cache keeps (config.max): well
+// under the core's MaxChildren (100), so a burst of new PRs plus this round's
+// retires never takes a reply past it (the core refuses the whole reply).
+const (
+	DefaultMax = 80
+	MaxMax     = 90
+)
 
 // MaxRules bounds config.rules: each rule is at least one search alias.
 const MaxRules = 10
@@ -34,14 +44,18 @@ const MaxRules = 10
 type Config struct {
 	Repos []string `json:"repos"`
 	Rules []Rule   `json:"rules"`
+	Max   int      `json:"max,omitempty"` // forms kept at most; 0 is DefaultMax
 	TTL   struct {
 		Closed string `json:"closed,omitempty"` // a Go duration; "" is DefaultClosedTTL
 	} `json:"ttl,omitzero"`
 }
 
 // Rule tracks a PR when any of its selectors matches: an author, a label, a
-// title tag, or an explicit number. Tier is hot (default), warm or cold.
+// title tag, or an explicit number. Repo, when set, scopes the rule to one of
+// config.repos; explicit numbers need it (a number names a PR in one repo).
+// Tier is hot (default), warm or cold.
 type Rule struct {
+	Repo     string   `json:"repo,omitempty"`
 	Author   []string `json:"author,omitempty"`
 	Label    []string `json:"label,omitempty"`
 	TitleTag []string `json:"title_tag,omitempty"`
@@ -50,8 +64,10 @@ type Rule struct {
 }
 
 var (
-	repoRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
-	loginRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
+	// childKeyRe is the core's child key rule (internal/poll childKey).
+	childKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,99}$`)
+	repoRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+	loginRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
 	// A label or title tag goes inside a quoted search term: no quote, no
 	// backslash, no newline, at most 100 bytes.
 	termRe = regexp.MustCompile(`^[^"\\\n\r]{1,100}$`)
@@ -91,6 +107,9 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 			return nil, 0, fmt.Errorf("config: repo %q is not owner/name", r)
 		}
 		k := repoKey(r)
+		if ck := ChildKey(r, 9999999999); !childKeyRe.MatchString(ck) {
+			return nil, 0, fmt.Errorf("config: repo %s gives child key %q, not [a-z0-9][a-z0-9-], 1-100", r, ck)
+		}
 		if other, ok := keys[k]; ok {
 			return nil, 0, fmt.Errorf("config: repos %s and %s share the form name part %q", other, r, k)
 		}
@@ -102,6 +121,12 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 	for i, r := range c.Rules {
 		if len(r.Author)+len(r.Label)+len(r.TitleTag)+len(r.PRs) == 0 {
 			return nil, 0, fmt.Errorf("config: rule %d selects nothing", i)
+		}
+		if r.Repo != "" && keys[repoKey(r.Repo)] != r.Repo {
+			return nil, 0, fmt.Errorf("config: rule %d: repo %q is not in repos", i, r.Repo)
+		}
+		if len(r.PRs) > 0 && r.Repo == "" {
+			return nil, 0, fmt.Errorf("config: rule %d: prs need a repo", i)
 		}
 		if _, ok := Every(r.Tier); !ok {
 			return nil, 0, fmt.Errorf("config: rule %d: tier %q (want hot, warm or cold)", i, r.Tier)
@@ -121,6 +146,12 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 				return nil, 0, fmt.Errorf("config: rule %d: pr %d", i, n)
 			}
 		}
+	}
+	if c.Max == 0 {
+		c.Max = DefaultMax
+	}
+	if c.Max < 1 || c.Max > MaxMax {
+		return nil, 0, fmt.Errorf("config: max %d (want 1-%d)", c.Max, MaxMax)
 	}
 	ttl := DefaultClosedTTL
 	if c.TTL.Closed != "" {

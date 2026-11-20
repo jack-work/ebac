@@ -60,6 +60,9 @@ func TestBotsEqualThePythonReference(t *testing.T) {
 	for ns, want := range ref {
 		n, _ := strconv.Atoi(ns)
 		got := Parse(prs[n]).Bots
+		for i := range got.Architect { // the reference has no source fields
+			got.Architect[i].Via, got.Architect[i].By = "", ""
+		}
 		if !reflect.DeepEqual(got.Architect, want.Architect) && !(len(got.Architect) == 0 && len(want.Architect) == 0) {
 			t.Errorf("#%d architect:\n got  %+v\n want %+v", n, got.Architect, want.Architect)
 		}
