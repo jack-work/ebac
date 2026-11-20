@@ -24,6 +24,9 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		"new thread":             ok(model.Post{Path: "2026/11/19/a.md", Line: 3, Body: "x"}),
 		"new thread + rev":       ok(model.Post{Path: "handoffs/x.md", Line: 1, Rev: "abc", Body: "x"}),
 		"16000 chars of 2 bytes": ok(model.Post{ReplyTo: "t1", Body: strings.Repeat("é", KeelBodyMax)}),
+		// keel is internal: a body naming our tools is sent (backlog #34); the same body to a GHE PR is refused
+		// (TestDisclosure's GHE arm).
+		"names an internal term": ok(model.Post{ReplyTo: "t1", Body: "queued on band-hub, see the captains-log"}),
 	}
 	for name, p := range accept {
 		if why := Authorize(w, nil, "jack", &p); why != "" {

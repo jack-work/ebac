@@ -36,6 +36,10 @@ func TestDisclosure(t *testing.T) {
 	if got := Authorize(w, snap, "jack", &model.Post{PR: "acme/widget#1", Body: "checked on gluk"}); !strings.Contains(got, `"gluk"`) {
 		t.Errorf("disclosing body: %q", got)
 	}
+	// The control for backlog #34 (keel sends the same body: TestAuthorizeKeelArms): to a GHE PR it is refused.
+	if got := Authorize(w, snap, "jack", &model.Post{PR: "acme/widget#1", Body: "queued on band-hub, see the captains-log"}); !strings.Contains(got, "internal term") {
+		t.Errorf("GHE body naming band-hub: %q, want a refusal", got)
+	}
 	if got := Authorize(w, snap, "jack", &model.Post{PR: "acme/widget#1", Body: "checked locally"}); got != "" {
 		t.Errorf("clean body refused: %q", got)
 	}
