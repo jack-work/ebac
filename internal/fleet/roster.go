@@ -189,6 +189,8 @@ func health(w *model.Critic, row RosterRow, now time.Time, beat *sched.Beat, bea
 		return "seat aria is gone; re-cast"
 	case w.NoAuthority:
 		return model.NoAuthorityNote(w.FormID)
+	case w.Undeclared:
+		return model.UndeclaredNote
 	case len(w.FormIgnored) > 0:
 		return model.IgnoredNote(w.FormIgnored)
 	case beatErr != nil:

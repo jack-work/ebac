@@ -206,6 +206,9 @@ type Critic struct {
 	// NoAuthority: neither the trusted config nor ebac's creation record
 	// names this critic's authority; it is not run (fail closed, #11).
 	NoAuthority bool `json:"-"`
+	// Undeclared: ebac's configuration declares critics (registrations) and
+	// not this one (rework step 3 flags it; a later switch archives it).
+	Undeclared bool `json:"-"`
 
 	// Source names the upstream this critic translates (source.go); empty
 	// means github-pr.

@@ -87,6 +87,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac ls                                   every critic, its seat, and its health
   ebac show   --critic N                     one critic in detail
   ebac poll   --critic N [--dry-run]         run one round now, by hand (ebacd runs them on schedule)
+  ebac config check                         the declared critics (services.ebac) against the live ones; no lines = equal
   ebac daemon [--config F] [--pool N] [--round-timeout D]
                                             ebacd: schedule every critic under the shared budget (one per node)
   ebac cast   --critic N --aria ID           seat or re-seat the role (succession)
@@ -204,6 +205,8 @@ func main() {
 		err = cmdPoll(ctx, g, args)
 	case "daemon":
 		err = cmdDaemon(ctx, g, args)
+	case "config":
+		err = cmdConfig(ctx, g, args)
 	case "cast":
 		err = cmdCast(ctx, g, args)
 	case "stop":

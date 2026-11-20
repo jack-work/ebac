@@ -315,6 +315,7 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 	w.FormID = f.ID
 	w.FormIgnored = TrustedConfig().Apply(&w)
 	w.FormIgnored = append(w.FormIgnored, applyAuthority(&w)...)
+	w.Undeclared = undeclared(w.Name, w.FormID)
 	w.Runtime = f.ebac().Runtime
 	w.Trigger = f.Keys[trigger.FormKey]
 	for _, k := range model.SourceReads[w.SourceName()] {
@@ -889,7 +890,9 @@ var (
 )
 
 // ResetTrusted makes the next TrustedConfig read path (tests).
-func ResetTrusted(path string) { TrustedPath, trustedOnce = path, sync.Once{} }
+func ResetTrusted(path string) {
+	TrustedPath, trustedOnce, regsOnce = path, sync.Once{}, sync.Once{}
+}
 
 // TrustedConfig is ebac's trusted configuration, read once per process. An
 // unreadable file fails CLOSED: the default host only and no per-critic
@@ -1018,4 +1021,34 @@ func (s *Store) SaveRecordingForTest(ctx context.Context, w *model.Critic, snap 
 		}
 	}
 	return s.Save(ctx, w, snap, receipts)
+}
+
+var (
+	regsOnce     sync.Once
+	regs         map[string]model.Registration
+	regsDeclared bool
+)
+
+// Registrations are the critics ebac's configuration declares (read once per
+// process from TrustedPath); declared is false when it declares none yet.
+func Registrations() (map[string]model.Registration, bool) {
+	regsOnce.Do(func() {
+		r, d, err := model.LoadRegistrations(TrustedPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ebac: %v: no registrations read\n", err)
+		}
+		regs, regsDeclared = r, d
+	})
+	return regs, regsDeclared
+}
+
+// undeclared says whether a configuration that declares critics leaves this
+// one out (by name, at this role form).
+func undeclared(name, formID string) bool {
+	r, declared := Registrations()
+	if !declared {
+		return false
+	}
+	d, ok := r[name]
+	return !ok || d.Form != formID
 }
