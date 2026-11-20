@@ -31,7 +31,7 @@ func For(source string) (string, error) {
 		return "bandhub", nil
 	case model.SourceRoster:
 		return "roster", nil
-	case model.SourceReleases, model.SourceScout:
+	case model.SourceReleases, model.SourceScout, model.SourceGHCache:
 		return "gh", nil
 	case model.SourceApprove, model.SourceOrgApprove:
 		return "approve", nil

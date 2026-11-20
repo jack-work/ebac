@@ -110,6 +110,9 @@ type Runtime struct {
 	// scout.State): the search cursor, each tracked PR's and issue's head
 	// and entry digest, path verdicts, test counts, ledger outbox times.
 	Scout json.RawMessage `json:"scout,omitempty"`
+	// GHCache is a github-cache critic's state, opaque to the core (the
+	// plugin's ghcache.State): per entity marks, tier and next due time.
+	GHCache json.RawMessage `json:"gh_cache,omitempty"`
 
 	// BandHub is a band-hub mirror's state, opaque to the core (the plugin's
 	// bandstate.State): the view it last wrote and its cached branch tips.
@@ -452,6 +455,7 @@ const (
 // on every round (Request.Keys): configuration the role holder edits.
 var SourceReads = map[string][]string{
 	"github-author": {AuthorPathsKey, AuthorTitleKey},
+	SourceGHCache:   {GHCacheConfigKey},
 	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey, "review", "verdict", "review_state"},
 }
 
@@ -876,6 +880,16 @@ type OwnerRule struct {
 // verdicts). The branch's builder holds the form (its target-aria) and owns
 // code_ready and ready on it; the plugin never writes them.
 const SourceKeelBranches = "keel-branches"
+
+// SourceGHCache is the GitHub cache (ebac-gh, slice 1: PR read side): one
+// child form per tracked PR (ebac-<critic>-<repo>-pr-<n>, keys gh, parsed,
+// sync), tracked by the rules in the role form's holder-edited config key;
+// the plugin writes its index to the role form's track key.
+const SourceGHCache = "github-cache"
+
+// GHCacheConfigKey is the github-cache role form's holder-edited config:
+// {repos[], rules[{author[], label[], tier}], ttl}.
+const GHCacheConfigKey = "config"
 
 // KeelBranches is a keel-branches critic's configuration.
 type KeelBranches struct {

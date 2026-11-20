@@ -99,6 +99,61 @@ func TestValidateFormsKeelBranches(t *testing.T) {
 	}
 }
 
+// The GitHub cache writes child forms under the keel-branches rules: one per tracked PR, key <repo>-pr-<n>; never an
+// owner or core key, a dotted key, its inputs form, past MaxChildren. RED if writesChildren drops SourceGHCache
+// (every write refused "may not write other forms") or the child rules stop applying to it.
+func TestValidateFormsGHCache(t *testing.T) {
+	gc := &model.Critic{Name: "gh-cache", Source: model.SourceGHCache, InputsForm: "@inputs"}
+	ok := plugin.FormWrite{Key: "aether-pr-1234", Set: map[string]json.RawMessage{"gh": raw(`{"title":"x"}`), "parsed": raw(`{}`), "sync": raw(`{}`)}}
+	if err := ValidateForms(gc, &plugin.Reply{Forms: []plugin.FormWrite{ok, {Key: "aether-pr-1", Retire: true}}}); err != nil {
+		t.Fatalf("valid writes refused: %v", err)
+	}
+	for _, c := range []struct {
+		name string
+		fw   plugin.FormWrite
+		in   string
+	}{
+		{"ready", plugin.FormWrite{Key: "aether-pr-1", Set: map[string]json.RawMessage{"ready": raw(`true`)}}, `may not set "ready" on child aether-pr-1 (owner or core key)`},
+		{"target-aria", plugin.FormWrite{Key: "aether-pr-1", Set: map[string]json.RawMessage{"target-aria": raw(`"x"`)}}, `may not set "target-aria" on child aether-pr-1 (owner or core key)`},
+		{"dotted gh key", plugin.FormWrite{Key: "aether-pr-1", Set: map[string]json.RawMessage{"gh.title": raw(`"x"`)}}, `may not set "gh.title" (top-level keys only)`},
+		{"unset system", plugin.FormWrite{Key: "aether-pr-1", Unset: []string{"system"}}, `may not unset "system" on child aether-pr-1 (owner or core key)`},
+		{"repo with slash", plugin.FormWrite{Key: "bic/aether-pr-1", Set: ok.Set}, `child key "bic/aether-pr-1" is not [a-z0-9-], 1-100`},
+		{"upper case", plugin.FormWrite{Key: "Aether-pr-1", Set: ok.Set}, `child key "Aether-pr-1" is not [a-z0-9-], 1-100`},
+		{"inputs form", plugin.FormWrite{Inputs: true, Set: map[string]json.RawMessage{"ledger_outbox": raw(`{}`)}}, "github-cache writes only child forms (want a key)"},
+	} {
+		err := ValidateForms(gc, &plugin.Reply{Forms: []plugin.FormWrite{ok, c.fw}})
+		if err == nil || !strings.Contains(err.Error(), c.in) || !strings.HasSuffix(err.Error(), "reply refused") {
+			t.Errorf("%s: %v (want %q)", c.name, err, c.in)
+		}
+	}
+	full := &model.Critic{Name: "gh-cache", Source: model.SourceGHCache, Runtime: model.Runtime{Children: map[string]string{}}}
+	for i := 0; i < 100; i++ {
+		full.Runtime.Children[fmt.Sprintf("aether-pr-%d", i)] = "@x"
+	}
+	if err := ValidateForms(full, &plugin.Reply{Forms: []plugin.FormWrite{{Key: "aether-pr-5", Set: ok.Set}}}); err != nil {
+		t.Fatalf("a rewrite at the cap refused: %v", err)
+	}
+	if err := ValidateForms(full, &plugin.Reply{Forms: []plugin.FormWrite{ok}}); err == nil || err.Error() != "101 child forms after this round (max 100): reply refused" {
+		t.Fatalf("the 101st child: %v", err)
+	}
+}
+
+// The GitHub cache sets only track on its role form: config is the holder's (read through SourceReads), and no
+// other key, dotted track member or scout key is its. RED if SourceKeys loses the entry (track refused) or widens.
+func TestGHCacheSourceKeys(t *testing.T) {
+	if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{"track": raw(`{}`)}, Unset: []string{"track"}}); err != nil {
+		t.Fatalf("track refused: %v", err)
+	}
+	for _, k := range []string{"config", "track.aether#1", "pr:1", "branches", "target-aria", "critic"} {
+		if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{k: raw(`1`)}}); err == nil {
+			t.Errorf("github-cache may set %q", k)
+		}
+	}
+	if got := model.SourceReads[model.SourceGHCache]; len(got) != 1 || got[0] != "config" {
+		t.Errorf("SourceReads[github-cache] = %v, want [config]", got)
+	}
+}
+
 // The scout's own keys are pr:<n> and issue:<n>, one segment, nothing else.
 func TestScoutSourceKeys(t *testing.T) {
 	ok := &plugin.Reply{Set: map[string]json.RawMessage{"pr:108445": raw(`{}`), "issue:96000": raw(`{}`)}, Unset: []string{"pr:1"}}

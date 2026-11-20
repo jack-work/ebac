@@ -24,6 +24,13 @@ import (
 // after checking the whole reply (ValidateForms), and only through
 // form.Commit.
 
+// writesChildren: the sources whose form writes are child forms only, under
+// one rule set (child key, top-level keys, ChildWriteRefused, MaxChildren).
+// The GitHub cache writes one child per tracked PR.
+func writesChildren(src string) bool {
+	return src == model.SourceKeelBranches || src == model.SourceGHCache
+}
+
 // InputsWriteKeys are the inputs-form keys a plugin may write.
 var InputsWriteKeys = map[string]bool{"ledger_outbox": true}
 
@@ -43,7 +50,7 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 	if src == model.SourceOrgApprove {
 		return validateOrgApproveForms(w, rep)
 	}
-	if src != model.SourceScout && src != model.SourceKeelBranches {
+	if src != model.SourceScout && !writesChildren(src) {
 		return fmt.Errorf("source %s may not write other forms (%d form writes): reply refused", src, len(rep.Forms))
 	}
 	minted := map[string]bool{}
@@ -68,7 +75,7 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 		}
 		switch {
 		case fw.Inputs || fw.Key == "":
-			return fmt.Errorf("%s: keel branches write only child forms (want a key): reply refused", where)
+			return fmt.Errorf("%s: %s writes only child forms (want a key): reply refused", where, src)
 		case !childKey.MatchString(fw.Key):
 			return fmt.Errorf("%s: child key %q is not [a-z0-9-], 1-100: reply refused", where, fw.Key)
 		}
@@ -136,7 +143,7 @@ func (p *Poller) commitOutbox(ctx context.Context, id string, set map[string]jso
 // orphaned. Its error fails the round after the critic is saved.
 func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Reply) error {
 	src := w.SourceName()
-	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove && src != model.SourceOrgApprove {
+	if src != model.SourceScout && !writesChildren(src) && src != model.SourceApprove && src != model.SourceOrgApprove {
 		return nil
 	}
 	var err error

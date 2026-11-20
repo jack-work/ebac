@@ -250,6 +250,9 @@ var SourceKeys = map[string][]string{
 	// role form, the registry (branch -> child form) and the branches they
 	// could not follow.
 	model.SourceKeelBranches: {"branches", "overflow"},
+	// The GitHub cache writes its index (one object: figaro#43) on its own
+	// role form; config is the holder's, read only.
+	model.SourceGHCache: {"track"},
 }
 
 func keyAllowed(pattern, k string) bool {

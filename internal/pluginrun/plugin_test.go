@@ -180,7 +180,7 @@ func TestInProcMatchesTheWire(t *testing.T) {
 }
 
 func TestForNamesEverySource(t *testing.T) {
-	for src, want := range map[string]string{"": "gh", "github-pr": "gh", "github-author": "gh", "keel-threads": "keel", "teams-chat": "tomb"} {
+	for src, want := range map[string]string{"": "gh", "github-pr": "gh", "github-author": "gh", "keel-threads": "keel", "teams-chat": "tomb", "github-cache": "gh"} {
 		if got, err := For(src); err != nil || got != want {
 			t.Fatalf("For(%q) = %q, %v; want %q", src, got, err, want)
 		}
