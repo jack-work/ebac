@@ -25,7 +25,7 @@ type Plugin struct {
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
-	if req.Op != plugin.OpRound {
+	if req.Op != plugin.OpRound && req.Op != plugin.OpCommit {
 		return nil, fmt.Errorf("op %q not supported: org-approve has no seat, brief or outbox", req.Op)
 	}
 	w := &req.Critic
@@ -62,7 +62,9 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		w.Runtime.OrgApprove = &model.OrgApproveState{}
 	}
 	rep := &plugin.Reply{Critic: w, Done: true}
-	o, err := Run(ctx, rd, wr, fl, Pass{Watch: *w.OrgApprove, State: w.Runtime.OrgApprove, Grants: gs, Now: now(), DryRun: req.DryRun})
+	o, err := Run(ctx, rd, wr, fl, Pass{Watch: *w.OrgApprove, State: w.Runtime.OrgApprove, Grants: gs, Now: now(), DryRun: req.DryRun,
+		Op: req.Op, Token: req.CommitToken})
+	rep.Commit = o.Commit && req.Op == plugin.OpRound && !req.DryRun
 	for _, l := range o.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}

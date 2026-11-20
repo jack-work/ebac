@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 	"github.com/gluck/ebac/sdk/tomb"
 )
 
@@ -29,7 +30,7 @@ var (
 	allowed = []*regexp.Regexp{
 		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+$`),
 		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+/reviews\?per_page=100&page=[0-9]{1,3}$`),
-		regexp.MustCompile(`^pr review [0-9]+ --repo bic/aether --approve --body Approved on Jack's behalf \(Figaro\), on [A-Za-z][A-Za-z .'-]{0,60}'s ask [0-9]{10,16}\.$`),
+		regexp.MustCompile(`^pr review [0-9]+ --repo bic/aether --approve --body Approved on Jack's behalf \(Figaro\), on [A-Za-z][A-Za-z .'-]{0,60}'s ask [0-9]{10,16}\.\n\n<!-- figaro-ask:[A-Za-z0-9._-]{1,64} -->$`),
 	}
 )
 
@@ -185,13 +186,55 @@ func good() map[string]any {
 	return map[string]any{"repo": "bic/aether", "pr": 110001, "teams_msg_id": msgID, "chat": "ahmed", "at": "2026-11-12T20:50:00Z", "by": "x"}
 }
 
-func run(t *testing.T, h *fakeHub, tm fakeTeams, reqs map[string]json.RawMessage, mut ...func(*Pass)) (Out, error) {
+// ledger plays the core across rounds: each round mints a token, runs OpRound, SAVES the ledger the reply carries,
+// then (Commit asked) runs OpCommit with the same token and saves again. lose drops the commit's save (the reply
+// was lost after the POST); crash skips the commit call entirely (the core died after the save).
+type ledger struct {
+	posts       map[string]*model.PostRecord
+	n           int
+	lose, crash bool
+}
+
+func (l *ledger) round(t *testing.T, h *fakeHub, tm fakeTeams, reqs map[string]json.RawMessage, at time.Time, mut ...func(*Pass)) (Out, error) {
 	t.Helper()
-	p := Pass{Watch: watch, Requests: reqs, Grants: liveGrants, Now: now}
+	l.n++
+	p := Pass{Watch: watch, Requests: reqs, Grants: liveGrants, Now: at, Op: plugin.OpRound, Token: fmt.Sprintf("%016x", l.n), Posts: l.posts}
 	for _, m := range mut {
 		m(&p)
 	}
-	return Run(context.Background(), h.gh(), tm, p)
+	out, err := Run(context.Background(), h.gh(), tm, p)
+	l.posts = out.Posts
+	if !out.Commit || l.crash {
+		return out, err
+	}
+	p.Op, p.Posts = plugin.OpCommit, l.posts
+	c, cerr := Run(context.Background(), h.gh(), tm, p)
+	if !l.lose {
+		l.posts = c.Posts
+	}
+	for id, r := range c.Results {
+		out.Results[id] = r
+	}
+	out.Pings = append(out.Pings, c.Pings...)
+	out.Log = append(out.Log, c.Log...)
+	out.Commit = false
+	return out, errors.Join(err, cerr)
+}
+
+// run is one round (both phases) on an empty ledger.
+func run(t *testing.T, h *fakeHub, tm fakeTeams, reqs map[string]json.RawMessage, mut ...func(*Pass)) (Out, error) {
+	t.Helper()
+	return (&ledger{}).round(t, h, tm, reqs, now, mut...)
+}
+
+// decided writes a round's results onto the requests, as the core lands them.
+func decided(reqs map[string]json.RawMessage, out Out) {
+	for id, r := range out.Results {
+		var f map[string]any
+		_ = json.Unmarshal(reqs[id], &f)
+		f["result"] = r
+		reqs[id] = reqJSON(f)
+	}
 }
 
 func TestApproveHappyPath(t *testing.T) {
@@ -209,7 +252,7 @@ func TestApproveHappyPath(t *testing.T) {
 		t.Fatalf("pings %+v", out.Pings)
 	}
 	last := h.calls[len(h.calls)-2]
-	if strings.Join(last, " ") != "pr review 110001 --repo bic/aether --approve --body "+Body(watch.Asker(), msgID) {
+	if strings.Join(last, " ") != "pr review 110001 --repo bic/aether --approve --body "+PostBody(watch.Asker(), msgID, "r1") {
 		t.Fatalf("approve argv %q", last)
 	}
 }
@@ -376,7 +419,7 @@ func TestApproveAskUsedOnce(t *testing.T) {
 
 func TestApproveRecoversAPostWithoutResult(t *testing.T) {
 	h, tm := world()
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 555, State: "APPROVED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 555, State: "APPROVED", Body: PostBody(watch.Asker(), msgID, "r1"), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID != 555 || h.posts() != 0 {
 		t.Fatalf("recovery: %+v posts %d", r, h.posts())
@@ -391,7 +434,7 @@ func TestApproveDryRunPostsNothing(t *testing.T) {
 		t.Fatalf("dry run: results %+v pings %+v posts %d calls %d err %v", out.Results, out.Pings, h.posts(), len(h.calls), err)
 	}
 	log := strings.Join(out.Log, "\n")
-	if !strings.Contains(log, "r1 would be approved") || !strings.Contains(log, "r2 would be refused: scope: repo") {
+	if !strings.Contains(log, "dry run: request r1 would be prepared for the approve") || !strings.Contains(log, "r2 would be refused: scope: repo") {
 		t.Fatalf("dry log: %s", log)
 	}
 	// And the real exec is never reached in dry mode: a GH whose exec is
@@ -482,10 +525,18 @@ func TestLiveGrantShape(t *testing.T) {
 // not a past approve, so the approve is still posted.
 func TestApproveRecoveryNeedsAnApproval(t *testing.T) {
 	h, tm := world()
+	// A comment quoting the body without the marker is not ours: the approve is posted.
 	h.reviews[110001] = append(h.reviews[110001], Review{ID: 556, State: "COMMENTED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID == 556 || h.posts() != 1 {
 		t.Fatalf("a comment counted as the approve: %+v posts %d", r, h.posts())
+	}
+	// The marker on a non-approve review: ours, never posted again, a final refusal (not ok).
+	h, tm = world()
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 558, State: "COMMENTED", Body: PostBody(watch.Asker(), msgID, "r1"), SubmittedAt: "2026-11-12T20:55:00Z"})
+	out, _ = run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
+	if r := out.Results["r1"]; r.OK || r.Reason != ReadBackFailed+"review 558 carries the request's marker in state COMMENTED" || h.posts() != 0 {
+		t.Fatalf("marker on a comment: %+v posts %d", r, h.posts())
 	}
 }
 
@@ -508,7 +559,7 @@ func TestApproveTwoAskersOneForm(t *testing.T) {
 		t.Fatalf("ahmed critic: results %+v (want a1 ok only; s1 and x1 untouched)", out.Results)
 	}
 	last := h.calls[len(h.calls)-2]
-	if !strings.HasSuffix(strings.Join(last, " "), "on Ahmed Kotb's ask "+msgID+".") || !strings.Contains(out.Pings[0].Text, "Ahmed Kotb") {
+	if !strings.HasSuffix(strings.Join(last, " "), "on Ahmed Kotb's ask "+msgID+".\n\n<!-- figaro-ask:a1 -->") || !strings.Contains(out.Pings[0].Text, "Ahmed Kotb") {
 		t.Fatalf("ahmed body %q ping %q", last, out.Pings[0].Text)
 	}
 
@@ -572,28 +623,34 @@ func TestQueryReadsOnly(t *testing.T) {
 	}
 }
 
-// bic/aether#129969: a read-back error after the post is a FINAL refusal (and
-// a ping), never a transient retry that would post again next round.
+// bic/aether#129969 under design B: a read-back error after the post is never a retry that could post again. The
+// post round leaves no result; later rounds only read back; LostAfter (10 min) after the post, a final refusal and a
+// ping. Exactly one POST throughout.
 func TestReadBackErrorAfterThePostIsFinal(t *testing.T) {
 	h, tm := world()
 	h.readErrAfterPost = errors.New("gh: HTTP 502")
 	reqs := map[string]json.RawMessage{"r1": reqJSON(good())}
-	out, err := run(t, h, tm, reqs)
-	if err != nil {
-		t.Fatalf("a read-back error after the post surfaced as a round error (retried next round): %v", err)
+	l := &ledger{}
+	out, err := l.round(t, h, tm, reqs, now)
+	if err != nil || len(out.Results) != 0 || h.posts() != 1 || l.posts["r1"].PostedAt != "2026-11-12T21:00:00Z" {
+		t.Fatalf("post round: %+v err %v posts %d ledger %+v", out.Results, err, h.posts(), l.posts["r1"])
 	}
-	r := out.Results["r1"]
-	if r.OK || r.Reason != ReadBackFailed+"gh: HTTP 502" || h.posts() != 1 || len(out.Pings) != 1 ||
-		!strings.Contains(out.Pings[0].Text, "approve SENT but not read back") {
-		t.Fatalf("result %+v posts %d pings %+v", r, h.posts(), out.Pings)
-	}
-	// the request is decided: a second round posts nothing
-	f := good()
-	f["result"] = r
-	h.readErrAfterPost = nil
-	out, _ = run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(f)})
+	out, _ = l.round(t, h, tm, reqs, now.Add(LostAfter-time.Second))
 	if len(out.Results) != 0 || h.posts() != 1 {
-		t.Fatalf("second round: %+v posts %d", out.Results, h.posts())
+		t.Fatalf("inside LostAfter: %+v posts %d", out.Results, h.posts())
+	}
+	out, _ = l.round(t, h, tm, reqs, now.Add(LostAfter))
+	r := out.Results["r1"]
+	if r.OK || !strings.HasPrefix(r.Reason, ReadBackFailed+"posted at 2026-11-12T21:00:00Z, not read back within 10m0s (read-back failed: gh: HTTP 502)") ||
+		h.posts() != 1 || len(out.Pings) != 1 || !strings.Contains(out.Pings[0].Text, "may have been SENT") {
+		t.Fatalf("at LostAfter: %+v posts %d pings %+v", r, h.posts(), out.Pings)
+	}
+	// decided: the next round posts nothing and drops the record
+	decided(reqs, out)
+	h.readErrAfterPost = nil
+	out, _ = l.round(t, h, tm, reqs, now.Add(LostAfter+time.Minute))
+	if len(out.Results) != 0 || h.posts() != 1 || len(l.posts) != 0 {
+		t.Fatalf("after the result: %+v posts %d ledger %v", out.Results, h.posts(), l.posts)
 	}
 }
 
@@ -603,7 +660,7 @@ func TestAnApproveOnPageTwoIsFound(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		h.reviews[110001] = append(h.reviews[110001], Review{ID: int64(100 + i), State: "COMMENTED", Body: "x", SubmittedAt: "2026-11-12T20:00:00Z"})
 	}
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 777, State: "APPROVED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 777, State: "APPROVED", Body: PostBody(watch.Asker(), msgID, "r1"), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID != 777 || h.posts() != 0 {
 		t.Fatalf("page 2: %+v posts %d", out.Results, h.posts())
@@ -614,7 +671,7 @@ func TestAnApproveOnPageTwoIsFound(t *testing.T) {
 // not post again.
 func TestDismissedApproveCountsAsPosted(t *testing.T) {
 	h, tm := world()
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 557, State: "DISMISSED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 557, State: "DISMISSED", Body: PostBody(watch.Asker(), msgID, "r1"), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID != 557 || h.posts() != 0 {
 		t.Fatalf("dismissed approve: %+v posts %d", r, h.posts())

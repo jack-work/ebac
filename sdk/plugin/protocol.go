@@ -43,6 +43,12 @@ const (
 	// in the critic's repo, in Reply.Rev ("" when there is none yet). The CLI
 	// asks it for `ebac verdict`, so the core holds no keel client.
 	OpDocRev Op = "docrev"
+	// OpCommit is the second phase of a round whose reply asked Commit: the
+	// core has durably saved that reply (the critic, with the records it
+	// prepared) and calls the plugin again in the same round, with the same
+	// CommitToken, to do the one irreversible thing it prepared (approve:
+	// the POST). Only the sources in the core's commit allowlist may ask.
+	OpCommit Op = "commit"
 )
 
 // Event is a model.Event on the wire. model.Event keeps its full text out of
@@ -119,6 +125,11 @@ type Request struct {
 	Pending []Event                `json:"pending,omitempty"` // OpBrief
 	Retry   int                    `json:"retry,omitempty"`   // OpBrief
 	Doc     string                 `json:"doc,omitempty"`     // OpDocRev
+	// CommitToken is minted by the core for each round of a two-phase source
+	// (random, 16 hex) and sent with both its OpRound and its OpCommit: a
+	// record prepared under another token was not saved-then-committed in
+	// this round, and is never acted on.
+	CommitToken string `json:"commit_token,omitempty"`
 }
 
 // Ping is a one-line message the core sends to a role (the scout: a material
@@ -182,6 +193,10 @@ type Reply struct {
 	Done bool `json:"done,omitempty"`
 	// Error fails the round after its effects are applied.
 	Error string `json:"error,omitempty"`
+	// Commit asks the core to persist this reply, then call the plugin with
+	// OpCommit in the same round (two-phase sources only; a commit reply may
+	// not ask again).
+	Commit bool `json:"commit,omitempty"`
 	// Archive asks the core to run its archival check (PR sources).
 	Archive bool `json:"archive,omitempty"`
 	// Outbox says this source carries posts: the core flushes the outbox
@@ -238,6 +253,7 @@ func Adopt(core, from *model.Critic) {
 	r.Roster = f.Roster
 	r.Releases = f.Releases
 	r.OrgApprove = f.OrgApprove
+	r.ApprovePosts = f.ApprovePosts
 	r.Stopped = f.Stopped
 	r.StopReason = f.StopReason
 }

@@ -131,70 +131,120 @@ func namesPR(content string, n int) bool {
 	return regexp.MustCompile(`(^|[^A-Za-z0-9_./-])#` + num + `\b`).MatchString(text)
 }
 
-// Pass is one round's input.
+// Pass is one round's input. Op is the phase (#27 B): OpRound decides and
+// PREPARES (records the approve under Token, posts nothing); OpCommit posts
+// what this round prepared, after the core saved it. Posts is the ledger as
+// the core saved it (runtime.approve_posts).
 type Pass struct {
 	Watch    model.ApproveWatch
 	Requests map[string]json.RawMessage // inputs form key requests
 	Grants   func() ([]grants.Grant, error)
 	Now      time.Time
 	DryRun   bool
+	Op       plugin.Op
+	Token    string
+	Posts    map[string]*model.PostRecord
 }
 
-// Out is one round's output: the results to write, the pings, the log.
+// Out is one round's output: the results to write, the pings, the log, the
+// ledger to save, and whether to ask the core for OpCommit.
 type Out struct {
 	Results map[string]Result
 	Pings   []plugin.Ping
 	Log     []string
+	Posts   map[string]*model.PostRecord
+	Commit  bool
 }
+
+// LostAfter: a prepared or posted approve not read back this long after is a
+// final refusal (it may have posted: the requester checks by hand).
+const LostAfter = 10 * time.Minute
+
+// Marker tags a request's approve (an HTML comment, invisible on GitHub;
+// names only figaro): found in ANY review state, the approve was posted.
+func Marker(id string) string { return "<!-- figaro-ask:" + id + " -->" }
+
+// PostBody is the body posted for a request: Body, then its marker.
+func PostBody(asker, msgID, id string) string { return Body(asker, msgID) + "\n\n" + Marker(id) }
 
 // errTransient marks an upstream failure: the request is left without a
 // result and decided again next round.
 var errTransient = errors.New("transient")
 
-// Run decides up to MaxPerRound requests without a result, oldest id first.
-// A dry run reads everything and decides, but posts nothing and returns no
-// results or pings: only its log says what it would do.
+// ReadBackFailed starts the reason of a request whose approve may have been
+// sent but was not read back: final, never retried (a retry could post
+// twice); the ask is used and the requester is pinged to check the PR by hand.
+const ReadBackFailed = "post: approve sent (check the PR by hand; not posted again): " // unchanged text: interim results with it keep their ask used
+
+// Run is one phase of a round (Pass.Op). A dry run reads everything and
+// decides, but prepares and posts nothing and returns no results or pings.
 func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
-	out := Out{Results: map[string]Result{}}
+	out := Out{Results: map[string]Result{}, Posts: map[string]*model.PostRecord{}}
+	for id, r := range p.Posts {
+		c := *r
+		out.Posts[id] = &c
+	}
+	if p.Op == plugin.OpCommit {
+		return out, commit(ctx, gh, p, &out)
+	}
 	logf := func(f string, a ...any) { out.Log = append(out.Log, fmt.Sprintf(f, a...)) }
 	ids := make([]string, 0, len(p.Requests))
-	used := map[string]string{} // teams_msg_id -> request id of an ok result
+	used := map[string]string{} // teams_msg_id -> request id whose approve was (or may have been) sent
+	decided := map[string]bool{}
 	for id, raw := range p.Requests {
 		var obj map[string]json.RawMessage
 		if json.Unmarshal(raw, &obj) != nil || obj == nil {
 			logf("request %q is not an object: skipped (no result can be written on it)", id)
 			continue
 		}
+		var msg string
+		_ = json.Unmarshal(obj["teams_msg_id"], &msg)
 		if obj["result"] != nil {
-			// Decided: never re-run, whatever the result's shape. An ok
-			// result marks its ask used.
+			// Decided: never re-run, whatever the result's shape. An
+			// approve that was sent (ok, or may have been) uses the ask.
+			decided[id] = true
 			var res Result
-			var msg string
-			// an approve that was SENT (ok, or sent but not read back) uses the ask
-			if json.Unmarshal(obj["result"], &res) == nil && (res.OK || strings.HasPrefix(res.Reason, ReadBackFailed)) && json.Unmarshal(obj["teams_msg_id"], &msg) == nil {
+			if json.Unmarshal(obj["result"], &res) == nil && (res.OK || strings.HasPrefix(res.Reason, ReadBackFailed)) && msg != "" {
 				used[msg] = id
 			}
 			continue
 		}
+		if out.Posts[id] != nil && msg != "" {
+			used[msg] = id // prepared or posted: the ask is taken
+		}
 		// One inputs form serves several askers, one critic each: a
 		// request names its asker's chat, and only that critic decides it.
-		// Another critic's request (or one naming no chat) is left alone:
-		// no result, not counted.
 		var chat string
 		if json.Unmarshal(obj["chat"], &chat) != nil || chat != p.Watch.ChatAlias {
 			continue
 		}
 		ids = append(ids, id)
 	}
+	// The ledger keeps a record until its request has a result (or is gone).
+	for id := range out.Posts {
+		if _, ok := p.Requests[id]; !ok || decided[id] {
+			delete(out.Posts, id)
+		}
+	}
 	sort.Strings(ids)
 	at := p.Now.UTC().Format(time.RFC3339)
 	var firstErr error
+	acted := 0
 	for _, id := range ids {
-		if len(out.Results) >= MaxPerRound {
-			logf("%d request(s) wait for later rounds", len(ids)-len(out.Results))
+		if acted >= MaxPerRound {
+			logf("%d request(s) wait for later rounds", len(ids)-acted)
 			break
 		}
-		res, err := decide(ctx, gh, teams, p, id, used)
+		var res Result
+		var final bool
+		var err error
+		if rec := out.Posts[id]; rec != nil {
+			// A record exists: no check runs again; only the read-back decides.
+			res, final, err = readBack(ctx, gh, p, id, rec)
+		} else {
+			res, final, err = decide(ctx, gh, teams, p, id, used, &out)
+		}
+		acted++
 		if err != nil {
 			logf("request %s: %v (decided again next round)", id, err)
 			if firstErr == nil {
@@ -202,32 +252,125 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 			}
 			continue
 		}
+		if !final {
+			continue
+		}
 		res.At = at
 		if p.DryRun {
 			logf("dry run: request %s would be %s", id, describe(res))
 			continue
 		}
-		out.Results[id] = res
-		logf("request %s: %s", id, describe(res))
-		if !res.OK && strings.HasPrefix(res.Reason, ReadBackFailed) {
-			r, _ := parse(id, p.Requests[id])
-			used[r.MsgID] = id // sent: the ask is used, a re-filed request for it is refused
-		}
-		if !res.OK && strings.HasPrefix(res.Reason, ReadBackFailed) && p.Watch.PingTo != "" {
-			r, _ := parse(id, p.Requests[id])
-			out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
-				"ebac approve: %s#%d approve SENT but not read back (request %s): check the PR by hand; ebac will not post again", Repo, r.PR, id)})
-		}
-		if res.OK {
-			r, _ := parse(id, p.Requests[id])
-			used[r.MsgID] = id
-			if p.Watch.PingTo != "" {
-				out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
-					"ebac approve: %s#%d approved, review %d, on %s's ask %s (request %s)", Repo, r.PR, res.ReviewID, p.Watch.Asker(), r.MsgID, id)})
-			}
-		}
+		record(&out, p, id, res, used)
+	}
+	if p.DryRun {
+		out.Commit, out.Posts = false, p.Posts
 	}
 	return out, firstErr
+}
+
+// record writes a final result, its ping, and marks a sent ask used.
+func record(out *Out, p Pass, id string, res Result, used map[string]string) {
+	out.Results[id] = res
+	out.Log = append(out.Log, fmt.Sprintf("request %s: %s", id, describe(res)))
+	r, _ := parse(id, p.Requests[id])
+	sent := res.OK || strings.HasPrefix(res.Reason, ReadBackFailed)
+	if sent {
+		used[r.MsgID] = id
+	}
+	if p.Watch.PingTo == "" {
+		return
+	}
+	switch {
+	case res.OK:
+		out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
+			"ebac approve: %s#%d approved, review %d, on %s's ask %s (request %s)", Repo, r.PR, res.ReviewID, p.Watch.Asker(), r.MsgID, id)})
+	case sent:
+		out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
+			"ebac approve: %s#%d approve may have been SENT but was not read back (request %s): check the PR by hand; ebac will not post again", Repo, r.PR, id)})
+	}
+}
+
+// commit is OpCommit: post ONLY the records this round prepared (their token
+// is this round's: the core saved them before calling), mark each posted
+// (also when the POST errs: it may have landed), and read back once, no
+// sleep. Unseen: later rounds read back; nothing here posts twice.
+func commit(ctx context.Context, gh *GH, p Pass, out *Out) error {
+	if p.Token == "" || p.DryRun {
+		return nil
+	}
+	ids := make([]string, 0, len(out.Posts))
+	for id, rec := range out.Posts {
+		if rec.Token == p.Token && rec.PostedAt == "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	used := map[string]string{}
+	at := p.Now.UTC().Format(time.RFC3339)
+	for _, id := range ids {
+		rec := out.Posts[id]
+		r, why := parse(id, p.Requests[id])
+		if why != "" {
+			out.Log = append(out.Log, fmt.Sprintf("request %s: prepared but unparseable now (%s): not posted", id, why))
+			continue
+		}
+		perr := gh.Approve(ctx, rec.PR, PostBody(p.Watch.Asker(), r.MsgID, id))
+		rec.PostedAt = at
+		if perr != nil {
+			out.Log = append(out.Log, fmt.Sprintf("request %s: post reported %s (may have landed; read back from now on)", id, oneLine(perr.Error())))
+		}
+		back, err := gh.Reviews(ctx, rec.PR)
+		if err != nil {
+			out.Log = append(out.Log, fmt.Sprintf("request %s: posted; read-back failed (%s): read back next round", id, oneLine(err.Error())))
+			continue
+		}
+		if rv := ours(back, rec.Marker); rv != nil {
+			res := found(rv)
+			res.At = at
+			record(out, p, id, res, used)
+			continue
+		}
+		out.Log = append(out.Log, fmt.Sprintf("request %s: posted, not yet read back: read back next round", id))
+	}
+	return nil
+}
+
+// readBack decides a request that has a record: the marker in any review
+// state settles it; unseen LostAfter after the post (or, never confirmed
+// posted, after the prepare) is a final refusal. A record never posts here.
+func readBack(ctx context.Context, gh *GH, p Pass, id string, rec *model.PostRecord) (Result, bool, error) {
+	back, err := gh.Reviews(ctx, rec.PR)
+	if err == nil {
+		if rv := ours(back, rec.Marker); rv != nil {
+			return found(rv), true, nil
+		}
+	}
+	since, what := rec.PostedAt, "posted"
+	if since == "" {
+		since, what = rec.PreparedAt, "prepared (never confirmed posted)"
+	}
+	t, perr := time.Parse(time.RFC3339, since)
+	if perr != nil || p.Now.Sub(t) >= LostAfter {
+		why := "no review with its marker"
+		if err != nil {
+			why = "read-back failed: " + oneLine(err.Error())
+		}
+		return Result{Reason: fmt.Sprintf("%s%s at %s, not read back within %s (%s); ask again with a new message", ReadBackFailed, what, since, LostAfter, why)}, true, nil
+	}
+	if err != nil {
+		return Result{}, false, fmt.Errorf("%w: read back: %v", errTransient, err)
+	}
+	return Result{}, false, nil
+}
+
+// found is the result of a review carrying the request's marker: an approve
+// (APPROVED, or DISMISSED by a later push) is ok; the marker on any other
+// state is ours but not an approve: final, never posted again.
+func found(rv *Review) Result {
+	if rv.State == "APPROVED" || rv.State == "DISMISSED" {
+		return Result{OK: true, ReviewID: rv.ID}
+	}
+	return Result{Reason: fmt.Sprintf("%sreview %d carries the request's marker in state %s", ReadBackFailed, rv.ID, rv.State)}
 }
 
 func describe(r Result) string {
@@ -237,11 +380,13 @@ func describe(r Result) string {
 	return "refused: " + r.Reason
 }
 
-func refuse(reason string) (Result, error) { return Result{Reason: reason}, nil }
+func refuse(reason string) (Result, bool, error) { return Result{Reason: reason}, true, nil }
 
 // decide runs the checks in order. A failed check is a refusal (a final
-// result); an upstream failure is an error (no result, retried).
-func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used map[string]string) (Result, error) {
+// result); an upstream failure is an error (no result, retried). Every check
+// passed: the approve is PREPARED (recorded under this round's token, Commit
+// asked), never posted here.
+func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used map[string]string, out *Out) (Result, bool, error) {
 	w := p.Watch
 	// 0. shape: every field is untrusted.
 	r, why := parse(id, p.Requests[id])
@@ -266,7 +411,7 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 		if strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "404") {
 			return refuse(fmt.Sprintf("scope: %s#%d not found", Repo, r.PR))
 		}
-		return Result{}, fmt.Errorf("%w: read PR: %v", errTransient, err)
+		return Result{}, false, fmt.Errorf("%w: read PR: %v", errTransient, err)
 	}
 	if pr.State != "open" {
 		return refuse(fmt.Sprintf("scope: %s#%d is %s, not open", Repo, r.PR, pr.State))
@@ -278,7 +423,7 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	// newer than the PR's last approval (server timestamps, both UTC).
 	msgs, err := teams.Messages(ctx, w.Chat, AskWindow)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: read chat: %v", errTransient, err)
+		return Result{}, false, fmt.Errorf("%w: read chat: %v", errTransient, err)
 	}
 	var ask *tomb.TeamsMsg
 	for i := range msgs {
@@ -306,12 +451,11 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	}
 	reviews, err := gh.Reviews(ctx, r.PR)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: read reviews: %v", errTransient, err)
+		return Result{}, false, fmt.Errorf("%w: read reviews: %v", errTransient, err)
 	}
-	body := Body(w.Asker(), r.MsgID)
-	if rv := ours(reviews, body); rv != nil {
-		// Posted in an earlier round that never wrote its result: record it.
-		return Result{OK: true, ReviewID: rv.ID}, nil
+	if rv := ours(reviews, Marker(id)); rv != nil {
+		// This request's approve is on GitHub with no record here: settle it.
+		return found(rv), true, nil
 	}
 	for _, rv := range reviews {
 		if rv.State != "APPROVED" {
@@ -326,40 +470,27 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 				r.MsgID, askAt.UTC().Format(time.RFC3339), rv.ID, t.UTC().Format(time.RFC3339)))
 		}
 	}
-	// 4. post, then read the review back.
+	// 4. prepare: the record, saved by the core before OpCommit posts it.
 	if p.DryRun {
-		return Result{OK: true}, nil
+		out.Log = append(out.Log, fmt.Sprintf("dry run: request %s would be prepared for the approve", id))
+		return Result{}, false, nil
 	}
-	perr := gh.Approve(ctx, r.PR, body)
-	back, err := gh.Reviews(ctx, r.PR)
-	if err != nil {
-		// Never transient after a post: a retry next round would post again if the
-		// review is still unseen (bic/aether#129969). A final refusal, and the
-		// requester is told to look.
-		return refuse(ReadBackFailed + oneLine(err.Error()))
+	if p.Token == "" {
+		return Result{}, false, fmt.Errorf("%w: no commit token from the core: nothing prepared", errTransient)
 	}
-	if rv := ours(back, body); rv != nil {
-		return Result{OK: true, ReviewID: rv.ID}, nil
-	}
-	if perr != nil {
-		// The POST may have landed although gh reported an error: sent, so the
-		// ask is used and never posted again.
-		return refuse(ReadBackFailed + "post error: " + oneLine(perr.Error()))
-	}
-	return refuse(ReadBackFailed + "no APPROVED review with its body read back")
+	out.Posts[id] = &model.PostRecord{PR: r.PR, Marker: Marker(id), Token: p.Token, PreparedAt: p.Now.UTC().Format(time.RFC3339)}
+	out.Commit = true
+	used[r.MsgID] = id
+	out.Log = append(out.Log, fmt.Sprintf("request %s: checks passed; approve of %s#%d prepared (posted at commit)", id, Repo, r.PR))
+	return Result{}, false, nil
 }
 
-// ReadBackFailed starts the reason of a request whose approve was sent but not
-// read back: final, never retried (a retry could post twice); the requester is
-// pinged to check the PR by hand.
-const ReadBackFailed = "post: approve sent (check the PR by hand; not posted again): "
-
-// ours is the approve carrying exactly body, APPROVED or DISMISSED: an approve
-// of ours that a push dismissed is still posted (bic/aether dismisses stale
-// approvals). A comment quoting the body is not an approve.
-func ours(rs []Review, body string) *Review {
+// ours is the review carrying marker, in ANY state: an approve of ours that a
+// push dismissed is still posted. A review merely quoting the body without
+// the exact marker is not ours.
+func ours(rs []Review, marker string) *Review {
 	for i := range rs {
-		if (rs[i].State == "APPROVED" || rs[i].State == "DISMISSED") && strings.TrimSpace(rs[i].Body) == body {
+		if strings.Contains(rs[i].Body, marker) {
 			return &rs[i]
 		}
 	}

@@ -73,21 +73,29 @@ type Filer interface {
 	State(ctx context.Context, id string) (grants.RequestState, error)
 }
 
-// Pass is one round's input.
+// Pass is one round's input. Op is the phase (#27 B): OpRound prepares an
+// approve (OrgAsk.Post under Token) and posts nothing; OpCommit posts what
+// this round prepared, after the core saved it.
 type Pass struct {
 	Watch  model.OrgApproveWatch
 	State  *model.OrgApproveState
 	Grants func() ([]grants.Grant, error)
 	Now    time.Time
 	DryRun bool
+	Op     plugin.Op
+	Token  string
 }
 
-// Out is one round's output.
+// Out is one round's output; Commit asks the core for OpCommit.
 type Out struct {
-	Q     map[string]map[string]any // q id -> fields to set (asker fields only)
-	Pings []plugin.Ping
-	Log   []string
+	Q      map[string]map[string]any // q id -> fields to set (asker fields only)
+	Pings  []plugin.Ping
+	Log    []string
+	Commit bool
 }
+
+// PostBody is an ask's review body: Body, then its marker (approve.Marker).
+func PostBody(id string) string { return Body + "\n\n" + approve.Marker(id) }
 
 var (
 	// QIDRe is the only q id shape this source writes.
@@ -116,6 +124,10 @@ func Run(ctx context.Context, rd Reader, wr Writer, fl Filer, p Pass) (Out, erro
 	}
 	if st.Asks == nil {
 		st.Asks = map[string]*model.OrgAsk{}
+	}
+	if p.Op == plugin.OpCommit {
+		commitAsks(ctx, wr, p, &out, logf)
+		return out, nil
 	}
 	open, err := lean(ctx, rd, p.Watch.Logins)
 	if err != nil {
@@ -231,6 +243,11 @@ func asks(ctx context.Context, wr Writer, fl Filer, p Pass, out *Out, logf func(
 			}
 			continue
 		}
+		if a.Post != nil {
+			// A record exists: no check runs again; only the read-back decides.
+			readBackAsk(ctx, wr, p, id, a, out, logf)
+			continue
+		}
 		pr := st.PRs[strconv.Itoa(a.PR)]
 		switch {
 		case pr == nil:
@@ -277,20 +294,23 @@ func asks(ctx context.Context, wr Writer, fl Filer, p Pass, out *Out, logf func(
 			}
 			continue
 		}
-		res, why, err := post(ctx, wr, a, p.DryRun)
+		res, why, err := post(ctx, wr, id, a, p.DryRun)
 		if err != nil {
 			logf("%s: %v (next round)", id, err)
 			continue
 		}
-		if why != "" {
-			if strings.HasPrefix(why, SentNotSeen) {
-				closeAsk(out, st, id, "done", why)
-				if w.PingTo != "" {
-					out.Pings = append(out.Pings, plugin.Ping{To: w.PingTo, Text: fmt.Sprintf(
-						"org-approve: %s#%d approve SENT but not read back (ask %s): check the PR by hand; not posted again", Repo, a.PR, id)})
-				}
+		if why == "" && res == 0 && !p.DryRun {
+			// Every check passed: prepare; the post is the commit's.
+			if p.Token == "" {
+				logf("%s: no commit token from the core: nothing prepared (next round)", id)
 				continue
 			}
+			a.Post = &model.PostRecord{PR: a.PR, Marker: approve.Marker(id), Token: p.Token, PreparedAt: at}
+			out.Commit = true
+			logf("%s: checks passed; approve of %s#%d at %s prepared (posted at commit)", id, Repo, a.PR, head7(a.Head))
+			continue
+		}
+		if why != "" {
 			closeAsk(out, st, id, "withdrawn", "approved on /grants/ but not posted: "+why)
 			continue
 		}
@@ -298,13 +318,7 @@ func asks(ctx context.Context, wr Writer, fl Filer, p Pass, out *Out, logf func(
 			logf("dry run: %s would be approved", id)
 			continue
 		}
-		a.ReviewID = res
-		closeAsk(out, st, id, "done", fmt.Sprintf("approved %s#%d at %s, review %d (%s)", Repo, a.PR, head7(a.Head), res, at))
-		st.Asks[id].State = "approved"
-		if w.PingTo != "" {
-			out.Pings = append(out.Pings, plugin.Ping{To: w.PingTo, Text: fmt.Sprintf(
-				"org-approve: %s#%d approved at %s (review %d, request %s)", Repo, a.PR, head7(a.Head), res, a.RequestID)})
-		}
+		approved(out, st, w, id, a, res, at)
 	}
 	// New asks: candidates at a head never asked, within band-grants' cap.
 	var cands []*model.OrgPR
@@ -388,10 +402,11 @@ func tapGrant(gs []grants.Grant, rid string, w model.OrgApproveWatch, now int64)
 	return "expired: no live grant row " + rid
 }
 
-// post re-checks the PR at the post (open, not draft, head unchanged, no
-// human change request standing, not already approved by Jack) and approves.
-// why is a final refusal; err a transient failure.
-func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, string, error) {
+// post re-checks the PR before the prepare (open, not draft, head unchanged,
+// no human change request standing, not already approved by Jack). It
+// returns a review id when this ask's approve is already on GitHub, why for a
+// final refusal, err for a transient failure; (0, "", nil): prepare it.
+func post(ctx context.Context, wr Writer, id string, a *model.OrgAsk, _ bool) (int64, string, error) {
 	info, err := wr.PR(ctx, a.PR)
 	if err != nil {
 		return 0, "", fmt.Errorf("read PR: %w", err)
@@ -408,6 +423,10 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 	if err != nil {
 		return 0, "", fmt.Errorf("read reviews: %w", err)
 	}
+	if r := oursAsk(rvs, id, a); r != nil {
+		// Posted with no record here: settle it (any state: a push dismisses).
+		return r.ID, "", nil
+	}
 	latest := map[string]string{}
 	for _, r := range rvs {
 		if r.User.Type == "Bot" || isBotLogin(r.User.Login) {
@@ -416,11 +435,6 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 		switch r.State {
 		case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
 			latest[r.User.Login] = r.State
-		}
-		// Ours at THIS head in any state (a push dismisses a stale approve):
-		// posted in an earlier round that never recorded it.
-		if r.User.Login == Self && strings.TrimSpace(r.Body) == Body && r.CommitID == a.Head {
-			return r.ID, "", nil
 		}
 	}
 	for l, s := range latest {
@@ -431,30 +445,124 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 	if latest[Self] == "APPROVED" {
 		return 0, "Jack already approved it", nil
 	}
-	if dry {
-		return 0, "", nil
-	}
-	perr := wr.Approve(ctx, a.PR, Body)
-	back, err := wr.Reviews(ctx, a.PR)
-	if err != nil {
-		// Never a transient error after a post: a retry next round would post
-		// again if the review is still unseen (bic/aether#129969).
-		return 0, SentNotSeen + "read-back failed: " + trunc(err.Error(), 200), nil
-	}
-	for _, r := range back {
-		if r.State == "APPROVED" && strings.TrimSpace(r.Body) == Body {
-			return r.ID, "", nil
+	return 0, "", nil
+}
+
+// oursAsk is this ask's review by Self in ANY state: carrying its marker, or
+// (an approve posted before the marker existed) the plain Body at its head.
+func oursAsk(rvs []approve.Review, id string, a *model.OrgAsk) *approve.Review {
+	for i, r := range rvs {
+		if r.User.Login != Self {
+			continue
+		}
+		if strings.Contains(r.Body, approve.Marker(id)) || (strings.TrimSpace(r.Body) == Body && r.CommitID == a.Head) {
+			return &rvs[i]
 		}
 	}
-	if perr != nil {
-		return 0, SentNotSeen + "post error: " + trunc(perr.Error(), 200), nil
+	return nil
+}
+
+// approved closes an ask whose approve is on GitHub.
+func approved(out *Out, st *model.OrgApproveState, w model.OrgApproveWatch, id string, a *model.OrgAsk, review int64, at string) {
+	a.ReviewID = review
+	closeAsk(out, st, id, "done", fmt.Sprintf("approved %s#%d at %s, review %d (%s)", Repo, a.PR, head7(a.Head), review, at))
+	st.Asks[id].State = "approved"
+	if w.PingTo != "" {
+		out.Pings = append(out.Pings, plugin.Ping{To: w.PingTo, Text: fmt.Sprintf(
+			"org-approve: %s#%d approved at %s (review %d, request %s)", Repo, a.PR, head7(a.Head), review, a.RequestID)})
 	}
-	return 0, SentNotSeen + "no APPROVED review with its body read back", nil
+}
+
+// lost closes an ask whose approve may have been sent but was never read
+// back: final, never posted again; the requester is pinged.
+func lost(out *Out, st *model.OrgApproveState, w model.OrgApproveWatch, id string, a *model.OrgAsk, why string) {
+	closeAsk(out, st, id, "done", SentNotSeen+why)
+	if w.PingTo != "" {
+		out.Pings = append(out.Pings, plugin.Ping{To: w.PingTo, Text: fmt.Sprintf(
+			"org-approve: %s#%d approve may have been SENT but was not read back (ask %s): check the PR by hand; not posted again", Repo, a.PR, id)})
+	}
+}
+
+// LostAfter: a prepared or posted approve unseen this long after is final.
+const LostAfter = 10 * time.Minute
+
+// settle decides an ask from a read of its reviews: found (approve or not),
+// or not yet. It never posts.
+func settle(out *Out, p Pass, id string, a *model.OrgAsk, rvs []approve.Review, at string) bool {
+	r := oursAsk(rvs, id, a)
+	if r == nil {
+		return false
+	}
+	if r.State == "APPROVED" || r.State == "DISMISSED" {
+		approved(out, p.State, p.Watch, id, a, r.ID, at)
+	} else {
+		lost(out, p.State, p.Watch, id, a, fmt.Sprintf("review %d carries the ask's marker in state %s", r.ID, r.State))
+	}
+	return true
+}
+
+// readBackAsk decides an ask with a record by its reviews alone; unseen
+// LostAfter after the post (or the prepare, never confirmed posted): final.
+func readBackAsk(ctx context.Context, wr Writer, p Pass, id string, a *model.OrgAsk, out *Out, logf func(string, ...any)) {
+	at := p.Now.UTC().Format(time.RFC3339)
+	rvs, err := wr.Reviews(ctx, a.PR)
+	if err == nil && settle(out, p, id, a, rvs, at) {
+		return
+	}
+	since, what := a.Post.PostedAt, "posted"
+	if since == "" {
+		since, what = a.Post.PreparedAt, "prepared (never confirmed posted)"
+	}
+	t, perr := time.Parse(time.RFC3339, since)
+	if perr != nil || p.Now.Sub(t) >= LostAfter {
+		why := "no review with its marker"
+		if err != nil {
+			why = "read-back failed: " + trunc(err.Error(), 200)
+		}
+		lost(out, p.State, p.Watch, id, a, fmt.Sprintf("%s at %s, not read back within %s (%s)", what, since, LostAfter, why))
+		return
+	}
+	if err != nil {
+		logf("%s: read back: %v (next round)", id, err)
+	}
+}
+
+// commitAsks is OpCommit: post ONLY the asks this round prepared (token =
+// this round's; the core saved them), mark each posted (also on a POST error:
+// it may have landed), read back once, no sleep.
+func commitAsks(ctx context.Context, wr Writer, p Pass, out *Out, logf func(string, ...any)) {
+	if p.Token == "" || p.DryRun {
+		return
+	}
+	ids := make([]string, 0)
+	for id, a := range p.State.Asks {
+		if a.State == "open" && a.Post != nil && a.Post.Token == p.Token && a.Post.PostedAt == "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	at := p.Now.UTC().Format(time.RFC3339)
+	for _, id := range ids {
+		a := p.State.Asks[id]
+		perr := wr.Approve(ctx, a.PR, PostBody(id))
+		a.Post.PostedAt = at
+		if perr != nil {
+			logf("%s: post reported %s (may have landed; read back from now on)", id, trunc(perr.Error(), 200))
+		}
+		rvs, err := wr.Reviews(ctx, a.PR)
+		if err != nil {
+			logf("%s: posted; read-back failed (%s): read back next round", id, trunc(err.Error(), 200))
+			continue
+		}
+		if !settle(out, p, id, a, rvs, at) {
+			logf("%s: posted, not yet read back: read back next round", id)
+		}
+	}
 }
 
 // SentNotSeen starts the reason of an ask whose approve was sent but not read
 // back: final, never retried; the requester is pinged to check by hand.
-const SentNotSeen = "approve sent, not read back (check the PR by hand; not posted again): "
+const SentNotSeen = "approve sent, not read back (check the PR by hand; not posted again): " // unchanged text (interim)
 
 func isBotLogin(l string) bool { return bots[l] || strings.Contains(strings.ToLower(l), "bot") }
 

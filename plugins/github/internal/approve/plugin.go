@@ -25,7 +25,7 @@ type Plugin struct {
 }
 
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
-	if req.Op != plugin.OpRound {
+	if req.Op != plugin.OpRound && req.Op != plugin.OpCommit {
 		return nil, fmt.Errorf("op %q not supported: approve-requests has no seat, brief or outbox", req.Op)
 	}
 	w := &req.Critic
@@ -63,7 +63,13 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		}
 	}
 	rep := &plugin.Reply{Critic: w, Done: true}
-	o, err := Run(ctx, gh, teams, Pass{Watch: *w.Requests, Requests: reqs, Grants: grantsFn, Now: now(), DryRun: req.DryRun})
+	o, err := Run(ctx, gh, teams, Pass{Watch: *w.Requests, Requests: reqs, Grants: grantsFn, Now: now(), DryRun: req.DryRun,
+		Op: req.Op, Token: req.CommitToken, Posts: w.Runtime.ApprovePosts})
+	if len(o.Posts) == 0 {
+		o.Posts = nil
+	}
+	w.Runtime.ApprovePosts = o.Posts
+	rep.Commit = o.Commit && req.Op == plugin.OpRound
 	for _, l := range o.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}
@@ -86,7 +92,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	w.Runtime.ConsecutiveFailures, w.Runtime.LastError = 0, ""
 	w.Runtime.LastSuccess = now().UTC()
-	rep.Logf("%s: round %d: %d request(s) pending, %d decided, %d ping(s)", w.Name, w.Runtime.Round, len(reqs), len(o.Results), len(o.Pings))
+	rep.Logf("%s: round %d %s: %d request(s) pending, %d decided, %d prepared/posted on record, %d ping(s)", w.Name, w.Runtime.Round, req.Op, len(reqs), len(o.Results), len(o.Posts), len(o.Pings))
 	return rep, nil
 }
 

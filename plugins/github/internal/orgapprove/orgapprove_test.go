@@ -13,6 +13,7 @@ import (
 
 	"github.com/gluck/ebac/plugins/github/internal/approve"
 	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 var t0 = time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
@@ -146,6 +147,10 @@ type rig struct {
 	w     model.OrgApproveWatch
 	grant []grants.Grant
 	now   time.Time
+	// The core's side of #27 B: n mints each round's token; crash skips the commit call (the core died after the
+	// save); lose drops what the commit changed (its reply was lost after the POST).
+	n           int
+	crash, lose bool
 }
 
 func newRig() *rig {
@@ -164,11 +169,40 @@ func newRig() *rig {
 
 func (r *rig) round(t *testing.T, dry bool) Out {
 	t.Helper()
-	o, err := Run(context.Background(), r.rd, r.wr, r.fl, Pass{Watch: r.w, State: r.st, Now: r.now, DryRun: dry,
-		Grants: func() ([]grants.Grant, error) { return r.grant, nil }})
+	r.n++
+	p := Pass{Watch: r.w, State: r.st, Now: r.now, DryRun: dry, Op: plugin.OpRound, Token: fmt.Sprintf("%016x", r.n),
+		Grants: func() ([]grants.Grant, error) { return r.grant, nil }}
+	o, err := Run(context.Background(), r.rd, r.wr, r.fl, p)
 	if err != nil {
 		t.Fatalf("round: %v (log %v)", err, o.Log)
 	}
+	if !o.Commit || dry || r.crash {
+		return o
+	}
+	saved := map[string]model.PostRecord{}
+	for id, a := range r.st.Asks {
+		if a.Post != nil {
+			saved[id] = *a.Post
+		}
+	}
+	p.Op = plugin.OpCommit
+	c, err := Run(context.Background(), r.rd, r.wr, r.fl, p)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if r.lose {
+		for id, rec := range saved {
+			rc := rec
+			r.st.Asks[id].Post, r.st.Asks[id].State = &rc, "open"
+		}
+		return o
+	}
+	for k, v := range c.Q {
+		o.Q[k] = v
+	}
+	o.Pings = append(o.Pings, c.Pings...)
+	o.Log = append(o.Log, c.Log...)
+	o.Commit = false
 	return o
 }
 
@@ -465,8 +499,8 @@ func TestTapGrantRefusesNonPersonApprovers(t *testing.T) {
 	}
 }
 
-// bic/aether#129969: an approve sent but not read back (read error, or not
-// seen) closes the ask as done with a ping, never retried: no second post.
+// bic/aether#129969 under design B: an approve sent but not read back (read error, or not seen) is read back only;
+// LostAfter (10 min) after the post the ask closes done with a ping. Exactly one POST.
 func TestSentButNotReadBackIsNeverRetried(t *testing.T) {
 	for name, set := range map[string]func(*fakeWrite){
 		"read-back error": func(f *fakeWrite) { f.readErr = errors.New("gh: HTTP 502") },
@@ -479,16 +513,21 @@ func TestSentButNotReadBackIsNeverRetried(t *testing.T) {
 			set(r.wr)
 			r.now = r.now.Add(15 * time.Minute)
 			o := r.round(t, false)
+			if len(r.wr.approved) != 1 || o.Q[QID(115803, headA)] != nil {
+				t.Fatalf("post round: approved %v q %v (log %v)", r.wr.approved, o.Q, o.Log)
+			}
+			r.now = r.now.Add(LostAfter - time.Second)
+			if o = r.round(t, false); len(r.wr.approved) != 1 || o.Q[QID(115803, headA)] != nil {
+				t.Fatalf("inside LostAfter: approved %v q %v", r.wr.approved, o.Q)
+			}
+			r.now = r.now.Add(time.Second)
+			o = r.round(t, false)
 			q := o.Q[QID(115803, headA)]
-			if len(r.wr.approved) != 1 || q == nil || q["status"] != "done" || !strings.HasPrefix(q["resolved"].(string), SentNotSeen) {
-				t.Fatalf("approved %v q %v (log %v)", r.wr.approved, q, o.Log)
+			if len(r.wr.approved) != 1 || q == nil || q["status"] != "done" || !strings.HasPrefix(q["resolved"].(string), SentNotSeen+"posted at ") {
+				t.Fatalf("at LostAfter: approved %v q %v (log %v)", r.wr.approved, q, o.Log)
 			}
-			pinged := false
-			for _, p := range o.Pings {
-				pinged = pinged || strings.Contains(p.Text, "approve SENT but not read back")
-			}
-			if !pinged {
-				t.Fatalf("no ping: %+v", o.Pings)
+			if len(o.Pings) != 1 || !strings.Contains(o.Pings[0].Text, "may have been SENT") {
+				t.Fatalf("pings %+v", o.Pings)
 			}
 			r.now = r.now.Add(time.Minute)
 			r.round(t, false)
@@ -496,6 +535,88 @@ func TestSentButNotReadBackIsNeverRetried(t *testing.T) {
 				t.Fatalf("posted again: %v", r.wr.approved)
 			}
 		})
+	}
+}
+
+// #27 B: the round that passes every check prepares (OrgAsk.Post under its token) and posts nothing; only the commit
+// with that token posts. A crash between the save and the commit: never posted, closed after LostAfter. RED if the
+// commit ignores the token or the post returns to OpRound.
+func TestACrashBeforeTheCommitNeverPosts(t *testing.T) {
+	r := newRig()
+	r.round(t, false)
+	r.approveTap("jack")
+	r.now = r.now.Add(15 * time.Minute)
+	r.crash = true
+	r.round(t, false)
+	a := r.st.Asks[QID(115803, headA)]
+	if len(r.wr.approved) != 0 || a.Post == nil || a.Post.Token != fmt.Sprintf("%016x", 2) || a.Post.PostedAt != "" || a.Post.Marker != "<!-- figaro-ask:"+QID(115803, headA)+" -->" {
+		t.Fatalf("prepare: approved %v post %+v", r.wr.approved, a.Post)
+	}
+	// A commit under a foreign token posts nothing.
+	o, _ := Run(context.Background(), r.rd, r.wr, r.fl, Pass{Watch: r.w, State: r.st, Now: r.now, Op: plugin.OpCommit, Token: "ffffffffffffffff"})
+	if len(r.wr.approved) != 0 || len(o.Q) != 0 {
+		t.Fatalf("foreign token: approved %v", r.wr.approved)
+	}
+	r.crash = false
+	r.now = r.now.Add(time.Minute)
+	r.round(t, false)
+	if len(r.wr.approved) != 0 {
+		t.Fatalf("next round posted: %v", r.wr.approved)
+	}
+	r.now = r.now.Add(LostAfter)
+	o = r.round(t, false)
+	q := o.Q[QID(115803, headA)]
+	if len(r.wr.approved) != 0 || q == nil || !strings.HasPrefix(q["resolved"].(string), SentNotSeen+"prepared (never confirmed posted)") {
+		t.Fatalf("at LostAfter: approved %v q %v", r.wr.approved, q)
+	}
+}
+
+// The POST landed but the commit's reply was lost (posted_at never saved): the record keeps the old token, so no later
+// round posts; the review, visible late, closes the ask approved. Exactly one POST.
+func TestALostCommitReplyNeverReposts(t *testing.T) {
+	r := newRig()
+	r.round(t, false)
+	r.approveTap("jack")
+	r.wr.lost = true
+	r.now = r.now.Add(15 * time.Minute)
+	r.lose = true
+	r.round(t, false)
+	if len(r.wr.approved) != 1 || r.st.Asks[QID(115803, headA)].Post.PostedAt != "" {
+		t.Fatalf("post: %v %+v", r.wr.approved, r.st.Asks[QID(115803, headA)].Post)
+	}
+	r.lose = false
+	r.now = r.now.Add(time.Minute)
+	r.round(t, false)
+	if len(r.wr.approved) != 1 {
+		t.Fatalf("reposted: %v", r.wr.approved)
+	}
+	rv := approve.Review{ID: 91, State: "APPROVED", Body: PostBody(QID(115803, headA)), CommitID: headA}
+	rv.User.Login, rv.User.Type = Self, "User"
+	r.wr.reviews = append(r.wr.reviews, rv)
+	r.now = r.now.Add(time.Minute)
+	o := r.round(t, false)
+	if q := o.Q[QID(115803, headA)]; len(r.wr.approved) != 1 || q == nil || !strings.Contains(q["resolved"].(string), "review 91") {
+		t.Fatalf("late visibility: approved %v q %v", r.wr.approved, q)
+	}
+}
+
+// Once a record exists no check re-runs: the head moved after the post, yet the read-back alone decides.
+func TestChecksDoNotRerunAfterTheRecord(t *testing.T) {
+	r := newRig()
+	r.round(t, false)
+	r.approveTap("jack")
+	r.wr.lost = true
+	r.now = r.now.Add(15 * time.Minute)
+	r.round(t, false)
+	r.wr.info.Head.SHA = "ccccccc3333333333333333333333333333333333"
+	r.grant = nil
+	rv := approve.Review{ID: 92, State: "DISMISSED", Body: PostBody(QID(115803, headA)), CommitID: headA}
+	rv.User.Login, rv.User.Type = Self, "User"
+	r.wr.reviews = append(r.wr.reviews, rv)
+	r.now = r.now.Add(time.Minute)
+	o := r.round(t, false)
+	if q := o.Q[QID(115803, headA)]; len(r.wr.approved) != 1 || q == nil || !strings.Contains(q["resolved"].(string), "review 92") {
+		t.Fatalf("after the record: approved %v q %v (log %v)", r.wr.approved, q, o.Log)
 	}
 }
 

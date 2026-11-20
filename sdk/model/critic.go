@@ -93,6 +93,9 @@ type Runtime struct {
 
 	// Releases is a release watch's state: the tags already seen.
 	Releases *ReleasesState `json:"releases,omitempty"`
+	// ApprovePosts are approve-requests' post ledger, by request id: the
+	// approve each request prepared, and whether it was posted (#27 B).
+	ApprovePosts map[string]*PostRecord `json:"approve_posts,omitempty"`
 	// OrgApprove is an org-approve critic's scores and filed asks.
 	OrgApprove *OrgApproveState `json:"org_approve,omitempty"`
 	// LastPing is when a collect-mode critic last pinged its seat.

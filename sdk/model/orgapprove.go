@@ -58,4 +58,20 @@ type OrgAsk struct {
 	FiledAt   string `json:"filed_at,omitempty"`
 	State     string `json:"state"` // open, approved, withdrawn, lapsed
 	ReviewID  int64  `json:"review_id,omitempty"`
+	// Post is the ask's post ledger (#27 B): set when the approve is
+	// prepared, PostedAt when it was sent.
+	Post *PostRecord `json:"post,omitempty"`
+}
+
+// PostRecord is one prepared approve (#27 design B). Token is the round's
+// CommitToken it was prepared under: it is posted only by that round's
+// OpCommit, after the core saved it; a record whose token passed unposted is
+// never posted (only read back). PostedAt is set once the POST was sent
+// (also when it reported an error: it may have landed).
+type PostRecord struct {
+	PR         int    `json:"pr"`
+	Marker     string `json:"marker"`
+	Token      string `json:"token"`
+	PreparedAt string `json:"prepared_at"`
+	PostedAt   string `json:"posted_at,omitempty"`
 }

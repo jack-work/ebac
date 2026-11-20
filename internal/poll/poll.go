@@ -163,6 +163,9 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 	w.Runtime.Round++
 	w.Runtime.LastPolled = time.Now().UTC()
 	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: p.withReviewCheck(ctx, w)}
+	if CommitSources[w.SourceName()] {
+		req.CommitToken = newCommitToken()
+	}
 	if w.SourceName() == model.SourceRoster {
 		// The roster's whole input is the aria store, read here with the
 		// core's own grant: the plugin has none.
@@ -214,6 +217,9 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 	if err == nil {
 		err = ValidatePings(w, rep)
 	}
+	if err == nil {
+		err = ValidateCommit(w.SourceName(), rep, plugin.OpRound)
+	}
 	if err != nil {
 		// The plugin itself failed (crash, timeout, bad reply): a failed
 		// round like any upstream failure.
@@ -222,7 +228,11 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 		_ = p.Store.SaveCritic(ctx, w)
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	return p.apply(ctx, w, rep)
+	return twoPhase(req, rep, p.DryRun, phases{
+		apply: func(r *plugin.Reply) (bool, error) { return p.apply(ctx, w, r) },
+		call:  func(r plugin.Request) (*plugin.Reply, error) { return p.call(ctx, w, r) },
+		check: func(r *plugin.Reply) error { return checkReply(w, r, plugin.OpCommit) },
+	})
 }
 
 // SourceKeys are, per source, the only role-form keys its plugin may set or
@@ -296,8 +306,10 @@ func SourceKeysOnly(source string, rep *plugin.Reply) error {
 	return nil
 }
 
-// apply lands one round's reply.
-func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) error {
+// apply lands one round's reply. saved: the critic (its runtime: a
+// two-phase source's prepared records) reached the store, the durable write
+// an OpCommit may follow (commit.go).
+func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) (saved bool, err error) {
 	for _, l := range rep.Log {
 		fmt.Fprintln(p.Out, l)
 	}
@@ -307,7 +319,7 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 	plugin.Adopt(w, rep.Critic)
 	for _, g := range rep.Gone {
 		if err := p.MarkGone(ctx, w, g); err != nil {
-			return err
+			return false, err
 		}
 	}
 	// One-off wakes go out after the keys they point at are written.
@@ -320,23 +332,23 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 
 	if rep.Done || rep.Error != "" {
 		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
-			return fmt.Errorf("%s: %w", w.Name, err)
+			return false, fmt.Errorf("%s: %w", w.Name, err)
 		}
 		ferr := p.landForms(ctx, w, rep)
 		wake()
 		if err := p.Store.SaveCritic(ctx, w); err != nil {
-			return err
+			return false, err
 		}
 		if ferr != nil {
-			return ferr
+			return true, ferr
 		}
 		if rep.Error != "" {
-			return fmt.Errorf("%s: %s", w.Name, rep.Error)
+			return true, fmt.Errorf("%s: %s", w.Name, rep.Error)
 		}
 		if rep.Archive {
-			return p.MaybeArchive(ctx, w, rep.Snapshot)
+			return true, p.MaybeArchive(ctx, w, rep.Snapshot)
 		}
-		return nil
+		return true, nil
 	}
 
 	if p.DryRun {
@@ -349,13 +361,13 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 		// A dry run still persists observed state: that is what makes the
 		// FIRST armed round quiet instead of an avalanche.
 		if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
-			return fmt.Errorf("%s: %w", w.Name, err)
+			return false, fmt.Errorf("%s: %w", w.Name, err)
 		}
 		ferr := p.landForms(ctx, w, rep)
 		if err := p.Store.Save(ctx, w, rep.Snapshot, nil); err != nil {
-			return err
+			return false, err
 		}
-		return ferr
+		return true, ferr
 	}
 
 	// --- outbox: what the seat wrote onto the form goes upstream ---
@@ -376,10 +388,10 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 	// delivery, so a crash mid-send leaves the debt on the form and the
 	// seat's wake finds the round's change already in its study diff.
 	if err := p.Store.SaveRound(ctx, w, rep.Snapshot, acks, inbox); err != nil {
-		return err
+		return false, err
 	}
 	if err := p.commitKeys(ctx, w, rep.Set, rep.Unset); err != nil {
-		return fmt.Errorf("%s: %w", w.Name, err)
+		return false, fmt.Errorf("%s: %w", w.Name, err)
 	}
 	ferr := p.landForms(ctx, w, rep)
 	wake()
@@ -387,18 +399,18 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 
 	derr := p.Deliver(ctx, w, rep.Snapshot)
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
-		return err
+		return false, err
 	}
 	if ferr != nil {
-		return ferr
+		return true, ferr
 	}
 	if derr != nil {
-		return derr
+		return true, derr
 	}
 	if rep.Archive {
-		return p.MaybeArchive(ctx, w, rep.Snapshot)
+		return true, p.MaybeArchive(ctx, w, rep.Snapshot)
 	}
-	return nil
+	return true, nil
 }
 
 // classify runs the trigger rules over the round's events and drops the
