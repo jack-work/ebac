@@ -60,9 +60,8 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Logf("%s: not built here (plugin module; tested in its own derivation)", name)
-			continue
+		if _, err := os.Stat(filepath.Join(dir, "ebac-"+name)); err != nil {
+			t.Fatalf("%s: plugin binary not built: %v", name, err)
 		}
 		rep, err := r.Call(context.Background(), name, plugin.Request{Op: plugin.OpBrief, Critic: c.critic, Pending: wake, Me: "me"})
 		if err != nil {
