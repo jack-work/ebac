@@ -8,7 +8,7 @@ import (
 )
 
 func TestAuthorizeKeelArms(t *testing.T) {
-	w := &model.Critic{Name: "keel-captains-log", Mode: model.ModeKeel, Write: true,
+	w := &model.Critic{Name: "keel-captains-log", Mode: model.ModeKeel, Source: "keel-threads", Write: true,
 		Keel: &model.KeelRef{Repo: "notes/captains-log", Paths: []string{"2026/**", "handoffs/*.md"}}}
 	const aria, role = "e680885d31ef318df6abd5ffbfe69868", "figaro-knight"
 	const form = "@8292f32b9578e0502343dbd0f6679c7c"
@@ -58,6 +58,12 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		if why := Authorize(w, nil, "jack", &p); !strings.Contains(why, c.want) {
 			t.Errorf("%s: %q, want it to say %q", name, why, c.want)
 		}
+	}
+	// A keel-mode critic whose source is a forge (a trusted record could split them) is still scrubbed.
+	split := *w
+	split.Source = "github-pr"
+	if p := ok(model.Post{ReplyTo: "t1", Body: "queued on band-hub, see the captains-log"}); !strings.Contains(Authorize(&split, nil, "jack", &p), "internal term") {
+		t.Errorf("keel mode + github-pr source: a body naming band-hub was not refused")
 	}
 	ro := *w
 	ro.Write = false
