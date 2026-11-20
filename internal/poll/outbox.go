@@ -284,9 +284,8 @@ func authorizeKeel(w *model.Critic, p *model.Post) string {
 	if len([]rune(p.Body)) > KeelBodyMax {
 		return fmt.Sprintf("body is %d chars: keel takes at most %d", len([]rune(p.Body)), KeelBodyMax)
 	}
-	if why := Disclosure(p.Body); why != "" {
-		return why
-	}
+	// No Disclosure here: keel is internal, so a keel thread may name our tools, roles and nodes. The internal-term
+	// scrub guards only text bound for the github plugin's forges (GHE, github.com): Authorize, above.
 	if (p.Path == "") != (p.Line == 0) {
 		return "a new thread needs both path and line"
 	}
