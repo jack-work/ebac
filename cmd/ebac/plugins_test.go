@@ -24,13 +24,16 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
 	}
+	// Every plugin is its own module, built and tested in its own derivation (pkgs/ebac.nix mkEbacPlugin); inside the
+	// core's nix build their module graphs are not available, so this cross-module exec runs only in a dev tree.
+	if os.Getenv("NIX_BUILD_TOP") != "" {
+		t.Skip("plugin modules are built in their own derivations")
+	}
 	dir := t.TempDir()
-	builds := [][]string{{"-o", dir, "../ebac-keel"}}
-	// A plugin module builds in its own derivation (pkgs/ebac.nix mkEbacPlugin); inside the core's nix build its
-	// module graph is not available, so the cross-module build runs only in a dev tree.
-	if os.Getenv("NIX_BUILD_TOP") == "" {
-		builds = append(builds, []string{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
-			[]string{"-C", "../../plugins/teams", "-o", dir, "./cmd/ebac-tomb"})
+	builds := [][]string{
+		{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
+		{"-C", "../../plugins/teams", "-o", dir, "./cmd/ebac-tomb"},
+		{"-C", "../../plugins/keel", "-o", dir, "./cmd/ebac-keel"},
 	}
 	for _, b := range builds {
 		if out, err := exec.Command("go", append([]string{"build"}, b...)...).CombinedOutput(); err != nil {

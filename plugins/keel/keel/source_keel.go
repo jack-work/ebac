@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"reflect"
 	"sort"
 	"strings"
@@ -58,6 +59,19 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		}
 		sendPosts(ctx, cl, wr, w, req.Posts)
 		return &plugin.Reply{Posts: req.Posts}, nil
+	case plugin.OpDocRev:
+		if w.Keel == nil || w.Keel.Repo == "" || req.Doc == "" {
+			return nil, fmt.Errorf("%s: docrev needs a keel critic and a doc", w.Name)
+		}
+		cl := pl.Client
+		if cl == nil {
+			cl = ForRef(w.Keel)
+		}
+		rev, err := DocRev(ctx, cl, w.Keel.Repo, req.Doc)
+		if err != nil {
+			return nil, err
+		}
+		return &plugin.Reply{Rev: rev}, nil
 	case plugin.OpBrief:
 		return &plugin.Reply{Brief: keelBrief(w, plugin.Unwire(req.Pending))}, nil
 	}
@@ -74,20 +88,7 @@ const (
 	keelGoneAfter  = 3 // consecutive "gone" answers before the repo is declared gone
 )
 
-var feedWait = FeedWait
-
-const (
-	FeedWait     = 30 * time.Second
-	FeedEvery    = 45 * time.Second
-	ThreadsEvery = 5 * time.Minute
-)
-
-func MinEvery(feed bool) time.Duration {
-	if feed {
-		return FeedWait + 5*time.Second
-	}
-	return 0
-}
+var feedWait = keelcfg.FeedWait
 
 // keelBlindAfter is how long the watcher may fail before it tells the seat it
 // is not hearing keel. A var so a test can shorten it.
@@ -506,10 +507,10 @@ func reviewRound(ctx context.Context, cl *Client, rep *plugin.Reply, w *model.Cr
 		}
 		st.ReviewErr = errText
 	}
-	onForm := keys[ReviewStateKey]
+	onForm := keys[keelcfg.ReviewStateKey]
 	if !ok {
 		if len(onForm) > 0 && string(onForm) != "null" {
-			rep.Unset = append(rep.Unset, ReviewStateKey)
+			rep.Unset = append(rep.Unset, keelcfg.ReviewStateKey)
 		}
 		return
 	}
@@ -542,7 +543,7 @@ func reviewRound(ctx context.Context, cl *Client, rep *plugin.Reply, w *model.Cr
 	})
 	b := model.MustJSON(rs)
 	if !jsonEqual(b, onForm) {
-		rep.SetKey(ReviewStateKey, rs)
+		rep.SetKey(keelcfg.ReviewStateKey, rs)
 	}
 }
 

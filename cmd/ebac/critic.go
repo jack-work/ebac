@@ -13,8 +13,8 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/sdk/brief"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 )
@@ -367,7 +367,7 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 func setEvery(w *model.Critic, every, ping time.Duration) error {
 	min := MinEvery
 	if w.Keel != nil {
-		min = max(min, keel.MinEvery(w.Keel.Feed))
+		min = max(min, keelcfg.MinEvery(w.Keel.Feed))
 	}
 	if every < min {
 		return fmt.Errorf("--every %s: want at least %s", every, min)

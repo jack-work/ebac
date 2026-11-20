@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/gluck/ebac/sdk/model"
 	"strings"
 	"testing"
 
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/source/keel"
 )
 
 func TestVerdictGuardArms(t *testing.T) {
@@ -18,7 +18,7 @@ func TestVerdictGuardArms(t *testing.T) {
 		Holder: map[string]string{rf: a(1), kf: a(9)},
 		Parent: map[string]string{a(1): "", a(9): "", a(10): a(9)},
 	}
-	cfg := keel.ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "knight"}
+	cfg := model.KeelReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "knight"}
 	if form, err := verdictGuard(d, a(1), "reviewer", "r9", "r9", cfg); err != nil || form != rf {
 		t.Fatalf("holder at the current rev: %q %v", form, err)
 	}

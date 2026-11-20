@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/plugins/keel/keel"
 	"github.com/gluck/ebac/sdk/model"
 )
 

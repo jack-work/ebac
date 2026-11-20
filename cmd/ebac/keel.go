@@ -10,7 +10,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/keel"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -41,8 +41,8 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	if err := validTransport(ref); err != nil {
 		return err
 	}
-	scope := model.KeelScope{Threads: strings.TrimSpace(*threads), Inbox: strings.TrimSpace(*inbox), Mirror: keel.ParseMirror(*mirror)}
-	if err := keel.CheckScope(scope); err != nil {
+	scope := model.KeelScope{Threads: strings.TrimSpace(*threads), Inbox: strings.TrimSpace(*inbox), Mirror: keelcfg.ParseMirror(*mirror)}
+	if err := keelcfg.CheckScope(scope); err != nil {
 		return err
 	}
 	interval, err := keelEvery(*every, ref.Feed)
@@ -86,7 +86,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 	if err := st.SeedTrigger(ctx, w); err != nil {
 		return fmt.Errorf("critic created (role %s), but %w", w.FormID, err)
 	}
-	if keys := keel.ScopeKeys(scope); len(keys) > 0 {
+	if keys := keelcfg.ScopeKeys(scope); len(keys) > 0 {
 		if err := st.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
 			return keys, nil
 		}); err != nil {
@@ -98,7 +98,7 @@ func cmdAddKeel(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("critic created (role %s), but casting %s failed: %w", formID, *aria, err)
 		}
 	}
-	via := "door " + keel.Socket()
+	via := "door " + keelcfg.Socket()
 	if ref.URL != "" {
 		via = ref.URL
 	}
@@ -140,13 +140,13 @@ func describeScope(s model.KeelScope) string {
 func keelEvery(every time.Duration, feed bool) (time.Duration, error) {
 	switch {
 	case every == 0 && feed:
-		return keel.FeedEvery, nil
+		return keelcfg.FeedEvery, nil
 	case every == 0:
-		return keel.ThreadsEvery, nil
+		return keelcfg.ThreadsEvery, nil
 	case every < 0:
 		return 0, fmt.Errorf("--every %s: want a positive interval", every)
-	case every < keel.MinEvery(feed):
-		return 0, fmt.Errorf("--every %s: a feed round holds its request up to %s, so the next round must start after it; want at least %s", every, keel.FeedWait, keel.MinEvery(feed))
+	case every < keelcfg.MinEvery(feed):
+		return 0, fmt.Errorf("--every %s: a feed round holds its request up to %s, so the next round must start after it; want at least %s", every, keelcfg.FeedWait, keelcfg.MinEvery(feed))
 	}
 	return every, nil
 }
@@ -179,7 +179,7 @@ func splitList(s string) []string {
 // keys and validates the result: the keys to set, the keys to unset (a flag
 // given empty clears its key) and the scope in force after.
 func overlayScope(cur map[string]json.RawMessage, given map[string]bool, vals map[string]string) (map[string]json.RawMessage, []string, model.KeelScope, error) {
-	spec, err := keel.ScopeFromKeys(cur)
+	spec, err := keelcfg.ScopeFromKeys(cur)
 	if err != nil {
 		spec = model.KeelScope{} // every broken key is overwritten or kept broken below
 	}
@@ -196,16 +196,16 @@ func overlayScope(cur map[string]json.RawMessage, given map[string]bool, vals ma
 		case "inbox":
 			spec.Inbox = v
 		case "mirror":
-			spec.Mirror = keel.ParseMirror(v)
+			spec.Mirror = keelcfg.ParseMirror(v)
 		}
 		if v == "" {
 			unset = append(unset, keyOf[f])
 		}
 	}
-	if err := keel.CheckScope(spec); err != nil {
+	if err := keelcfg.CheckScope(spec); err != nil {
 		return nil, nil, spec, err
 	}
-	for k, v := range keel.ScopeKeys(spec) {
+	for k, v := range keelcfg.ScopeKeys(spec) {
 		for f, key := range keyOf {
 			if key == k && given[f] {
 				set[k] = v

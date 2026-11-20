@@ -6,8 +6,8 @@ package main
 import (
 	"context"
 
-	"github.com/gluck/ebac/internal/source/keel"
-	"github.com/gluck/ebac/internal/source/keelbranch"
+	"github.com/gluck/ebac/plugins/keel/keel"
+	"github.com/gluck/ebac/plugins/keel/keelbranch"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )

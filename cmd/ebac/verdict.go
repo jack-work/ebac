@@ -12,7 +12,7 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/identity"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/source/keel"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -51,22 +51,26 @@ func cmdVerdict(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	var cfg keel.ReviewConfig
-	if err := json.Unmarshal(f.Keys[keel.ReviewKey], &cfg); err != nil || cfg.Doc == "" {
+	var cfg model.KeelReviewConfig
+	if err := json.Unmarshal(f.Keys[keelcfg.ReviewKey], &cfg); err != nil || cfg.Doc == "" {
 		return fmt.Errorf("refused: %s has no review configured (ebac review)", *name)
 	}
 	key, err := identity.LoadKey(identity.KeyPath(), true)
 	if err != nil {
 		return err
 	}
-	if !identity.Verify(key, cfg.Stamp, keel.ConfigStampFields(w.FormID, w.Name, w.Keel.Repo, cfg)...) {
+	if !identity.Verify(key, cfg.Stamp, model.KeelConfigStampFields(w.FormID, w.Name, w.Keel.Repo, cfg)...) {
 		return fmt.Errorf("refused: %s's review key was not written by ebac review (or was edited since)", *name)
 	}
-	current, err := keel.DocRev(ctx, keel.ForRef(w.Keel), w.Keel.Repo, cfg.Doc)
+	runner, err := newRunner(g)
+	if err != nil {
+		return err
+	}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Out: io.Discard, Plugins: runner}
+	current, err := p.DocRev(ctx, w, cfg.Doc)
 	if err != nil {
 		return fmt.Errorf("refused: the revision of %s could not be read from keel: %w", cfg.Doc, err)
 	}
-	p := &poll.Poller{Store: st, Fig: st.Fig, Out: io.Discard}
 	d, err := p.Directory(ctx)
 	if err != nil {
 		return fmt.Errorf("role check: %w", err)
@@ -76,14 +80,14 @@ func cmdVerdict(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	rs := struct{ Rev string }{current}
-	v := keel.Verdict{Verdict: *verdict, Rev: rs.Rev, At: time.Now().UTC().Format(time.RFC3339), ByAria: g.caller,
+	v := model.KeelVerdict{Verdict: *verdict, Rev: rs.Rev, At: time.Now().UTC().Format(time.RFC3339), ByAria: g.caller,
 		Note: *note, Repo: w.Keel.Repo, Doc: cfg.Doc, RoleForm: roleForm}
-	v.Stamp = identity.Stamp(key, keel.StampFields(w.FormID, w.Name, *role, v)...)
+	v.Stamp = identity.Stamp(key, model.KeelVerdictStampFields(w.FormID, w.Name, *role, v)...)
 	err = st.Commit(ctx, w.FormID, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
 		all := map[string]json.RawMessage{}
-		_ = json.Unmarshal(cur[keel.VerdictKey], &all)
+		_ = json.Unmarshal(cur[keelcfg.VerdictKey], &all)
 		all[*role] = model.MustJSON(v)
-		return map[string]json.RawMessage{keel.VerdictKey: model.MustJSON(all)}, nil
+		return map[string]json.RawMessage{keelcfg.VerdictKey: model.MustJSON(all)}, nil
 	})
 	if err != nil {
 		return err
@@ -97,7 +101,7 @@ func cmdVerdict(ctx context.Context, g globals, args []string) error {
 // role must be one of the review's reviewers, the reviewed revision must be
 // the doc's current one, and the caller must be provably independent of the
 // author side.
-func verdictGuard(d identity.Directory, caller, role, rev, current string, cfg keel.ReviewConfig) (roleForm string, err error) {
+func verdictGuard(d identity.Directory, caller, role, rev, current string, cfg model.KeelReviewConfig) (roleForm string, err error) {
 	if caller == "" {
 		return "", fmt.Errorf("refused: no caller aria (run ebac from a figaro seat: the wrapper passes FIGARO_ARIA as --caller)")
 	}
@@ -197,10 +201,10 @@ func cmdReview(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := keel.ReviewConfig{Doc: *doc, Reviewers: rs, AuthorRole: *author, ByAria: g.caller, At: time.Now().UTC().Format(time.RFC3339)}
-	cfg.Stamp = identity.Stamp(key, keel.ConfigStampFields(w.FormID, w.Name, w.Keel.Repo, cfg)...)
+	cfg := model.KeelReviewConfig{Doc: *doc, Reviewers: rs, AuthorRole: *author, ByAria: g.caller, At: time.Now().UTC().Format(time.RFC3339)}
+	cfg.Stamp = identity.Stamp(key, model.KeelConfigStampFields(w.FormID, w.Name, w.Keel.Repo, cfg)...)
 	if err := st.Commit(ctx, w.FormID, func(map[string]json.RawMessage, form.EbacState) (map[string]json.RawMessage, []string) {
-		return map[string]json.RawMessage{keel.ReviewKey: model.MustJSON(cfg)}, nil
+		return map[string]json.RawMessage{keelcfg.ReviewKey: model.MustJSON(cfg)}, nil
 	}); err != nil {
 		return err
 	}

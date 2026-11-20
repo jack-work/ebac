@@ -1,8 +1,10 @@
 package poll
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/gluck/ebac/sdk/plugin"
 	"strings"
 	"testing"
 
@@ -85,5 +87,18 @@ func TestBuildDirectoryFromOneListing(t *testing.T) {
 	}
 	if _, ok := d.Forms["reviewer~moved"]; ok || len(d.Forms["gone"]) != 0 {
 		t.Errorf("moved or reaped form named: %v", d.Forms)
+	}
+}
+
+func TestDocRevAsksTheCriticsPlugin(t *testing.T) {
+	var got plugin.Request
+	p := &Poller{Plugins: plugin.InProc{"keel": func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
+		got = req
+		return &plugin.Reply{Rev: "a1b2c3"}, nil
+	}}}
+	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Source: "keel-threads", Keel: &model.KeelRef{Repo: "notes/x"}}
+	rev, err := p.DocRev(context.Background(), w, "d.md")
+	if err != nil || rev != "a1b2c3" || got.Op != plugin.OpDocRev || got.Doc != "d.md" || got.Critic.Name != "k" {
+		t.Fatalf("rev %q err %v req %+v", rev, err, got)
 	}
 }

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/source/keel"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 )
 
 // grants are this process's access grants, by the paths that carry them: the
@@ -17,7 +17,7 @@ import (
 func pluginGrants(g globals) pluginrun.Grants {
 	gr := pluginrun.Grants{
 		pluginrun.GrantFigaro:   {figaro.AngelusSocket()},
-		pluginrun.GrantKeelDoor: {keel.Socket()},
+		pluginrun.GrantKeelDoor: {keelcfg.Socket()},
 		pluginrun.GrantBandHub:  {bandhub.DefaultSocket},
 		// Hides /run/band-grants (request and honor sockets) from every
 		// plugin but org-approve's.

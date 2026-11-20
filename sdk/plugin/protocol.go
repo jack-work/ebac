@@ -39,6 +39,10 @@ const (
 	OpPost Op = "post"
 	// OpBrief renders the wake message for the pending events.
 	OpBrief Op = "brief"
+	// OpDocRev (keel) answers the newest commit on main touching Request.Doc
+	// in the critic's repo, in Reply.Rev ("" when there is none yet). The CLI
+	// asks it for `ebac verdict`, so the core holds no keel client.
+	OpDocRev Op = "docrev"
 )
 
 // Event is a model.Event on the wire. model.Event keeps its full text out of
@@ -114,6 +118,7 @@ type Request struct {
 	Posts   map[string]*model.Post `json:"posts,omitempty"`   // OpPost
 	Pending []Event                `json:"pending,omitempty"` // OpBrief
 	Retry   int                    `json:"retry,omitempty"`   // OpBrief
+	Doc     string                 `json:"doc,omitempty"`     // OpDocRev
 }
 
 // Ping is a one-line message the core sends to a role (the scout: a material
@@ -188,6 +193,7 @@ type Reply struct {
 
 	Posts map[string]*model.Post `json:"posts,omitempty"` // OpPost
 	Brief string                 `json:"brief,omitempty"` // OpBrief
+	Rev   string                 `json:"rev,omitempty"`   // OpDocRev
 
 	// Log lines go to the core's output, prefixed by nothing.
 	Log []string `json:"log,omitempty"`

@@ -2,6 +2,7 @@ package keel
 
 import (
 	"encoding/json"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"reflect"
 	"sort"
 	"strings"
@@ -70,7 +71,7 @@ func TestCompileScope(t *testing.T) {
 		{model.KeelScope{Mirror: []string{"inbox.kind"}}, false},
 		{model.KeelScope{Mirror: []string{"threads.body"}}, false},
 	} {
-		if err := CheckScope(c.spec); (err == nil) != c.ok {
+		if err := keelcfg.CheckScope(c.spec); (err == nil) != c.ok {
 			t.Errorf("%+v: err %v, want ok %v", c.spec, err, c.ok)
 		}
 	}
@@ -244,4 +245,13 @@ func TestBriefNamesTheFullViewUnderAPartialScope(t *testing.T) {
 			t.Fatalf("brief lacks %q:\n%s", want, got)
 		}
 	}
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

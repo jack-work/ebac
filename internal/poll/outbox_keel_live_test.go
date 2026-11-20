@@ -8,26 +8,24 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
-// noThreads answers keel's threads read with none.
-type noThreads struct{}
-
-func (noThreads) Where() string { return "none" }
-func (noThreads) Get(context.Context, string, time.Duration) (int, []byte, error) {
-	return 200, []byte(`{"paths":{}}`), nil
-}
-
+// countWriter stands in for the keel plugin: it counts the posts that reach
+// it and answers each as sent.
 type countWriter struct{ n int }
 
-func (c *countWriter) Write(context.Context, string, string, string, string, []byte) (int, []byte, error) {
-	c.n++
-	return 200, []byte(`{"ok":true}`), nil
+func (c *countWriter) handle(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
+	if req.Op != plugin.OpPost {
+		return &plugin.Reply{}, nil
+	}
+	for _, p := range req.Posts {
+		c.n++
+		p.Sent = &model.PostReceipt{URL: "keel:x#t", At: "now"}
+	}
+	return &plugin.Reply{Posts: req.Posts}, nil
 }
 
 const (
@@ -77,7 +75,7 @@ func TestLiveHandWrittenKeelPostIsRefusedAtTheFlush(t *testing.T) {
 	}
 	cw := &countWriter{}
 	p := &Poller{Store: st, Fig: f, Out: os.Stderr, Me: "jack",
-		Plugins: plugin.InProc{"keel": keel.Plugin{Client: &keel.Client{T: noThreads{}}, Writer: cw}.Handle},
+		Plugins: plugin.InProc{"keel": cw.handle},
 		RoleCheck: func(context.Context, string, string) (string, string, error) {
 			return poolForm, "caller " + holderAria + " is not the holder of role reviewer", nil
 		}}
@@ -99,7 +97,7 @@ func TestLiveHandWrittenKeelPostIsRefusedAtTheFlush(t *testing.T) {
 func TestPostRechecksKeelRolesBeforeThePlugin(t *testing.T) {
 	cw := &countWriter{}
 	p := &Poller{Out: io.Discard,
-		Plugins: plugin.InProc{"keel": keel.Plugin{Client: &keel.Client{T: noThreads{}}, Writer: cw}.Handle},
+		Plugins: plugin.InProc{"keel": cw.handle},
 		RoleCheck: func(context.Context, string, string) (string, string, error) {
 			return poolForm, "caller " + holderAria + " is not the holder of role reviewer", nil
 		}}

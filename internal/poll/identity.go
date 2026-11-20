@@ -11,6 +11,7 @@ import (
 
 	"github.com/gluck/ebac/internal/identity"
 	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Directory reads what identity needs, once per round or command (pollRound
@@ -153,4 +154,14 @@ func checkVerdict(key []byte, w *model.Critic, cfg model.KeelReviewConfig, role 
 		return model.KeelRoleCheck{Why: "recorded by " + v.ByAria + ", the role is now held by " + d.Holder[form] + ": re-verdict"}
 	}
 	return model.KeelRoleCheck{Valid: true}
+}
+
+// DocRev asks the critic's plugin (keel: OpDocRev) for the newest commit on
+// main touching doc; the core holds no keel client.
+func (p *Poller) DocRev(ctx context.Context, w *model.Critic, doc string) (string, error) {
+	rep, err := p.call(ctx, w, plugin.Request{Op: plugin.OpDocRev, Doc: doc})
+	if err != nil {
+		return "", err
+	}
+	return rep.Rev, nil
 }

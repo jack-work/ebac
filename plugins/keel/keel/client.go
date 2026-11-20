@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -19,22 +19,9 @@ import (
 	"github.com/gluck/ebac/sdk/model"
 )
 
-// DefaultSocket is ebac's own door to keel: admits uid 988 named ebac only,
-// and only GET /api/r/<viewer-id>/threads and GET /api/v1/r/<viewer-id>/events
-// for listed repos.
-const DefaultSocket = "/run/kweb-ebac/threads.sock"
-
 // ErrGone is keel saying the repo is not there for us: the socket is missing
 // or refuses connections, or the door answers 404 (unlisted repo).
 var ErrGone = errors.New("keel threads gone")
-
-// Socket is EBAC_KEEL_SOCKET, else DefaultSocket.
-func Socket() string {
-	if s := os.Getenv("EBAC_KEEL_SOCKET"); s != "" {
-		return s
-	}
-	return DefaultSocket
-}
 
 // Thread and Comment are the fields ebac reads from keel/viewer/threads.go.
 type Thread struct {
@@ -188,7 +175,7 @@ func ForRef(ref *model.KeelRef) *Client {
 	if ref != nil && ref.URL != "" {
 		return &Client{T: HTTPS{Base: ref.URL, TokenCmd: ref.TokenCmd}}
 	}
-	return &Client{T: Door{Socket: Socket()}}
+	return &Client{T: Door{Socket: keelcfg.Socket()}}
 }
 
 // ViewerID is keel's id for a repo: owner/name with / replaced by -.

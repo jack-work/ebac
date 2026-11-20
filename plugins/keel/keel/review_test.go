@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"reflect"
 	"testing"
 	"time"
@@ -75,8 +76,8 @@ func TestReviewStateArms(t *testing.T) {
 
 func TestReadReviewParsesAndRefuses(t *testing.T) {
 	keys := map[string]json.RawMessage{
-		ReviewKey:  json.RawMessage(`{"doc":"d.md","reviewers":["reviewer"]}`),
-		VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r2","at":"2026-11-19T20:00:00Z"},"warden":"nonsense"}`),
+		keelcfg.ReviewKey:  json.RawMessage(`{"doc":"d.md","reviewers":["reviewer"]}`),
+		keelcfg.VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r2","at":"2026-11-19T20:00:00Z"},"warden":"nonsense"}`),
 	}
 	cfg, v, ok, err := readReview(keys)
 	if err != nil || !ok || cfg.Doc != "d.md" || v["reviewer"].Rev != "r2" || v["warden"].Verdict != "unreadable" {
@@ -85,7 +86,7 @@ func TestReadReviewParsesAndRefuses(t *testing.T) {
 	if _, _, ok, err := readReview(map[string]json.RawMessage{}); ok || err != nil {
 		t.Fatalf("absent: ok %v err %v", ok, err)
 	}
-	if _, _, ok, err := readReview(map[string]json.RawMessage{ReviewKey: json.RawMessage(`{"reviewers":["x"]}`)}); ok || err == nil {
+	if _, _, ok, err := readReview(map[string]json.RawMessage{keelcfg.ReviewKey: json.RawMessage(`{"reviewers":["x"]}`)}); ok || err == nil {
 		t.Fatalf("no doc: ok %v err %v", ok, err)
 	}
 }
@@ -117,12 +118,12 @@ func roundKeys(config bool, valid bool, onForm json.RawMessage) map[string]json.
 	v := Verdict{Verdict: "pass", Rev: "r9"}
 	chk := model.KeelReviewCheck{Config: config, Roles: map[string]model.KeelRoleCheck{"reviewer": {Valid: valid}}}
 	keys := map[string]json.RawMessage{
-		ReviewKey:  model.MustJSON(cfg),
-		VerdictKey: model.MustJSON(map[string]Verdict{"reviewer": v}),
-		CheckKey:   model.MustJSON(chk),
+		keelcfg.ReviewKey:  model.MustJSON(cfg),
+		keelcfg.VerdictKey: model.MustJSON(map[string]Verdict{"reviewer": v}),
+		CheckKey:           model.MustJSON(chk),
 	}
 	if onForm != nil {
-		keys[ReviewStateKey] = onForm
+		keys[keelcfg.ReviewStateKey] = onForm
 	}
 	return keys
 }
@@ -132,7 +133,7 @@ func roundState(t *testing.T, keys map[string]json.RawMessage, byPath map[string
 	rep := &plugin.Reply{}
 	w := &model.Critic{Name: "k", FormID: "@7d99311ef30a41de02b53090bd27a2e8", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
 	reviewRound(context.Background(), cl, rep, w, &model.KeelState{}, keys, byPath)
-	raw, set := rep.Set[ReviewStateKey]
+	raw, set := rep.Set[keelcfg.ReviewStateKey]
 	var rs ReviewState
 	_ = json.Unmarshal(raw, &rs)
 	return rs, set
@@ -197,8 +198,21 @@ func TestReviewRoundRewritesAHandWrittenState(t *testing.T) {
 	}
 	rep := &plugin.Reply{}
 	w := &model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: repo}}
-	reviewRound(context.Background(), nil, rep, w, &model.KeelState{}, map[string]json.RawMessage{ReviewStateKey: forged}, nil)
-	if len(rep.Unset) != 1 || rep.Unset[0] != ReviewStateKey {
+	reviewRound(context.Background(), nil, rep, w, &model.KeelState{}, map[string]json.RawMessage{keelcfg.ReviewStateKey: forged}, nil)
+	if len(rep.Unset) != 1 || rep.Unset[0] != keelcfg.ReviewStateKey {
 		t.Fatalf("no review configured: unset %v", rep.Unset)
+	}
+}
+
+func TestOpDocRevAnswersKeelsLogForTheDoc(t *testing.T) {
+	var got string
+	pl := Plugin{Client: &Client{T: logDoor{&got}}}
+	w := model.Critic{Name: "k", Mode: model.ModeKeel, Keel: &model.KeelRef{Repo: "notes/captains-log"}}
+	rep, err := pl.Handle(context.Background(), plugin.Request{Op: plugin.OpDocRev, Critic: w, Doc: "2026/11/19/d.md"})
+	if err != nil || rep.Rev != "a1b2c3" || got != "/api/r/notes-captains-log/log?n=1&path=2026%2F11%2F19%2Fd.md&rev=main" {
+		t.Fatalf("rev %+v err %v query %q", rep, err, got)
+	}
+	if _, err := pl.Handle(context.Background(), plugin.Request{Op: plugin.OpDocRev, Critic: w}); err == nil {
+		t.Fatal("docrev without a doc answered")
 	}
 }

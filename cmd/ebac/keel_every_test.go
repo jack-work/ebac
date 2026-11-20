@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/source/keel"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 )
 
 func TestAFeedCriticPollsWithinAMinuteByDefault(t *testing.T) {
@@ -12,8 +12,8 @@ func TestAFeedCriticPollsWithinAMinuteByDefault(t *testing.T) {
 	if err != nil || got != 45*time.Second {
 		t.Fatalf("feed default %s %v", got, err)
 	}
-	if got <= keel.FeedWait || got > time.Minute {
-		t.Fatalf("feed default %s must start after a held round (%s) and stay near real time", got, keel.FeedWait)
+	if got <= keelcfg.FeedWait || got > time.Minute {
+		t.Fatalf("feed default %s must start after a held round (%s) and stay near real time", got, keelcfg.FeedWait)
 	}
 	if got, err := keelEvery(0, false); err != nil || got != 5*time.Minute {
 		t.Fatalf("threads default %s %v: diffing /threads stays at 5m", got, err)
@@ -34,7 +34,7 @@ func TestEveryOverridesTheDefault(t *testing.T) {
 func TestAFeedRoundMayNotOverlapTheNext(t *testing.T) {
 	for _, d := range []time.Duration{time.Second, 30 * time.Second, 34 * time.Second, -time.Second} {
 		if _, err := keelEvery(d, true); err == nil {
-			t.Errorf("--every %s accepted with a %s long-poll", d, keel.FeedWait)
+			t.Errorf("--every %s accepted with a %s long-poll", d, keelcfg.FeedWait)
 		}
 	}
 }

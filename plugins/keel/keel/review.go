@@ -2,6 +2,7 @@ package keel
 
 import (
 	"encoding/json"
+	keelcfg "github.com/gluck/ebac/sdk/cfg/keel"
 	"github.com/gluck/ebac/sdk/model"
 	"sort"
 )
@@ -20,11 +21,7 @@ import (
 // "waiting", naming what is missing. Required reviewers are review.reviewers,
 // which must be named (no reviewers: never pass).
 
-const (
-	ReviewKey      = "review"
-	VerdictKey     = "verdict"
-	ReviewStateKey = "review_state"
-)
+const ()
 
 type (
 	ReviewConfig = model.KeelReviewConfig
@@ -106,7 +103,7 @@ func reviewState(cfg ReviewConfig, cfgStamped bool, verdicts map[string]Verdict,
 // readReview parses the holder's review key and the reviewers' verdicts.
 // ok is false when there is no review configured (no doc).
 func readReview(keys map[string]json.RawMessage) (cfg ReviewConfig, verdicts map[string]Verdict, ok bool, err error) {
-	raw := keys[ReviewKey]
+	raw := keys[keelcfg.ReviewKey]
 	if len(raw) == 0 || string(raw) == "null" {
 		return cfg, nil, false, nil
 	}
@@ -117,7 +114,7 @@ func readReview(keys map[string]json.RawMessage) (cfg ReviewConfig, verdicts map
 		return cfg, nil, false, err
 	}
 	verdicts = map[string]Verdict{}
-	if v := keys[VerdictKey]; len(v) > 0 && string(v) != "null" {
+	if v := keys[keelcfg.VerdictKey]; len(v) > 0 && string(v) != "null" {
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal(v, &m); err != nil {
 			return cfg, nil, false, err
