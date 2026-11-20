@@ -3,6 +3,7 @@ package form_test
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/gluck/ebac/sdk/prdelta"
 	"os"
 	"sort"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/github"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -78,13 +78,13 @@ func TestPRDetailMovesToDiskAndRoundsStillSeeEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(github.Diff(oldPrev, round2(), "jack")); strings.Join(got, ",") != strings.Join(wantRound2, ",") {
+	if got := kinds(prdelta.Diff(oldPrev, round2(), "jack")); strings.Join(got, ",") != strings.Join(wantRound2, ",") {
 		t.Fatalf("baseline against the old form: %v, want %v", got, wantRound2)
 	}
 
 	// Migration round: nothing changed upstream, so nothing is reported; the
 	// save writes heads and the file.
-	if d := github.Diff(oldPrev, round1(), "jack"); len(d.Events) != 0 {
+	if d := prdelta.Diff(oldPrev, round1(), "jack"); len(d.Events) != 0 {
 		t.Fatalf("an unchanged migration round reported %v", kinds(d))
 	}
 	keys := map[string]json.RawMessage{"prs": legacy["prs"]}
@@ -108,11 +108,11 @@ func TestPRDetailMovesToDiskAndRoundsStillSeeEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(github.Diff(prev, round2(), "jack")); strings.Join(got, ",") != strings.Join(wantRound2, ",") {
+	if got := kinds(prdelta.Diff(prev, round2(), "jack")); strings.Join(got, ",") != strings.Join(wantRound2, ",") {
 		t.Fatalf("after the move: %v, want %v", got, wantRound2)
 	}
 	// ...and an unchanged round is still quiet.
-	if d := github.Diff(prev, round1(), "jack"); len(d.Events) != 0 {
+	if d := prdelta.Diff(prev, round1(), "jack"); len(d.Events) != 0 {
 		t.Fatalf("an unchanged round after the move reported %v", kinds(d))
 	}
 	// The outbox check still finds the threads a reply names.
@@ -154,12 +154,12 @@ func TestLostDetailRebaselinesWithoutFlood(t *testing.T) {
 	if p == nil || !p.NoDetail || len(p.Threads) != 0 {
 		t.Fatalf("heads read back as %+v", p)
 	}
-	d := github.Diff(prev, round2(), "jack")
+	d := prdelta.Diff(prev, round2(), "jack")
 	if len(d.Events) != 1 || d.Events[0].Kind != model.EvThreadNew || d.Events[0].Tier != model.TierRecord || d.Events[0].ThreadID != "" {
 		t.Fatalf("lost detail: %v, want one record re-baseline", kinds(d))
 	}
 	p.NoDetail = false
-	if flood := github.Diff(prev, round2(), "jack"); len(flood.Events) < 5 || !flood.WakeWorthy() {
+	if flood := prdelta.Diff(prev, round2(), "jack"); len(flood.Events) < 5 || !flood.WakeWorthy() {
 		t.Fatalf("control: heads without the mark did not flood: %v", kinds(flood))
 	}
 

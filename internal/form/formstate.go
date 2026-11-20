@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
+	"github.com/gluck/ebac/sdk/brief"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/trigger"
 	"github.com/jack-work/figaro/api/form"

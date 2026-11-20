@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gluck/ebac/sdk/cfg/github"
+	"github.com/gluck/ebac/sdk/grants"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/approve"
-	"github.com/gluck/ebac/internal/source/orgapprove"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -33,7 +33,7 @@ func cmdAddOrgApprove(ctx context.Context, g globals, args []string) error {
 	}
 	ow := &model.OrgApproveWatch{Logins: splitList(*logins), Grant: *grant, Principal: *principal, Approver: *approver,
 		PingTo: *ping, KnownBreaks: splitList(*breaks)}
-	if err := orgapprove.CheckWatch(ow); err != nil {
+	if err := ghcfg.CheckOrgApprove(ow); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(*board, "@") {
@@ -46,7 +46,7 @@ func cmdAddOrgApprove(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	w := &model.Critic{Name: *name, Source: model.SourceOrgApprove, Host: approve.Host, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
+	w := &model.Critic{Name: *name, Source: model.SourceOrgApprove, Host: ghcfg.Host, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		EverySec: int(every.Seconds()), InputsForm: *board, OrgApprove: ow, Stop: model.StopConditions{}}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {
@@ -69,7 +69,7 @@ func cmdGrantRequest(ctx context.Context, args []string) error {
 	ttlS := fs.String("ttl", "", "how long: a Go duration or whole days, e.g. 2h or 30d")
 	principal := fs.String("principal", "", "the principal it is filed as (the socket maps the caller's uid; this only labels the output)")
 	reason := fs.String("reason", "", "why, 1..300 characters (shown on /grants/)")
-	sock := fs.String("socket", approve.RequestSocket, "band-grants' request socket")
+	sock := fs.String("socket", grants.RequestSocket, "band-grants' request socket")
 	_ = fs.Parse(args)
 	ttl, err := parseDays(*ttlS)
 	if err != nil {
@@ -83,12 +83,12 @@ func cmdGrantRequest(ctx context.Context, args []string) error {
 	case len(*reason) == 0 || len(*reason) > 300:
 		return fmt.Errorf("--reason: want 1..300 characters")
 	}
-	id, err := approve.Filer{Socket: *sock}.File(ctx, *cred, ttl, *reason)
+	id, err := grants.Filer{Socket: *sock}.File(ctx, *cred, ttl, *reason)
 	if err != nil {
 		return err
 	}
 	if *principal != "" {
-		fmt.Printf("%s (%s for %s, %s: approve on %s)\n", id, *cred, *principal, ttl, orgapprove.GrantsPage)
+		fmt.Printf("%s (%s for %s, %s: approve on %s)\n", id, *cred, *principal, ttl, grants.Page)
 		return nil
 	}
 	fmt.Println(id)

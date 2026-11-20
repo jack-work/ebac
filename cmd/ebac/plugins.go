@@ -3,25 +3,25 @@ package main
 import (
 	"github.com/gluck/ebac/internal/pluginrun"
 	"github.com/gluck/ebac/sdk/bandhub"
+	"github.com/gluck/ebac/sdk/grants"
 	"os"
 	"path/filepath"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
 )
 
 // grants are this process's access grants, by the paths that carry them: the
 // sandbox shows each plugin only the ones it needs (pluginrun.Needs).
-func grants(g globals) pluginrun.Grants {
+func pluginGrants(g globals) pluginrun.Grants {
 	gr := pluginrun.Grants{
 		pluginrun.GrantFigaro:   {figaro.AngelusSocket()},
 		pluginrun.GrantKeelDoor: {keel.Socket()},
 		pluginrun.GrantBandHub:  {bandhub.DefaultSocket},
 		// Hides /run/band-grants (request and honor sockets) from every
 		// plugin but org-approve's.
-		pluginrun.GrantBandGrants: {approve.RequestSocket},
+		pluginrun.GrantBandGrants: {grants.RequestSocket},
 		// Never in any plugin's Needs: hidden from every plugin.
 		pluginrun.GrantStampKey: {identity.KeyPath()},
 	}
@@ -38,4 +38,4 @@ func grants(g globals) pluginrun.Grants {
 	return gr
 }
 
-func newRunner(g globals) (*pluginrun.Runner, error) { return pluginrun.NewRunner(grants(g)) }
+func newRunner(g globals) (*pluginrun.Runner, error) { return pluginrun.NewRunner(pluginGrants(g)) }

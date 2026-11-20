@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/brief"
+	"github.com/gluck/ebac/sdk/brief"
 	"github.com/gluck/ebac/sdk/model"
 )
 

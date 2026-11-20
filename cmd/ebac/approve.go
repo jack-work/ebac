@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gluck/ebac/sdk/cfg/github"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -33,7 +33,7 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 		return err
 	}
 	aw := &model.ApproveWatch{Chat: *chat, ChatAlias: *alias, AskFrom: *from, Grant: *grant, Principal: *principal, PingTo: *ping, AskName: *askName}
-	if err := approve.CheckWatch(aw); err != nil {
+	if err := ghcfg.CheckApprove(aw); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(*inputs, "@") {
@@ -46,7 +46,7 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 	if _, err := st.LoadCritic(ctx, *name); err == nil {
 		return fmt.Errorf("critic %q already exists", *name)
 	}
-	w := &model.Critic{Name: *name, Source: model.SourceApprove, Host: approve.Host, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
+	w := &model.Critic{Name: *name, Source: model.SourceApprove, Host: ghcfg.Host, CreatedAt: time.Now().UTC(), FigaroSock: g.figaro,
 		EverySec: int(every.Seconds()), InputsForm: *inputs, Requests: aw, Stop: model.StopConditions{}}
 	formID, err := st.Fig.FormNew(ctx, "ebac-"+*name)
 	if err != nil {

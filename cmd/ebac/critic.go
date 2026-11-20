@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/gluck/ebac/sdk/cfg/github"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/approve"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/sdk/brief"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 )
@@ -323,7 +323,7 @@ func cmdSet(ctx context.Context, g globals, args []string) error {
 			return fmt.Errorf("--ask-name is for approve critics; %s is %s", w.Name, w.SourceName())
 		}
 		w.Requests.AskName = strings.TrimSpace(*askName)
-		if err := approve.CheckWatch(w.Requests); err != nil {
+		if err := ghcfg.CheckApprove(w.Requests); err != nil {
 			return err
 		}
 		if err := st.SaveCritic(ctx, w); err != nil {

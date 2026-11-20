@@ -25,9 +25,13 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		t.Skip("no go toolchain on PATH")
 	}
 	dir := t.TempDir()
-	build := exec.Command("go", "build", "-o", dir, "../ebac-gh", "../ebac-keel", "../ebac-tomb")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build plugins: %v\n%s", err, out)
+	for _, b := range [][]string{
+		{"-o", dir, "../ebac-keel", "../ebac-tomb"},
+		{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
+	} {
+		if out, err := exec.Command("go", append([]string{"build"}, b...)...).CombinedOutput(); err != nil {
+			t.Fatalf("build plugins %v: %v\n%s", b, err, out)
+		}
 	}
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
 	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)

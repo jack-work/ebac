@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/cfg/github"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/author"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 )
@@ -66,7 +66,7 @@ func cmdAddAuthor(ctx context.Context, g globals, args []string) error {
 		}
 	}
 	filter.TitleMatch = strings.TrimSpace(*titleMatch)
-	if err := author.CheckFilter(filter); err != nil {
+	if err := ghcfg.CheckFilter(filter); err != nil {
 		return err
 	}
 	if err := forge.CheckForgeHost(*host); err != nil {

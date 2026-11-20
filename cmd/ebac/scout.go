@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gluck/ebac/sdk/cfg/github"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/source/scout"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/relevance"
@@ -60,7 +60,7 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	if _, err := relevance.Compile(sw.TitleMatch, sw.Paths); err != nil {
 		return err
 	}
-	if err := scout.CheckOwners(sw.Owners); err != nil {
+	if err := ghcfg.CheckOwners(sw.Owners); err != nil {
 		return err
 	}
 	if sw.WarnTo != "" && !strings.HasPrefix(sw.WarnTo, "@") {

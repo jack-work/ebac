@@ -12,7 +12,7 @@ import (
 // plugin (no plugin's Needs names it).
 func TestGrantsRegisterTheStampKey(t *testing.T) {
 	t.Setenv("EBAC_STAMP_KEY", "/var/lib/ebac/.local/state/ebac-stamp/stamp.key")
-	if got := grants(globals{})[pluginrun.GrantStampKey]; !reflect.DeepEqual(got, []string{identity.KeyPath()}) {
+	if got := pluginGrants(globals{})[pluginrun.GrantStampKey]; !reflect.DeepEqual(got, []string{identity.KeyPath()}) {
 		t.Fatalf("stamp-key grant %v", got)
 	}
 	for _, p := range []string{"keel", "gh", "tomb", "approve", "bandhub", "roster"} {

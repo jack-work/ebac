@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/sched"
+	"github.com/gluck/ebac/sdk/brief"
 	"github.com/gluck/ebac/sdk/model"
 )
 
