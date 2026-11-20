@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/gluck/ebac/internal/figaro"
 )
@@ -14,9 +15,13 @@ import (
 // Store holds ebac's state. Critic state lives in figaro forms (formstate.go);
 // Root keeps only what must outlive a form: archive exports and reports.
 type Store struct {
-	Root   string
-	Fig    *figaro.Figaro
-	Me     string            // the forge login, for protocol text
+	Root string
+	Fig  *figaro.Figaro
+	Me   string // the forge login, for protocol text
+	// mu guards formOf and loaded: ebacd's scheduler runs several critics'
+	// rounds at once on one Store (a concurrent map write killed ebacd,
+	// 2026-11-19 22:54Z). Touch them only through the helpers below.
+	mu     sync.Mutex
 	formOf map[string]string // critic name -> form id, for this process
 	// loaded is each critic key as this process last read or wrote it, by
 	// form id: the base of SaveRound's merge (critic_merge.go).
@@ -77,8 +82,39 @@ func (s *Store) remember(id string, raw json.RawMessage) {
 	if id == "" || len(raw) == 0 {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.loaded == nil {
 		s.loaded = map[string]json.RawMessage{}
 	}
 	s.loaded[id] = append(json.RawMessage(nil), raw...)
+}
+
+// base is the critic key this process last saw for a form (nil if none).
+func (s *Store) base(id string) json.RawMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loaded[id]
+}
+
+// knownForm is the form id this process last resolved for a critic name.
+func (s *Store) knownForm(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.formOf[name]
+	return id, ok
+}
+
+// setForm records (id != "") or forgets (id == "") a critic name's form.
+func (s *Store) setForm(name, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		delete(s.formOf, name)
+		return
+	}
+	if s.formOf == nil {
+		s.formOf = map[string]string{}
+	}
+	s.formOf[name] = id
 }

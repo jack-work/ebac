@@ -399,7 +399,7 @@ func (s *Store) criticForms(ctx context.Context) ([]*CriticForm, error) {
 var ErrNoCritic = errors.New("no critic")
 
 func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error) {
-	if id, ok := s.formOf[name]; ok {
+	if id, ok := s.knownForm(name); ok {
 		f, err := s.ReadForm(ctx, id)
 		if err == nil {
 			if w, err := f.Critic(); err == nil && w.Name == name {
@@ -408,7 +408,7 @@ func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error
 		} else if !errors.Is(err, figaro.ErrFormGone) {
 			return nil, err
 		}
-		delete(s.formOf, name)
+		s.setForm(name, "")
 	}
 	forms, err := s.criticForms(ctx)
 	if err != nil {
@@ -424,7 +424,7 @@ func (s *Store) FindCritic(ctx context.Context, name string) (*CriticForm, error
 	case 0:
 		return nil, fmt.Errorf("%w named %q (try: ebac ls)", ErrNoCritic, name)
 	case 1:
-		s.formOf[name] = hits[0].ID
+		s.setForm(name, hits[0].ID)
 		return hits[0], nil
 	}
 	ids := make([]string, len(hits))
@@ -508,7 +508,7 @@ func (s *Store) ListCritics(ctx context.Context) ([]*model.Critic, error) {
 			continue
 		}
 		seen[w.Name] = f.ID
-		s.formOf[w.Name] = f.ID
+		s.setForm(w.Name, f.ID)
 		s.remember(f.ID, f.Keys["critic"])
 		out = append(out, w)
 	}
@@ -563,10 +563,10 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		return err
 	}
 	set["harness"] = harness
-	s.formOf[w.Name] = w.FormID
+	s.setForm(w.Name, w.FormID)
 	// The critic key is merged, never overwritten: a `figaro set critic.<field>` that landed after this process
 	// loaded the critic survives (critic_merge.go).
-	base := s.loaded[w.FormID]
+	base := s.base(w.FormID)
 	var written json.RawMessage
 	var conflicts []string
 	// The detail goes to disk after the form (prs_local.go); a round with no
