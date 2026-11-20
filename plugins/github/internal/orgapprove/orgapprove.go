@@ -283,6 +283,14 @@ func asks(ctx context.Context, wr Writer, fl Filer, p Pass, out *Out, logf func(
 			continue
 		}
 		if why != "" {
+			if strings.HasPrefix(why, SentNotSeen) {
+				closeAsk(out, st, id, "done", why)
+				if w.PingTo != "" {
+					out.Pings = append(out.Pings, plugin.Ping{To: w.PingTo, Text: fmt.Sprintf(
+						"org-approve: %s#%d approve SENT but not read back (ask %s): check the PR by hand; not posted again", Repo, a.PR, id)})
+				}
+				continue
+			}
 			closeAsk(out, st, id, "withdrawn", "approved on /grants/ but not posted: "+why)
 			continue
 		}
@@ -427,7 +435,9 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 	perr := wr.Approve(ctx, a.PR, Body)
 	back, err := wr.Reviews(ctx, a.PR)
 	if err != nil {
-		return 0, "", fmt.Errorf("read back: %w", err)
+		// Never a transient error after a post: a retry next round would post
+		// again if the review is still unseen (bic/aether#129969).
+		return 0, SentNotSeen + "read-back failed: " + trunc(err.Error(), 200), nil
 	}
 	for _, r := range back {
 		if r.State == "APPROVED" && strings.TrimSpace(r.Body) == Body {
@@ -435,10 +445,14 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 		}
 	}
 	if perr != nil {
-		return 0, "", fmt.Errorf("post: %w", perr)
+		return 0, SentNotSeen + "post error: " + trunc(perr.Error(), 200), nil
 	}
-	return 0, "approve sent, but no APPROVED review with its body read back", nil
+	return 0, SentNotSeen + "no APPROVED review with its body read back", nil
 }
+
+// SentNotSeen starts the reason of an ask whose approve was sent but not read
+// back: final, never retried; the requester is pinged to check by hand.
+const SentNotSeen = "approve sent, not read back (check the PR by hand; not posted again): "
 
 func isBotLogin(l string) bool { return bots[l] || strings.Contains(strings.ToLower(l), "bot") }
 

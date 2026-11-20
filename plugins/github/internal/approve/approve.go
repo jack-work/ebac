@@ -208,6 +208,11 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 		}
 		out.Results[id] = res
 		logf("request %s: %s", id, describe(res))
+		if !res.OK && strings.HasPrefix(res.Reason, ReadBackFailed) && p.Watch.PingTo != "" {
+			r, _ := parse(id, p.Requests[id])
+			out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
+				"ebac approve: %s#%d approve SENT but not read back (request %s): check the PR by hand; ebac will not post again", Repo, r.PR, id)})
+		}
 		if res.OK {
 			r, _ := parse(id, p.Requests[id])
 			used[r.MsgID] = id
@@ -323,7 +328,10 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	perr := gh.Approve(ctx, r.PR, body)
 	back, err := gh.Reviews(ctx, r.PR)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: read back: %v", errTransient, err)
+		// Never transient after a post: a retry next round would post again if the
+		// review is still unseen (bic/aether#129969). A final refusal, and the
+		// requester is told to look.
+		return refuse(ReadBackFailed + oneLine(err.Error()))
 	}
 	if rv := ours(back, body); rv != nil {
 		return Result{OK: true, ReviewID: rv.ID}, nil
@@ -331,8 +339,13 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	if perr != nil {
 		return refuse("post: " + oneLine(perr.Error()))
 	}
-	return refuse("post: approve sent, but no APPROVED review with its body read back")
+	return refuse(ReadBackFailed + "no APPROVED review with its body read back")
 }
+
+// ReadBackFailed starts the reason of a request whose approve was sent but not
+// read back: final, never retried (a retry could post twice); the requester is
+// pinged to check the PR by hand.
+const ReadBackFailed = "post: approve sent (check the PR by hand; not posted again): "
 
 // ours is the APPROVED review carrying body, if any.
 func ours(rs []Review, body string) *Review {

@@ -28,7 +28,7 @@ var (
 	argvAll [][]string
 	allowed = []*regexp.Regexp{
 		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+$`),
-		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+/reviews\?per_page=100$`),
+		regexp.MustCompile(`^api repos/bic/aether/pulls/[0-9]+/reviews\?per_page=100&page=[0-9]{1,3}$`),
 		regexp.MustCompile(`^pr review [0-9]+ --repo bic/aether --approve --body Approved on Jack's behalf \(Figaro\), on [A-Za-z][A-Za-z .'-]{0,60}'s ask [0-9]{10,16}\.$`),
 	}
 )
@@ -76,8 +76,10 @@ type fakeHub struct {
 	readErr  error // a non-404 read failure
 	postErr  error // Approve fails
 	postLost bool  // Approve "succeeds" but no review appears
-	calls    [][]string
-	nextID   int64
+	// readErrAfterPost fails every read after the first Approve
+	readErrAfterPost error
+	calls            [][]string
+	nextID           int64
 }
 
 func (h *fakeHub) gh() *GH {
@@ -102,14 +104,22 @@ func (h *fakeHub) gh() *GH {
 		if h.readErr != nil {
 			return nil, h.readErr
 		}
+		if h.readErrAfterPost != nil && h.posts() > 0 {
+			return nil, h.readErrAfterPost
+		}
 		path := a[1]
 		n, _ := strconv.Atoi(strings.Split(strings.TrimPrefix(path, "repos/bic/aether/pulls/"), "/")[0])
 		if strings.Contains(path, "/reviews") {
+			page, _ := strconv.Atoi(path[strings.LastIndex(path, "=")+1:])
 			rs := h.reviews[n]
-			if rs == nil {
-				rs = []Review{}
+			lo, hi := (page-1)*ReviewsPerPage, page*ReviewsPerPage
+			if lo > len(rs) {
+				lo = len(rs)
 			}
-			return json.Marshal(rs)
+			if hi > len(rs) {
+				hi = len(rs)
+			}
+			return json.Marshal(append([]Review{}, rs[lo:hi]...))
 		}
 		pr, ok := h.prs[n]
 		if !ok {
@@ -276,7 +286,8 @@ func TestApproveRefusals(t *testing.T) {
 		}, want: "is not newer than approval 3"},
 		{name: "post fails", req: reqJSON(good()), hub: func(h *fakeHub) { h.postErr = errors.New("gh: Can not approve your own pull request") },
 			want: "post: gh: Can not approve your own pull request"},
-		{name: "post lost", req: reqJSON(good()), hub: func(h *fakeHub) { h.postLost = true }, want: "post: approve sent, but no APPROVED review"},
+		{name: "post lost", req: reqJSON(good()), hub: func(h *fakeHub) { h.postLost = true },
+			want: "post: approve sent (check the PR by hand; not posted again): no APPROVED review with its body read back"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -304,8 +315,12 @@ func TestApproveRefusals(t *testing.T) {
 			if !ok || r.OK || !strings.Contains(r.Reason, c.want) {
 				t.Fatalf("want a refusal %q, got %+v (present %v)", c.want, r, ok)
 			}
-			if len(out.Pings) != 0 {
-				t.Fatalf("a refusal pinged: %+v", out.Pings)
+			wantPings := 0
+			if strings.HasPrefix(c.want, ReadBackFailed) {
+				wantPings = 1 // sent but not read back: the requester is told to look
+			}
+			if len(out.Pings) != wantPings {
+				t.Fatalf("pings %+v, want %d", out.Pings, wantPings)
 			}
 			wantPosts := 0
 			if strings.HasPrefix(c.want, "post:") {
@@ -554,5 +569,43 @@ func TestQueryReadsOnly(t *testing.T) {
 	}
 	if s := gh.Spent(); s.Calls != 1 || s.Points != 2 || s.Remaining != 4000 {
 		t.Fatalf("spend %+v", s)
+	}
+}
+
+// bic/aether#129969: a read-back error after the post is a FINAL refusal (and
+// a ping), never a transient retry that would post again next round.
+func TestReadBackErrorAfterThePostIsFinal(t *testing.T) {
+	h, tm := world()
+	h.readErrAfterPost = errors.New("gh: HTTP 502")
+	reqs := map[string]json.RawMessage{"r1": reqJSON(good())}
+	out, err := run(t, h, tm, reqs)
+	if err != nil {
+		t.Fatalf("a read-back error after the post surfaced as a round error (retried next round): %v", err)
+	}
+	r := out.Results["r1"]
+	if r.OK || r.Reason != ReadBackFailed+"gh: HTTP 502" || h.posts() != 1 || len(out.Pings) != 1 ||
+		!strings.Contains(out.Pings[0].Text, "approve SENT but not read back") {
+		t.Fatalf("result %+v posts %d pings %+v", r, h.posts(), out.Pings)
+	}
+	// the request is decided: a second round posts nothing
+	f := good()
+	f["result"] = r
+	h.readErrAfterPost = nil
+	out, _ = run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(f)})
+	if len(out.Results) != 0 || h.posts() != 1 {
+		t.Fatalf("second round: %+v posts %d", out.Results, h.posts())
+	}
+}
+
+// An approve on page 2 (150 reviews) is found: no second post.
+func TestAnApproveOnPageTwoIsFound(t *testing.T) {
+	h, tm := world()
+	for i := 0; i < 150; i++ {
+		h.reviews[110001] = append(h.reviews[110001], Review{ID: int64(100 + i), State: "COMMENTED", Body: "x", SubmittedAt: "2026-11-12T20:00:00Z"})
+	}
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 777, State: "APPROVED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
+	if r := out.Results["r1"]; !r.OK || r.ReviewID != 777 || h.posts() != 0 {
+		t.Fatalf("page 2: %+v posts %d", out.Results, h.posts())
 	}
 }

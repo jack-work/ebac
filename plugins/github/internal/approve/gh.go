@@ -60,14 +60,34 @@ func (g *GH) PR(ctx context.Context, n int) (PRInfo, error) {
 	return p, err
 }
 
-// Reviews reads a pull request's reviews (GET, first 100).
+// ReviewsPerPage is the page size of a review read; a page shorter than it is
+// the last.
+const ReviewsPerPage = 100
+
+// maxReviewPages bounds one read (10,000 reviews): a PR past it is an error,
+// never a silently partial list.
+const maxReviewPages = 100
+
+// Reviews reads ALL of a pull request's reviews (GET, every page). A busy PR
+// has more than one page (bic/aether#129969): reading only the first let an
+// approve posted on page 2 go unseen and be posted again.
 func (g *GH) Reviews(ctx context.Context, n int) ([]Review, error) {
-	var rs []Review
-	out, err := g.run(ctx, []string{"api", "repos/" + Repo + "/pulls/" + strconv.Itoa(n) + "/reviews?per_page=100"})
-	if err == nil {
-		err = json.Unmarshal(out, &rs)
+	var all []Review
+	for page := 1; page <= maxReviewPages; page++ {
+		var rs []Review
+		out, err := g.run(ctx, []string{"api", "repos/" + Repo + "/pulls/" + strconv.Itoa(n) + "/reviews?per_page=" + strconv.Itoa(ReviewsPerPage) + "&page=" + strconv.Itoa(page)})
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(out, &rs); err != nil {
+			return nil, err
+		}
+		all = append(all, rs...)
+		if len(rs) < ReviewsPerPage {
+			return all, nil
+		}
 	}
-	return rs, err
+	return nil, fmt.Errorf("%s#%d has more than %d review pages", Repo, n, maxReviewPages)
 }
 
 // Approve posts an APPROVE review on a pull request of Repo: the one write.

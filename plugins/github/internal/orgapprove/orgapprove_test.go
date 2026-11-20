@@ -3,6 +3,7 @@ package orgapprove
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gluck/ebac/sdk/cfg/github"
 	"github.com/gluck/ebac/sdk/grants"
@@ -61,14 +62,22 @@ type fakeWrite struct {
 	info     approve.PRInfo
 	reviews  []approve.Review
 	approved []int
+	lost     bool  // Approve "succeeds" but no review appears
+	readErr  error // every review read after the first Approve fails
 }
 
 func (f *fakeWrite) PR(context.Context, int) (approve.PRInfo, error) { return f.info, nil }
 func (f *fakeWrite) Reviews(context.Context, int) ([]approve.Review, error) {
+	if f.readErr != nil && len(f.approved) > 0 {
+		return nil, f.readErr
+	}
 	return f.reviews, nil
 }
 func (f *fakeWrite) Approve(_ context.Context, n int, body string) error {
 	f.approved = append(f.approved, n)
+	if f.lost {
+		return nil
+	}
 	r := approve.Review{ID: 77, State: "APPROVED", Body: body}
 	r.User.Login, r.User.Type = Self, "User"
 	f.reviews = append(f.reviews, r)
@@ -453,5 +462,39 @@ func TestTapGrantRefusesNonPersonApprovers(t *testing.T) {
 	r.round(t, false)
 	if len(r.wr.approved) != 0 {
 		t.Fatal("posted with an empty approver")
+	}
+}
+
+// bic/aether#129969: an approve sent but not read back (read error, or not
+// seen) closes the ask as done with a ping, never retried: no second post.
+func TestSentButNotReadBackIsNeverRetried(t *testing.T) {
+	for name, set := range map[string]func(*fakeWrite){
+		"read-back error": func(f *fakeWrite) { f.readErr = errors.New("gh: HTTP 502") },
+		"not seen":        func(f *fakeWrite) { f.lost = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig()
+			r.round(t, false)
+			r.approveTap("jack")
+			set(r.wr)
+			r.now = r.now.Add(15 * time.Minute)
+			o := r.round(t, false)
+			q := o.Q[QID(115803, headA)]
+			if len(r.wr.approved) != 1 || q == nil || q["status"] != "done" || !strings.HasPrefix(q["resolved"].(string), SentNotSeen) {
+				t.Fatalf("approved %v q %v (log %v)", r.wr.approved, q, o.Log)
+			}
+			pinged := false
+			for _, p := range o.Pings {
+				pinged = pinged || strings.Contains(p.Text, "approve SENT but not read back")
+			}
+			if !pinged {
+				t.Fatalf("no ping: %+v", o.Pings)
+			}
+			r.now = r.now.Add(time.Minute)
+			r.round(t, false)
+			if len(r.wr.approved) != 1 {
+				t.Fatalf("posted again: %v", r.wr.approved)
+			}
+		})
 	}
 }
