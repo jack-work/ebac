@@ -37,6 +37,16 @@ MUTANTS=(
   "N7|sdk/forge/gh.go|return data, out, nil|return data, nil, nil|./sdk/forge/"
   "R9|$G/config.go|if !termRe.MatchString(t) {|if false {|./$G/"
 )
+# Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
+# two red tests "killed" every mutant).
+for pk in ./internal/poll/ ./internal/pluginrun/ ./$G/ ./sdk/forge/; do
+  mod=.; p=$pk
+  case $pk in ./plugins/github/*) mod=plugins/github; p=./${pk#./plugins/github/};; ./sdk/*) mod=sdk; p=./${pk#./sdk/};; esac
+  if ! out=$(cd "$mod" && go test -count=1 "$p" 2>&1); then
+    echo "baseline red: $pk"; grep -- '--- FAIL' <<<"$out" | head -5; exit 2
+  fi
+done
+echo "baseline green"
 bad=0
 for m in "${MUTANTS[@]}"; do
   IFS='|' read -r id file old new pkg <<<"$(sed 's/\\|/\x01/g' <<<"$m")"

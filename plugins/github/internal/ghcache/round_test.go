@@ -241,7 +241,8 @@ func TestHotTierIsFiveMinutes(t *testing.T) {
 	gh := world(t)
 	c, ttl := cfg(t, hotAuthor)
 	r, _ := round(t, gh, State{}, c, ttl, t0)
-	if _, calls := round(t, gh, r.State, c, ttl, t0.Add(5*time.Minute-time.Millisecond)); calls != 0 {
+	r, calls := round(t, gh, r.State, c, ttl, t0.Add(5*time.Minute-time.Millisecond))
+	if calls != 0 {
 		t.Fatalf("1 ms early: %d calls", calls)
 	}
 	if _, calls := round(t, gh, r.State, c, ttl, t0.Add(5*time.Minute)); calls != 1 {
@@ -257,7 +258,8 @@ func TestWarmRuleSearchesEveryThirtyMinutes(t *testing.T) {
 	if r.Track["bic/aether#127740"].Tier != "warm" {
 		t.Fatalf("tier: %+v", r.Track)
 	}
-	if _, calls := round(t, gh, r.State, c, ttl, t0.Add(29*time.Minute)); calls != 0 {
+	r, calls := round(t, gh, r.State, c, ttl, t0.Add(29*time.Minute))
+	if calls != 0 {
 		t.Fatalf("29 min: %d calls", calls)
 	}
 	if _, calls := round(t, gh, r.State, c, ttl, t0.Add(30*time.Minute)); calls != 1 {
