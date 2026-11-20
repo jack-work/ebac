@@ -3,6 +3,7 @@ package approve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -165,3 +166,22 @@ func TestTheMarkerIsExact(t *testing.T) {
 }
 
 func noGrants() ([]grants.Grant, error) { return nil, nil }
+
+// A POST that gh reports as failed may have landed: marked posted, never posted again; the read-back decides, and
+// LostAfter after the post it is a final refusal with a ping. Exactly one POST.
+func TestAPostErrorIsReadBackNeverRetried(t *testing.T) {
+	h, tm := world()
+	h.postErr = errors.New("gh: Can not approve your own pull request")
+	reqs := map[string]json.RawMessage{"r1": reqJSON(good())}
+	l := &ledger{}
+	out, _ := l.round(t, h, tm, reqs, now)
+	if h.posts() != 1 || len(out.Results) != 0 || l.posts["r1"].PostedAt != "2026-11-12T21:00:00Z" {
+		t.Fatalf("post round: posts %d results %+v record %+v", h.posts(), out.Results, l.posts["r1"])
+	}
+	out, _ = l.round(t, h, tm, reqs, now.Add(LostAfter))
+	r := out.Results["r1"]
+	if r.OK || !strings.HasPrefix(r.Reason, ReadBackFailed+"posted at 2026-11-12T21:00:00Z, not read back within 10m0s (no review with its marker)") ||
+		h.posts() != 1 || len(out.Pings) != 1 {
+		t.Fatalf("at LostAfter: %+v posts %d pings %+v", r, h.posts(), out.Pings)
+	}
+}

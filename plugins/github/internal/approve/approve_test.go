@@ -327,10 +327,7 @@ func TestApproveRefusals(t *testing.T) {
 		{name: "ask stale", req: reqJSON(good()), hub: func(h *fakeHub) {
 			h.reviews[110001] = append(h.reviews[110001], Review{ID: 3, State: "APPROVED", Body: "ok", SubmittedAt: "2026-11-12T20:48:06.156Z"})
 		}, want: "is not newer than approval 3"},
-		{name: "post fails", req: reqJSON(good()), hub: func(h *fakeHub) { h.postErr = errors.New("gh: Can not approve your own pull request") },
-			want: "post: approve sent (check the PR by hand; not posted again): post error: gh: Can not approve your own pull request"},
-		{name: "post lost", req: reqJSON(good()), hub: func(h *fakeHub) { h.postLost = true },
-			want: "post: approve sent (check the PR by hand; not posted again): no APPROVED review with its body read back"},
+		// A failed or lost POST is no refusal in its round under #27 B: TestAPostErrorIsReadBackNeverRetried.
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
