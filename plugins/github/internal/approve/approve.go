@@ -170,7 +170,8 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 			// result marks its ask used.
 			var res Result
 			var msg string
-			if json.Unmarshal(obj["result"], &res) == nil && res.OK && json.Unmarshal(obj["teams_msg_id"], &msg) == nil {
+			// an approve that was SENT (ok, or sent but not read back) uses the ask
+			if json.Unmarshal(obj["result"], &res) == nil && (res.OK || strings.HasPrefix(res.Reason, ReadBackFailed)) && json.Unmarshal(obj["teams_msg_id"], &msg) == nil {
 				used[msg] = id
 			}
 			continue
@@ -208,6 +209,10 @@ func Run(ctx context.Context, gh *GH, teams Teams, p Pass) (Out, error) {
 		}
 		out.Results[id] = res
 		logf("request %s: %s", id, describe(res))
+		if !res.OK && strings.HasPrefix(res.Reason, ReadBackFailed) {
+			r, _ := parse(id, p.Requests[id])
+			used[r.MsgID] = id // sent: the ask is used, a re-filed request for it is refused
+		}
 		if !res.OK && strings.HasPrefix(res.Reason, ReadBackFailed) && p.Watch.PingTo != "" {
 			r, _ := parse(id, p.Requests[id])
 			out.Pings = append(out.Pings, plugin.Ping{To: p.Watch.PingTo, Text: fmt.Sprintf(
@@ -347,10 +352,12 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 // pinged to check the PR by hand.
 const ReadBackFailed = "post: approve sent (check the PR by hand; not posted again): "
 
-// ours is the APPROVED review carrying body, if any.
+// ours is the approve carrying exactly body, APPROVED or DISMISSED: an approve
+// of ours that a push dismissed is still posted (bic/aether dismisses stale
+// approvals). A comment quoting the body is not an approve.
 func ours(rs []Review, body string) *Review {
 	for i := range rs {
-		if rs[i].State == "APPROVED" && strings.TrimSpace(rs[i].Body) == body {
+		if (rs[i].State == "APPROVED" || rs[i].State == "DISMISSED") && strings.TrimSpace(rs[i].Body) == body {
 			return &rs[i]
 		}
 	}

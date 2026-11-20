@@ -498,3 +498,26 @@ func TestSentButNotReadBackIsNeverRetried(t *testing.T) {
 		})
 	}
 }
+
+// Our approve at THIS head, DISMISSED by a push, counts as posted; at another
+// head it does not.
+func TestOursAtHeadInAnyState(t *testing.T) {
+	for name, c := range map[string]struct {
+		commit string
+		posts  int
+	}{"same head": {headA, 0}, "old head": {"bbbbbbb2222222222222222222222222222222222", 1}} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig()
+			r.round(t, false)
+			r.approveTap("jack")
+			rv := approve.Review{ID: 66, State: "DISMISSED", Body: Body, CommitID: c.commit}
+			rv.User.Login, rv.User.Type = Self, "User"
+			r.wr.reviews = append(r.wr.reviews, rv)
+			r.now = r.now.Add(15 * time.Minute)
+			r.round(t, false)
+			if len(r.wr.approved) != c.posts {
+				t.Fatalf("approved %v, want %d post(s)", r.wr.approved, c.posts)
+			}
+		})
+	}
+}

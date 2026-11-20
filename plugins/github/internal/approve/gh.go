@@ -44,6 +44,7 @@ type Review struct {
 	State       string `json:"state"` // APPROVED, COMMENTED, ...
 	Body        string `json:"body"`
 	SubmittedAt string `json:"submitted_at"`
+	CommitID    string `json:"commit_id"`
 	User        struct {
 		Login string `json:"login"`
 		Type  string `json:"type"` // User, Bot

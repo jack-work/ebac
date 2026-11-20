@@ -417,8 +417,10 @@ func post(ctx context.Context, wr Writer, a *model.OrgAsk, dry bool) (int64, str
 		case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
 			latest[r.User.Login] = r.State
 		}
-		if r.User.Login == Self && r.State == "APPROVED" && strings.TrimSpace(r.Body) == Body {
-			return r.ID, "", nil // posted in an earlier round that never recorded it
+		// Ours at THIS head in any state (a push dismisses a stale approve):
+		// posted in an earlier round that never recorded it.
+		if r.User.Login == Self && strings.TrimSpace(r.Body) == Body && r.CommitID == a.Head {
+			return r.ID, "", nil
 		}
 	}
 	for l, s := range latest {

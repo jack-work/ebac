@@ -609,3 +609,27 @@ func TestAnApproveOnPageTwoIsFound(t *testing.T) {
 		t.Fatalf("page 2: %+v posts %d", out.Results, h.posts())
 	}
 }
+
+// Our approve DISMISSED by a push is still ours: a re-decided request does
+// not post again.
+func TestDismissedApproveCountsAsPosted(t *testing.T) {
+	h, tm := world()
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 557, State: "DISMISSED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
+	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
+	if r := out.Results["r1"]; !r.OK || r.ReviewID != 557 || h.posts() != 0 {
+		t.Fatalf("dismissed approve: %+v posts %d", r, h.posts())
+	}
+}
+
+// A request whose approve was SENT but not read back uses its ask: a
+// re-filed request for the same Teams message is refused, never posted.
+func TestSentButUnreadAskIsUsed(t *testing.T) {
+	h, tm := world()
+	f := good()
+	f["result"] = map[string]any{"ok": false, "reason": ReadBackFailed + "gh: HTTP 502", "at": "2026-11-12T21:00:00Z"}
+	reqs := map[string]json.RawMessage{"r1": reqJSON(f), "r2": reqJSON(good())}
+	out, _ := run(t, h, tm, reqs)
+	if r := out.Results["r2"]; r.OK || !strings.Contains(r.Reason, "already approved through request r1") || h.posts() != 0 {
+		t.Fatalf("re-filed: %+v posts %d", r, h.posts())
+	}
+}
