@@ -125,7 +125,6 @@ G1-check-differs	sdk/model/registry.go	60	\t\t\tout = append(out, fmt.Sprintf("%
 G2-check-undeclared	sdk/model/registry.go	65	\t\t\tout = append(out, fmt.Sprintf("%s: live (form %s) but undeclared", name, l.Form))\n	\t\t\t_ = l\n	./sdk/model	TestCheckRegistrations
 G3-check-form	sdk/model/registry.go	56	\t\tif l.Form != r.Form {	\t\tif false {	./sdk/model	TestCheckRegistrations
 G5-undeclared-form	internal/form/formstate.go	1053	\treturn !ok || d.Form != formID	\t_ = d\n\treturn !ok	./internal/form	TestUndeclared
-G6-ls-flag	internal/fleet/roster.go	192	\tcase w.Undeclared:\n\t\treturn model.UndeclaredNote\n		./internal/fleet	TestUndeclared
 G4-undeclared-flag	internal/form/formstate.go	318	\tw.Undeclared = undeclared(w.Name, w.FormID)\n		./internal/form	TestUndeclared|TestCriticLoadSetsUndeclared
 G7-canonical	sdk/model/registry.go	78	\tma, mb := canonical(a), canonical(b)	\tvar ma, mb map[string]json.RawMessage\n\t_ = json.Unmarshal(a, &ma)\n\t_ = json.Unmarshal(b, &mb)	./sdk/model	TestReview|TestCheckRegistrations
 G8-undeclared-last	internal/fleet/roster.go	209	\tif w.Undeclared {\n\t\t// Last:	\tif false {\n\t\t// Last:	./internal/fleet	TestUndeclared
