@@ -75,6 +75,7 @@ def norm_arch(arch):
 
 def theirs(r):
     row = {k: r.get(k) for k in FIELDS}
+    row["title"] = (r.get("title") or "")[:120]  # both sides cut at 120 (board-snapshot writes title[:120])
     row["fixes"] = sorted(r.get("fixes") or [])
     row["arch"] = norm_arch(r.get("arch") or [])
     px = r.get("praxis")

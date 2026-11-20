@@ -182,3 +182,17 @@ func TestSections(t *testing.T) {
 		t.Error("an edited section kept its hash")
 	}
 }
+
+// The newest Praxis gate by createdAt wins whatever order the comments come in (GitHub answers oldest first today;
+// the guard does not rely on it). RED if the createdAt comparison goes (mutant P3: the later-listed, older gate wins).
+func TestThePraxisGateNewestByTimeWins(t *testing.T) {
+	pr := &PR{Number: 7, Head: "abcdef0123"}
+	pr.Comments.Nodes = []Comment{
+		comment("Chiqun-Zhang", "2026-01-05T00:00:00Z", "## Praxis merge gate — PR #7 @ abcdef0\n\n**SAFE TO MERGE**"),
+		comment("Chiqun-Zhang", "2026-01-04T00:00:00Z", "## Praxis merge gate — PR #7 @ 1111111\n\n**NOT SAFE**"),
+	}
+	got := Parse(pr).Bots.Praxis
+	if got == nil || got.Verdict != "safe" || got.At != "2026-01-05T00:00:00Z" || got.Head != "abcdef0" {
+		t.Fatalf("praxis: %+v", got)
+	}
+}
