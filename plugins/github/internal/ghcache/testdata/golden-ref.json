@@ -1,0 +1,176 @@
+{
+ "107698": {
+  "architect": [
+   {
+    "at": "2026-11-10T15:15:09Z",
+    "at_head": false,
+    "sha": "b2e316cff4521ea9772158966aee9ca5d81dafa2",
+    "verdict": "changes"
+   },
+   {
+    "at": "2026-11-13T15:41:17Z",
+    "at_head": true,
+    "sha": "aae0037f3c614c54e47999c27b72614fc51a2967",
+    "verdict": "changes"
+   }
+  ],
+  "lair": {},
+  "praxis": null
+ },
+ "116015": {
+  "architect": [
+   {
+    "at": "2026-11-17T18:38:24Z",
+    "at_head": false,
+    "sha": "c714a85bbf94eed00ebf71c3604943d25c679660",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-17T22:02:38Z",
+    "at_head": false,
+    "sha": "aacbdc2bb25f6275d9eddc546f26a4c5dfdd9aef",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-18T03:48:16Z",
+    "at_head": true,
+    "sha": "f9baa56815bc491da40c6a5c93522d1c5318c8fc",
+    "verdict": "approve"
+   }
+  ],
+  "lair": {},
+  "praxis": null
+ },
+ "116018": {
+  "architect": [
+   {
+    "at": "2026-11-18T07:06:22Z",
+    "at_head": false,
+    "sha": "13f0061f3ad9536ca4d53477a92cbde481e73e70",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T02:40:51Z",
+    "at_head": true,
+    "sha": "56be9b2414f0cb6edafebcddb8db624fbbcfc34a",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T02:40:54Z",
+    "at_head": true,
+    "sha": "56be9b2414f0cb6edafebcddb8db624fbbcfc34a",
+    "verdict": "approve"
+   }
+  ],
+  "lair": {
+   "ken": {
+    "ruling": "approved",
+    "sha": "56be9b2414f0cb6edafebcddb8db624fbbcfc34a",
+    "url": "https://microsoft.ghe.com/bic/aether/pull/116018#issuecomment-293627386"
+   },
+   "yugo": {
+    "ruling": "ruled every item not BLOCKING",
+    "sha": "56be9b24",
+    "url": "https://microsoft.ghe.com/bic/aether/pull/116018#issuecomment-293630301"
+   }
+  },
+  "praxis": null
+ },
+ "127740": {
+  "architect": [
+   {
+    "at": "2026-11-17T17:53:57Z",
+    "at_head": false,
+    "sha": "6aca7334d73c362841c8423fc05b59d398349cfe",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-17T17:54:00Z",
+    "at_head": true,
+    "sha": "6b7a29f63cd8ea4c46a0fc42d566a90c377a57bf",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-18T20:14:40Z",
+    "at_head": true,
+    "sha": "6b7a29f63cd8ea4c46a0fc42d566a90c377a57bf",
+    "verdict": "approve"
+   }
+  ],
+  "lair": {},
+  "praxis": {
+   "at": "2026-11-18T06:20:46Z",
+   "at_head": false,
+   "head": "6aca7334",
+   "items": [],
+   "url": "https://microsoft.ghe.com/bic/aether/pull/127740#issuecomment-292935516",
+   "verdict": "safe"
+  }
+ },
+ "130950": {
+  "architect": [
+   {
+    "at": "2026-11-19T01:54:04Z",
+    "at_head": false,
+    "sha": "9a774e416d6f4a0dedda96f52dd095c3fe7c61ce",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T07:23:44Z",
+    "at_head": false,
+    "sha": "e6ef35fd1ced92ce8a36648f686ecf3f3fd501fe",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T09:36:20Z",
+    "at_head": false,
+    "sha": "51c92cce6e609d12515f967e62575395ad9b66c6",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T10:59:35Z",
+    "at_head": false,
+    "sha": "a7fc59b7d99383d1c905d3e83e7be63ae9e1308e",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T10:59:39Z",
+    "at_head": false,
+    "sha": "956dae6521b46277be665c86a9a033ab6c545a35",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T21:37:24Z",
+    "at_head": false,
+    "sha": "ea51abd032c049bed75c0aadc239dc9129d02c3b",
+    "verdict": "changes"
+   },
+   {
+    "at": "2026-11-20T03:08:25Z",
+    "at_head": true,
+    "sha": "17bb13cfd364fc6abe513e181f2e0bc57cd56639",
+    "verdict": "changes"
+   }
+  ],
+  "lair": {},
+  "praxis": null
+ },
+ "131611": {
+  "architect": [
+   {
+    "at": "2026-11-19T08:03:23Z",
+    "at_head": false,
+    "sha": "39b37d84ea91f14c173064a746ac3a39ef870e08",
+    "verdict": "approve"
+   },
+   {
+    "at": "2026-11-19T08:03:26Z",
+    "at_head": false,
+    "sha": "189cf47c63091c022a028c4f23f309788a79301a",
+    "verdict": "approve"
+   }
+  ],
+  "lair": {},
+  "praxis": null
+ }
+}

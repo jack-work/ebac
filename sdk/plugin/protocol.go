@@ -234,6 +234,7 @@ func Adopt(core, from *model.Critic) {
 	r.BandHub = f.BandHub
 	r.Scout = f.Scout
 	r.KeelBranches = f.KeelBranches
+	r.GHCache = f.GHCache
 	r.Roster = f.Roster
 	r.Releases = f.Releases
 	r.OrgApprove = f.OrgApprove

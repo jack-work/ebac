@@ -1,11 +1,12 @@
 // ebac-gh is the GitHub plugin of ebac: pull request review (github-pr),
-// author watches (github-author), release watches (github-releases) and the scout (github-scout). It speaks sdk/plugin on stdin/stdout.
+// author watches (github-author), release watches (github-releases) the scout (github-scout) and the GitHub cache (github-cache). It speaks sdk/plugin on stdin/stdout.
 package main
 
 import (
 	"context"
 
 	"github.com/gluck/ebac/plugins/github/internal/author"
+	"github.com/gluck/ebac/plugins/github/internal/ghcache"
 	"github.com/gluck/ebac/plugins/github/internal/github"
 	"github.com/gluck/ebac/plugins/github/internal/releases"
 	"github.com/gluck/ebac/plugins/github/internal/scout"
@@ -17,6 +18,9 @@ func main() {
 	plugin.Serve(func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 		if req.Critic.SourceName() == model.SourceScout {
 			return scout.Plugin{}.Handle(ctx, req)
+		}
+		if req.Critic.SourceName() == model.SourceGHCache {
+			return ghcache.Plugin{}.Handle(ctx, req)
 		}
 		if req.Critic.SourceName() == model.SourceReleases {
 			return releases.Plugin{}.Handle(ctx, req)

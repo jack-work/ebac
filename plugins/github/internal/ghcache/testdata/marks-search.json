@@ -1,0 +1,135 @@
+{
+ "data": {
+  "s0": {
+   "issueCount": 21,
+   "nodes": [
+    {
+     "number": 133026,
+     "updatedAt": "2026-11-20T01:56:56Z",
+     "headRefOid": "44a0f8d844ee3274760da50dc80977e7a5e2a35d",
+     "state": "OPEN"
+    },
+    {
+     "number": 132933,
+     "updatedAt": "2026-11-20T03:22:22Z",
+     "headRefOid": "4f51f8eba9bef322174a033bf3a59bacba49bfcc",
+     "state": "OPEN"
+    },
+    {
+     "number": 132855,
+     "updatedAt": "2026-11-20T03:24:58Z",
+     "headRefOid": "2f91d7f4976fd8cbe29042958b1766c1c1828791",
+     "state": "OPEN"
+    },
+    {
+     "number": 131762,
+     "updatedAt": "2026-11-20T01:49:39Z",
+     "headRefOid": "1b09e9ef237e6d0bea3acf7e5d54833c3a5cfe4f",
+     "state": "OPEN"
+    },
+    {
+     "number": 131611,
+     "updatedAt": "2026-11-19T22:22:45Z",
+     "headRefOid": "1320b408a5334cd4eb43489c72ee98a15d613246",
+     "state": "OPEN"
+    },
+    {
+     "number": 131601,
+     "updatedAt": "2026-11-20T03:14:09Z",
+     "headRefOid": "a65135a370dd091a9ee53bc98b8b1d42c4aa02c9",
+     "state": "OPEN"
+    },
+    {
+     "number": 131335,
+     "updatedAt": "2026-11-20T03:11:24Z",
+     "headRefOid": "2bc94761c195bc9d48e9c4103b0b621a7e4fb9e4",
+     "state": "OPEN"
+    },
+    {
+     "number": 131219,
+     "updatedAt": "2026-11-20T01:49:26Z",
+     "headRefOid": "e1d78d72ff9fc5dfcce6440980ca718f8b6b56e0",
+     "state": "OPEN"
+    },
+    {
+     "number": 131210,
+     "updatedAt": "2026-11-20T03:21:22Z",
+     "headRefOid": "49eba51610de79d0fddaf5a3ea0420cce311aa67",
+     "state": "OPEN"
+    },
+    {
+     "number": 130990,
+     "updatedAt": "2026-11-20T03:10:55Z",
+     "headRefOid": "fe509374c0092f79255f285efa17056803a5290a",
+     "state": "OPEN"
+    },
+    {
+     "number": 130950,
+     "updatedAt": "2026-11-20T03:11:55Z",
+     "headRefOid": "17bb13cfd364fc6abe513e181f2e0bc57cd56639",
+     "state": "OPEN"
+    },
+    {
+     "number": 129798,
+     "updatedAt": "2026-11-19T18:58:03Z",
+     "headRefOid": "08330df889a46af8d57482b82b0b751b8adb4714",
+     "state": "OPEN"
+    },
+    {
+     "number": 129534,
+     "updatedAt": "2026-11-20T00:21:59Z",
+     "headRefOid": "629f51a6fb7ea688a044901830c2d30cd538fd84",
+     "state": "OPEN"
+    },
+    {
+     "number": 127740,
+     "updatedAt": "2026-11-19T09:16:30Z",
+     "headRefOid": "6b7a29f63cd8ea4c46a0fc42d566a90c377a57bf",
+     "state": "OPEN"
+    },
+    {
+     "number": 127667,
+     "updatedAt": "2026-11-18T19:04:47Z",
+     "headRefOid": "fe1e20e51ea449c2b2960d537e7dec96be7f38ce",
+     "state": "OPEN"
+    },
+    {
+     "number": 108419,
+     "updatedAt": "2026-11-17T17:47:01Z",
+     "headRefOid": "00a09096439f7326787e6b24c9a45329914233c7",
+     "state": "OPEN"
+    },
+    {
+     "number": 108418,
+     "updatedAt": "2026-11-18T17:29:31Z",
+     "headRefOid": "32c8863c668dee1c815642edfbbc039bc8c47fd8",
+     "state": "OPEN"
+    },
+    {
+     "number": 108416,
+     "updatedAt": "2026-11-17T17:32:22Z",
+     "headRefOid": "98ccc6cc67c5c81f580daf4f60fba29f35a6558c",
+     "state": "OPEN"
+    },
+    {
+     "number": 108415,
+     "updatedAt": "2026-11-17T17:33:34Z",
+     "headRefOid": "504854071812171adcf174e4088af9954c4c3d1a",
+     "state": "OPEN"
+    },
+    {
+     "number": 108414,
+     "updatedAt": "2026-11-18T00:34:54Z",
+     "headRefOid": "e2a78215a9fac9860ad392929d89044d880b1642",
+     "state": "OPEN"
+    },
+    {
+     "number": 108413,
+     "updatedAt": "2026-11-19T19:38:59Z",
+     "headRefOid": "6cee11d47ef7fab94d7e08ccf9eaa3df035518dd",
+     "state": "OPEN"
+    }
+   ]
+  }
+ }
+}

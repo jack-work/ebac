@@ -206,6 +206,18 @@ func TestAdoptKeepsTheCoresFields(t *testing.T) {
 	}
 }
 
+// The GitHub cache's state (its entities' marks and due times) is the plugin's: adopted whole, or every round would
+// re-read every PR in full. RED if Adopt drops Runtime.GHCache.
+func TestAdoptKeepsTheGHCacheState(t *testing.T) {
+	from := &model.Critic{}
+	from.Runtime.GHCache = json.RawMessage(`{"entities":{"aether-pr-1":{"head":"ab"}}}`)
+	core := &model.Critic{}
+	plugin.Adopt(core, from)
+	if got := string(core.Runtime.GHCache); got != `{"entities":{"aether-pr-1":{"head":"ab"}}}` {
+		t.Fatalf("gh_cache state not adopted: %q", got)
+	}
+}
+
 // A review critic's probe fingerprints and its last full read are the github source's: not adopted, every round
 // read every PR in full (ledger-front 11-17: 14 points a round instead of 1).
 func TestAdoptKeepsTheProbe(t *testing.T) {
