@@ -58,3 +58,18 @@ func TestLoadRegistrations(t *testing.T) {
 		t.Fatal("a torn config loaded")
 	}
 }
+
+// Two declarations differing ONLY in approve (authority-from-flake): the check names critic.approve, both ways.
+// RED if diffKeys skips approve (review grok-4.7 on 01a305a).
+func TestCheckRegistrationsOnlyApproveDiffers(t *testing.T) {
+	for _, c := range []struct{ decl, live string }{
+		{`{"name":"a","approve":true}`, `{"name":"a"}`},
+		{`{"name":"a"}`, `{"name":"a","approve":true}`},
+	} {
+		got := CheckRegistrations(map[string]Registration{"a": {Form: "@a", Critic: json.RawMessage(c.decl)}},
+			map[string]Registration{"a": {Form: "@a", Critic: json.RawMessage(c.live)}})
+		if strings.Join(got, "|") != "a: critic.approve differs" {
+			t.Errorf("%s vs %s: %v", c.decl, c.live, got)
+		}
+	}
+}
