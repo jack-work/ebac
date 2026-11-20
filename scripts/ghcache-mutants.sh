@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # ghcache-mutants.sh: run the ghcache slice 1 mutants (testing standard 4.3). For a build node, never gluk.
 # Each mutant: a file, a literal old line fragment, its replacement, the package to test.
-# Outcomes, one line each: KILLED <test> | NOT-CAUGHT | DIDNT-APPLY | DIDNT-COMPILE. Restores the tree byte for byte
-# (git diff --quiet checked at the end); exits 2 on a tool failure or a dirty tree, 1 when any mutant is not killed.
+# Outcomes, one line each: KILLED <test> | NOT-CAUGHT | DIDNT-APPLY | DIDNT-COMPILE. Restores each file byte for byte
+# from a copy (cmp checked after each mutant; no git needed: it runs in a nix build); exits 2 on a tool failure or an
+# unrestored file, 1 when any mutant is not killed. Runs from the repo root (the directory above this script).
 set -u
-cd "$(git rev-parse --show-toplevel)" || exit 2
-git diff --quiet || { echo "tree dirty: refusing" >&2; exit 2; }
-exec 9>/tmp/ghcache-mutants.lock; flock -n 9 || { echo "another run holds the lock" >&2; exit 2; }
+cd "$(dirname "$0")/.." || exit 2
+LOCK=${TMPDIR:-/tmp}/ghcache-mutants.lock
+exec 9>"$LOCK"; flock -n 9 || { echo "another run holds the lock" >&2; exit 2; }
+BK=$(mktemp -d) || exit 2
 G=plugins/github/internal/ghcache
 MUTANTS=(
   "C1|internal/poll/forms.go|return src == model.SourceKeelBranches \|\| src == model.SourceGHCache|return src == model.SourceKeelBranches|./internal/poll/"
@@ -32,6 +34,7 @@ bad=0
 for m in "${MUTANTS[@]}"; do
   IFS='|' read -r id file old new pkg <<<"$(sed 's/\\|/\x01/g' <<<"$m")"
   old=${old//$'\x01'/|}; new=${new//$'\x01'/|}
+  cp -p "$file" "$BK/orig" || exit 2
   if ! python3 - "$file" "$old" "$new" <<'EOF'
 import sys
 p, o, n = sys.argv[1:]
@@ -43,10 +46,10 @@ EOF
   then echo "$id DIDNT-APPLY"; bad=1; continue; fi
   mod=.; case $pkg in ./plugins/github/*) mod=plugins/github; pkg=./${pkg#./plugins/github/};; esac
   out=$(cd "$mod" && go test -count=1 "$pkg" 2>&1); st=$?
-  git checkout -q -- "$file"
+  cp -p "$BK/orig" "$file" && cmp -s "$BK/orig" "$file" || { echo "$file not restored" >&2; exit 2; }
   if grep -q '\[build failed\]\|cannot use\|undefined:' <<<"$out"; then echo "$id DIDNT-COMPILE"; bad=1
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-git diff --quiet || { echo "tree not restored" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 18 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad
