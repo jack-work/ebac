@@ -62,18 +62,9 @@ const (
 
 // teamsBlindAfter is how long the watcher may fail to read the chat before it
 // tells the seat it is not hearing it. A var so a unit test can shorten it;
-// EBAC_TEAMS_BLIND_AFTER (a Go duration) overrides it for one plugin process,
-// which is how core's live tests shorten it across the exec.
+// blindAfter() is what a round reads (blind_live.go, built only with the
+// ebaclive tag, lets core's live tests shorten it across the exec).
 var teamsBlindAfter = 10 * time.Minute
-
-func blindAfter() time.Duration {
-	if v := os.Getenv("EBAC_TEAMS_BLIND_AFTER"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return teamsBlindAfter
-}
 
 var (
 	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</li>`)

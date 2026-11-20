@@ -209,7 +209,6 @@ func TestTombHelperProcess(t *testing.T) {
 
 // ---------- live: one teams critic through baseline, news and gone ----------
 
-
 const jackID = "8:orgid:bc3cb0f4-1239-4ec7-a528-4913522f79c5"
 
 func from(m tomb.TeamsMsg, id string) tomb.TeamsMsg {
@@ -308,9 +307,7 @@ func TestTeamsDeletionRecordedByDefault(t *testing.T) {
 
 // ---------- live: trigger rules on a real role form ----------
 
-
 // ---------- live: collect mode (W7 item 2) ----------
-
 
 func fromMsg(id, from, fromID, content string) tomb.TeamsMsg {
 	m := tmsg(id, from, content)
@@ -380,5 +377,3 @@ func TestTeamsRoundSetsInboxFetch(t *testing.T) {
 		t.Fatalf("control: a failed read set inbox_fetch: %+v", rep)
 	}
 }
-
-

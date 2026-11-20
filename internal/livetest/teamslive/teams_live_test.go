@@ -1,19 +1,24 @@
 package teamslive
 
 // EBAC_LIVE tests of the teams plugin: they need core's form store, poller and
-// the live daemon, so they live in core and drive the plugin binary by exec
-// (EBAC_PLUGIN_DIR names the directory holding ebac-tomb; unset -> skip).
+// the live daemon, so they live in core and drive the plugin binary by exec.
+// The binary is built once per run from plugins/teams with -tags ebaclive
+// (the tag lets EBAC_TEAMS_BLIND_AFTER shorten its blind threshold; the
+// shipped binary has no such knob).
 // tomb is faked by testdata/fake-tomb (EBAC_TOMB), band-cred by a one-line
 // script (EBAC_BAND_CRED); FAKE_SCENARIO picks the chat a round sees.
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,9 +36,6 @@ func liveOrSkip(t *testing.T) *figaro.Figaro {
 	if os.Getenv("EBAC_LIVE") != "1" {
 		t.Skip("set EBAC_LIVE=1 to run against the live daemon")
 	}
-	if os.Getenv("EBAC_PLUGIN_DIR") == "" {
-		t.Skip("EBAC_PLUGIN_DIR unset: build ebac-tomb (go build -C plugins/teams -o <dir> ./cmd/ebac-tomb) and point it there")
-	}
 	f := figaro.NewFigaro("")
 	t.Cleanup(func() { _ = f.Close() })
 	return f
@@ -42,6 +44,34 @@ func liveOrSkip(t *testing.T) *figaro.Figaro {
 // teamsGoneAfter is the plugin's consecutive-gone threshold, written literally
 // (a changed threshold in plugins/teams must turn this red).
 const teamsGoneAfter = 3
+
+var (
+	buildOnce sync.Once
+	builtDir  string
+	buildErr  error
+)
+
+// pluginDir builds ebac-tomb (with the ebaclive tag) once per test run.
+func pluginDir(t *testing.T) string {
+	t.Helper()
+	buildOnce.Do(func() {
+		_, here, _, _ := runtime.Caller(0)
+		mod := filepath.Join(filepath.Dir(here), "..", "..", "..", "plugins", "teams")
+		builtDir, buildErr = os.MkdirTemp("", "ebac-teamslive")
+		if buildErr != nil {
+			return
+		}
+		cmd := exec.Command("go", "build", "-C", mod, "-tags", "ebaclive", "-o", builtDir, "./cmd/ebac-tomb")
+		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			buildErr = fmt.Errorf("build ebac-tomb: %v\n%s", err, out)
+		}
+	})
+	if buildErr != nil {
+		t.Fatal(buildErr)
+	}
+	return builtDir
+}
 
 func teamsTestChat() *model.ChatRef {
 	return &model.ChatRef{ID: "19:abc@thread.v2", Topic: "MD1 + Cowork"}
@@ -60,6 +90,7 @@ func teamsPlugin(t *testing.T, scenario string) plugin.Caller {
 	t.Setenv("EBAC_BAND_CRED", cred)
 	t.Setenv("EBAC_BAND_CRED_SOCKET", "")
 	t.Setenv("FAKE_SCENARIO", scenario)
+	t.Setenv("EBAC_PLUGIN_DIR", pluginDir(t))
 	t.Setenv(pluginrun.SandboxOffEnv, "off")
 	r, err := pluginrun.NewRunner(nil)
 	if err != nil {
