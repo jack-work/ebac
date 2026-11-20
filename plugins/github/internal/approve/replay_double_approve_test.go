@@ -104,13 +104,13 @@ func TestReplayDoubleApprove(t *testing.T) {
 	asker := "8:orgid:00000000-0000-0000-0000-00000000000a"
 	chat := "19:replay@unq.gbl.spaces"
 	watch := model.ApproveWatch{Chat: chat, ChatAlias: "asker", AskFrom: asker, Grant: "ebac-approve.aether",
-		Principal: "sbx-cheroot-sec", PingTo: "@d407b690", AskName: "Asker A"}
+		Principal: "replay-principal", PingTo: "@0000000a", AskName: "Asker A"}
 	teams := replayTeams{msgs: []tomb.TeamsMsg{{ID: inc.MsgID, MessageType: "RichText/Html",
 		FromURL: "https://x/v1/users/ME/contacts/" + asker, Content: "please approve #4242",
 		Arrival: inc.Arrival}}}
 	start := time.Date(2026, 11, 20, 4, 42, 35, 0, time.UTC)
 	gs := func() ([]grants.Grant, error) {
-		return []grants.Grant{{ID: "g", Principal: "sbx-cheroot-sec", Credential: "ebac-approve.aether", ExpiresAt: start.Add(24 * time.Hour).Unix(), ApprovedBy: "jack"}}, nil
+		return []grants.Grant{{ID: "g", Principal: "replay-principal", Credential: "ebac-approve.aether", ExpiresAt: start.Add(24 * time.Hour).Unix(), ApprovedBy: "jack"}}, nil
 	}
 	req := map[string]any{"repo": Repo, "pr": inc.PR, "teams_msg_id": inc.MsgID, "chat": "asker", "at": "2026-11-20T04:42:00Z", "by": "x"}
 	var ledger reflect.Value // Out.Posts of design B, carried as the core saves it
