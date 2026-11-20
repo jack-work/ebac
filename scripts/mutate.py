@@ -19,6 +19,16 @@ import fcntl, os, subprocess, sys
 def esc(s):
     return s.replace("\\n", "\n").replace("\\t", "\t")
 
+def modroot(pkg):
+    """The Go module directory holding pkg (a nested go.mod, e.g. ./sdk), and pkg relative to it."""
+    parts = pkg.lstrip("./").split("/")
+    for i in range(len(parts), 0, -1):
+        d = "/".join(parts[:i])
+        if os.path.exists(os.path.join(d, "go.mod")):
+            rest = "/".join(parts[i:])
+            return d, "./" + rest if rest else "."
+    return ".", pkg
+
 def main():
     if len(sys.argv) != 2:
         print("usage: mutate.py MUTANTS.tsv", file=sys.stderr); return 2
@@ -54,11 +64,12 @@ def main():
             print(f"{mid}\tlanded-elsewhere\t{path}:{at}, declared {decl}"); worst = max(worst, 1); continue
         try:
             open(path, "w").write(text.replace(old, new, 1))
-            b = subprocess.run(["go", "test", "-count=1", "-run", "^$", pkg], capture_output=True, text=True)
+            cwd, gpkg = modroot(pkg)
+            b = subprocess.run(["go", "test", "-count=1", "-run", "^$", gpkg], capture_output=True, text=True, cwd=cwd)
             if b.returncode:
                 print(f"{mid}\tdidnt-compile\t{path}:{at}: {b.stdout.strip().splitlines()[-1] if b.stdout.strip() else b.stderr.strip()[:200]}")
                 worst = max(worst, 1); continue
-            t = subprocess.run(["go", "test", "-count=1", "-run", rx, pkg], capture_output=True, text=True)
+            t = subprocess.run(["go", "test", "-count=1", "-run", rx, gpkg], capture_output=True, text=True, cwd=cwd)
             fails = [l.split()[2] for l in t.stdout.splitlines() if l.startswith("--- FAIL")]
             if t.returncode and fails:
                 print(f"{mid}\tkilled\t{path}:{at}\tby {','.join(sorted(set(fails)))}")
