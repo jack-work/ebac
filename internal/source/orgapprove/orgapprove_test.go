@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/approve"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 var t0 = time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)

@@ -2,7 +2,7 @@ package keel
 
 import (
 	"encoding/json"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 	"sort"
 )
 

@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/relevance"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/forge/forgetest"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/relevance"
 )
 
 // The author-chiqun filter, as the leader's order encodes the Minister's rule.chiqun_relevance (2026-11-09).

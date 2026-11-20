@@ -11,7 +11,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Live: one ack is ONE form version carrying read.<critic> = {round, at, note}; the flat ack_* keys a seat left are

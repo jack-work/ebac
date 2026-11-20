@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Report mode (GO-20261104-ebac-narrow): with EBAC_SUCCESSION_REPORT_TO set, a seat past the standby threshold is

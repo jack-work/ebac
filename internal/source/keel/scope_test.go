@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func keysOf(kv ...string) map[string]json.RawMessage {

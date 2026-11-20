@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/relevance"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/relevance"
 )
 
 // The relevance filter (cheroot work order 2026-11-09, Boss via the Minister:

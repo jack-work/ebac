@@ -17,10 +17,10 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/sched"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // ---------- daemon (ebacd) ----------
@@ -134,7 +134,7 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 			}
 			return ws, err
 		},
-		Run: func(ctx context.Context, name string, settle func([]budget.Spend)) error {
+		Run: func(ctx context.Context, name string, settle func([]model.Spend)) error {
 			p := base // one Poller per round: OnSpend settles THIS round's grant
 			p.OnSpend = settle
 			return p.Poll(ctx, name)

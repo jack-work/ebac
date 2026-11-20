@@ -14,7 +14,7 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // fill sets every string in v (recursively; one element in each slice, map and pointer) to s.

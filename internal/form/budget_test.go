@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
@@ -17,7 +17,7 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 	pr.Comments["IC1"] = &model.Comment{ID: "IC1", Author: "amy", URL: "u1", Body: strings.Repeat("é", 1500)}
 	pr.Comments["IC2"] = &model.Comment{ID: "IC2", Author: "jack", URL: "u2", Body: "mine"}
 	ev := []model.Event{{Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC1"}, {Kind: model.EvPRCommentNew, PR: pr.Key, Comment: "IC2"}}
-	got := InboxItems(snap, ev, "jack", time.Unix(0, 0))
+	got := model.InboxItems(snap, ev, "jack", time.Unix(0, 0))
 	if _, mine := got["IC2"]; mine || len(got) != 1 {
 		t.Fatalf("inbox %v; want only amy's comment", got)
 	}
@@ -26,10 +26,10 @@ func TestInboxKeepsOthersCutsAndEvictsOldest(t *testing.T) {
 		t.Fatalf("cut: %v, %d bytes", it.Cut, len(it.Body))
 	}
 
-	fresh := map[string]InboxItem{}
+	fresh := map[string]model.InboxItem{}
 	for i := 0; i < 30; i++ {
 		id := string(rune('A'+i%26)) + string(rune('a'+i/26))
-		fresh[id] = InboxItem{PR: "p", By: "amy", At: time.Unix(int64(i), 0).UTC().Format(time.RFC3339), Body: strings.Repeat("x", 1900)}
+		fresh[id] = model.InboxItem{PR: "p", By: "amy", At: time.Unix(int64(i), 0).UTC().Format(time.RFC3339), Body: strings.Repeat("x", 1900)}
 	}
 	box := mergeInbox(nil, fresh)
 	if n := len(model.MustJSON(box)); n > inboxBytes {

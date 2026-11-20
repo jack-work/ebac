@@ -3,9 +3,8 @@ package form
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The inbox is how comment text reaches a seat now that the form keeps no
@@ -21,81 +20,6 @@ const (
 	inboxBytes = 8 * 1024
 )
 
-type InboxItem struct {
-	PR       string `json:"pr,omitempty"`
-	Chat     string `json:"chat,omitempty"`
-	FromID   string `json:"from_id,omitempty"` // teams sender id (8:orgid:...)
-	Time     string `json:"time,omitempty"`    // when the message was written (teams)
-	HasImage bool   `json:"has_image,omitempty"`
-	Fetch    string `json:"fetch,omitempty"` // exact command for the full text
-	Kind     string `json:"kind"`
-	By       string `json:"by"`
-	At       string `json:"at"`
-	URL      string `json:"url,omitempty"`
-	Thread   string `json:"thread,omitempty"`
-	Path     string `json:"path,omitempty"`  // keel: the file the thread is anchored to
-	Line     int    `json:"line,omitempty"`  // keel: its first line
-	Quote    string `json:"quote,omitempty"` // keel: the selected text, cut
-	Body     string `json:"body"`
-	Cut      bool   `json:"cut,omitempty"` // the full text is at URL
-	// EditedAt is when an edit of a Teams message was seen; the item keeps
-	// its first At, Kind and every other field (an item is written once).
-	EditedAt string `json:"edited_at,omitempty"`
-	// Self marks a Teams message by the critic's own account (chat.self):
-	// written once, compact (first line), never updated; the full text is
-	// at the critic's inbox_fetch with this item's message id.
-	Self bool `json:"self,omitempty"`
-}
-
-// inboxItems turns a round's events into inbox entries, keyed by comment or
-// review id. The operator's own posts are skipped: the seat wrote them.
-func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.Time) map[string]InboxItem {
-	out := map[string]InboxItem{}
-	if next == nil {
-		return out
-	}
-	at := now.UTC().Format(time.RFC3339)
-	add := func(id string, it InboxItem, body string) {
-		if id == "" || strings.EqualFold(it.By, me) {
-			return
-		}
-		it.At = at
-		it.Body, it.Cut = model.CutBody(body, model.InboxItemBytes)
-		out[id] = it
-	}
-	for _, e := range events {
-		pr := next.PRs[e.PR]
-		if pr == nil {
-			continue
-		}
-		switch e.Kind {
-		case model.EvThreadNew:
-			if th := pr.Threads[e.ThreadID]; th != nil {
-				for _, c := range th.Comments {
-					add(c.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: c.Author, URL: c.URL, Thread: e.ThreadID}, c.Body)
-				}
-			}
-		case model.EvCommentNew, model.EvCommentEdited:
-			if th := pr.Threads[e.ThreadID]; th != nil {
-				for _, c := range th.Comments {
-					if c.ID == e.Comment {
-						add(c.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: c.Author, URL: c.URL, Thread: e.ThreadID}, c.Body)
-					}
-				}
-			}
-		case model.EvPRCommentNew, model.EvPRCommentEdited:
-			if c := pr.Comments[e.Comment]; c != nil {
-				add(c.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: c.Author, URL: c.URL}, c.Body)
-			}
-		case model.EvReviewSubmitted, model.EvReviewEdited:
-			if r := pr.Reviews[e.ReviewID]; r != nil && strings.TrimSpace(r.Body) != "" {
-				add(r.ID, InboxItem{PR: string(e.PR), Kind: string(e.Kind), By: r.Author, URL: pr.URL}, r.Body)
-			}
-		}
-	}
-	return out
-}
-
 // mergeInbox adds fresh items to the current inbox, cuts every item's text
 // to model.InboxItemBytes (held items too: a form written under a larger cut
 // is cut on its first round), and evicts the oldest until at most inboxItems
@@ -106,8 +30,8 @@ func InboxItems(next *model.Snapshot, events []model.Event, me string, now time.
 // edited_at, and only when the body changed; a teams_deleted removes the
 // item; a re-sent teams_new for an id already held changes nothing. Every
 // unchanged leaf is then left out of the write by the form diff.
-func mergeInbox(cur json.RawMessage, fresh map[string]InboxItem) map[string]InboxItem {
-	box := map[string]InboxItem{}
+func mergeInbox(cur json.RawMessage, fresh map[string]model.InboxItem) map[string]model.InboxItem {
+	box := map[string]model.InboxItem{}
 	_ = json.Unmarshal(cur, &box)
 	for id, it := range box {
 		if it.Kind == "" {

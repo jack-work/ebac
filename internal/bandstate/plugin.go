@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin is ebac-bandhub: one round reads the hub and returns the mirror's
@@ -17,7 +18,7 @@ import (
 type Plugin struct {
 	// Hub, Tip and Now replace the socket client, the forge and the clock in
 	// tests; nil means the real ones.
-	Hub  *Hub
+	Hub  *bandhub.Hub
 	Tip  TipsFunc
 	Desc DescFunc
 	Now  func() time.Time
@@ -33,7 +34,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	cfg := Config{Socket: w.Band.Socket, Utility: w.Band.Utility, Repo: w.Band.Repo, LoadEvery: time.Duration(w.Band.LoadEverySec) * time.Second}
 	if cfg.Socket == "" {
-		cfg.Socket = DefaultSocket
+		cfg.Socket = bandhub.DefaultSocket
 	}
 	now := time.Now
 	if pl.Now != nil {
@@ -44,7 +45,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	h := pl.Hub
 	if h == nil {
 		var err error
-		if h, err = (&Client{Socket: cfg.Socket}).Fetch(ctx); err != nil {
+		if h, err = (&bandhub.Client{Socket: cfg.Socket}).Fetch(ctx); err != nil {
 			w.Runtime.ConsecutiveFailures++
 			w.Runtime.LastError = err.Error()
 			rep.Error = err.Error()

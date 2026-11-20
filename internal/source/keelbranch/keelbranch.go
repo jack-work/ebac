@@ -27,9 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Keel is what a pass needs from keel.

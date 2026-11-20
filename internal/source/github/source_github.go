@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/brief"
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin translates GitHub pull requests: threads, reviews and PR comments
@@ -95,7 +94,7 @@ func retireGone(rep *plugin.Reply, w *model.Critic, gone []model.PRRef, errs map
 		if len(w.PRs) == 0 {
 			action = "polling stopped. Delete this form and the critic (ebac rm --critic " + w.Name + " --purge); a moved PR needs a NEW critic."
 		}
-		rep.Gone = append(rep.Gone, plugin.Gone{Key: "pr:" + form.PrFormKey(k), Resource: "pull request " + string(k),
+		rep.Gone = append(rep.Gone, plugin.Gone{Key: "pr:" + model.PrFormKey(k), Resource: "pull request " + string(k),
 			Since: now, Error: errors.New(errs[k]).Error(), Action: action})
 	}
 	if len(w.PRs) == 0 {
@@ -296,10 +295,10 @@ func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep
 
 	// The source's tiers are a suggestion; the core's trigger rules decide.
 	now := time.Now()
-	rep.Inbox = map[string]form.InboxItem{}
+	rep.Inbox = map[string]model.InboxItem{}
 	rep.Events = plugin.Wire(delta.Events)
 	for i, e := range delta.Events {
-		for k, it := range form.InboxItems(next, []model.Event{e}, me, now) {
+		for k, it := range model.InboxItems(next, []model.Event{e}, me, now) {
 			rep.Inbox[k] = it
 			rep.Events[i].Inbox = append(rep.Events[i].Inbox, k)
 		}

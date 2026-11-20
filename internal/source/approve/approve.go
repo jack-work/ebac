@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/tomb"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/tomb"
 )
 
 const (

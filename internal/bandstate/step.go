@@ -3,6 +3,7 @@ package bandstate
 import (
 	"context"
 	"encoding/json"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"sort"
 	"strings"
 	"time"
@@ -72,7 +73,7 @@ type Result struct {
 // Step turns one hub read and the last state into the next state and the
 // keys to write. It is pure apart from tip, which it calls at most every
 // TipEvery (now is the caller's clock, for that cadence only).
-func Step(ctx context.Context, prev State, h *Hub, cfg Config, now time.Time, tip TipsFunc, desc DescFunc) Result {
+func Step(ctx context.Context, prev State, h *bandhub.Hub, cfg Config, now time.Time, tip TipsFunc, desc DescFunc) Result {
 	next := prev
 	refreshTips(ctx, &next, cfg, Branches(h.Live), now, tip)
 	refreshDesc(ctx, &next, cfg, pairs(h.Live, next.Tips), now, desc)

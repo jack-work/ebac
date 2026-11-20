@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/trigger"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/trigger"
 )
 
 // Classify is the core's decision for every source: the critic's trigger

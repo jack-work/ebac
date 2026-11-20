@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gluck/ebac/internal/budget"
+	"github.com/gluck/ebac/sdk/model"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/sdk/forge"
 )
 
 // GH is this source's whole GHE surface: two reads and one APPROVE, on Repo
@@ -123,11 +123,11 @@ func (s Spend) String() string {
 
 // Budget is the spend in the budget ledger's terms (GraphQL points; the
 // ledger assumes the hour window for the reported remaining).
-func (s Spend) Budget() []budget.Spend {
+func (s Spend) Budget() []model.Spend {
 	if s.Calls == 0 {
 		return nil
 	}
-	return []budget.Spend{{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining}}
+	return []model.Spend{{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining}}
 }
 
 // Spent is the GraphQL spend so far.

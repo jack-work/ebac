@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/forge/forgetest"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func apr(n int, state string, draft bool, head string) forge.AuthoredPR {

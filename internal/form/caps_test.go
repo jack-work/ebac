@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The head is what the board and a studier read of a PR: identity, state and
@@ -28,7 +28,7 @@ func TestPRHeadsCountAndWaitOn(t *testing.T) {
 		Comments: map[string]*model.Comment{"I1": c("I1", "bot", true, ""), "I2": c("I2", "amy", false, "")},
 	}
 	h := prsHeads(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}})
-	got := h[PrFormKey(pr.Key)]
+	got := h[model.PrFormKey(pr.Key)]
 	if got == nil {
 		t.Fatalf("heads keyed %v", h)
 	}
@@ -47,22 +47,22 @@ func TestPRHeadsCountAndWaitOn(t *testing.T) {
 	}
 	// A closed PR waits on nobody.
 	pr.State = "MERGED"
-	if h := prsHeads(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}}); h[PrFormKey(pr.Key)].WaitingOn != nil {
-		t.Fatalf("a merged PR waits on %v", h[PrFormKey(pr.Key)].WaitingOn)
+	if h := prsHeads(&model.Snapshot{PRs: map[model.PRKey]*model.PRState{pr.Key: pr}}); h[model.PrFormKey(pr.Key)].WaitingOn != nil {
+		t.Fatalf("a merged PR waits on %v", h[model.PrFormKey(pr.Key)].WaitingOn)
 	}
 }
 
-func longItems(n int, at func(i int) string) map[string]InboxItem {
-	out := map[string]InboxItem{}
+func longItems(n int, at func(i int) string) map[string]model.InboxItem {
+	out := map[string]model.InboxItem{}
 	for i := 0; i < n; i++ {
 		body := strings.Repeat("é", 1000) // 2000 B, the old cut
 		switch i % 3 {
 		case 0:
-			out[fmt.Sprintf("IC%02d", i)] = InboxItem{PR: "a/b#1", Kind: "pr_comment_new", By: "amy", At: at(i), URL: fmt.Sprintf("https://x/c/%d", i), Body: body}
+			out[fmt.Sprintf("IC%02d", i)] = model.InboxItem{PR: "a/b#1", Kind: "pr_comment_new", By: "amy", At: at(i), URL: fmt.Sprintf("https://x/c/%d", i), Body: body}
 		case 1:
-			out[fmt.Sprintf("keel-%02d", i)] = InboxItem{Kind: "keel_new", By: "bob", At: at(i), Fetch: "keel r, thread t: GET ...", Body: body}
+			out[fmt.Sprintf("keel-%02d", i)] = model.InboxItem{Kind: "keel_new", By: "bob", At: at(i), Fetch: "keel r, thread t: GET ...", Body: body}
 		default:
-			out[fmt.Sprintf("teams-%02d", i)] = InboxItem{Kind: "teams_new", By: "carl", At: at(i), Body: body}
+			out[fmt.Sprintf("teams-%02d", i)] = model.InboxItem{Kind: "teams_new", By: "carl", At: at(i), Body: body}
 		}
 	}
 	return out
@@ -99,9 +99,9 @@ func TestInboxCapsHold(t *testing.T) {
 		}
 	}
 	// The item cap binds when items are small (Teams one-liners).
-	small := map[string]InboxItem{}
+	small := map[string]model.InboxItem{}
 	for i := 0; i < 40; i++ {
-		small[fmt.Sprintf("teams-%02d", i)] = InboxItem{Kind: "teams_new", By: "carl", At: stamp(i), Body: "ok"}
+		small[fmt.Sprintf("teams-%02d", i)] = model.InboxItem{Kind: "teams_new", By: "carl", At: stamp(i), Body: "ok"}
 	}
 	if got := mergeInbox(nil, small); len(got) != inboxItems {
 		t.Fatalf("small items: %d kept, want %d", len(got), inboxItems)
@@ -112,7 +112,7 @@ func TestInboxCapsHold(t *testing.T) {
 // first round with nothing fresh, the change touches only body and cut (the
 // item guard passes it whole), and the next round writes nothing.
 func TestInboxOldFormMigratesOnceAndSettles(t *testing.T) {
-	old := map[string]InboxItem{}
+	old := map[string]model.InboxItem{}
 	for id, it := range longItems(12, stamp) {
 		it.Body, it.Cut = model.CutBody(it.Body, 2000)
 		old[id] = it
@@ -121,7 +121,7 @@ func TestInboxOldFormMigratesOnceAndSettles(t *testing.T) {
 	if len(cur) <= inboxBytes {
 		t.Fatalf("setup: the old inbox is %d B, not over the new cap", len(cur))
 	}
-	first := mergeInbox(cur, map[string]InboxItem{})
+	first := mergeInbox(cur, map[string]model.InboxItem{})
 	next := model.MustJSON(first)
 	// Cut, not evicted: all twelve fit once each is cut.
 	if len(next) > inboxBytes || len(first) != len(old) {
@@ -142,7 +142,7 @@ func TestInboxOldFormMigratesOnceAndSettles(t *testing.T) {
 			t.Fatalf("%s: the cut touched more than body and cut: %+v -> %+v", id, was, it)
 		}
 	}
-	if again := model.MustJSON(mergeInbox(next, map[string]InboxItem{})); string(again) != string(next) {
+	if again := model.MustJSON(mergeInbox(next, map[string]model.InboxItem{})); string(again) != string(next) {
 		t.Fatal("a second round re-cut an already cut inbox")
 	}
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // cmdVerdict records the caller's verdict on a keel critic's review: the

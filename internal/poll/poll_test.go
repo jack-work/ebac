@@ -3,7 +3,7 @@ package poll
 import (
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func TestBackoffClimbsAndCaps(t *testing.T) {

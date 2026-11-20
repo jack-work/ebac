@@ -12,9 +12,8 @@ import (
 
 	"github.com/jack-work/figaro/api/handle"
 
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Source translates one keel repo's comment threads into a critic's inbox and
@@ -176,8 +175,8 @@ func knownPrincipal(author string, ref *model.KeelRef) bool {
 // A new or edited comment by a waited-on author in an open thread wakes; any
 // other comment and a resolve or reopen are recorded; the seat's own comments
 // are never announced. Seen is rebuilt from the fetch, so it never outgrows it.
-func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Thread) (events []model.Event, items map[string]form.InboxItem, index map[string]IndexEntry) {
-	items, index = map[string]form.InboxItem{}, map[string]IndexEntry{}
+func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Thread) (events []model.Event, items map[string]model.InboxItem, index map[string]IndexEntry) {
+	items, index = map[string]model.InboxItem{}, map[string]IndexEntry{}
 	first := st.Seen == nil
 	seen, resolved := map[string]string{}, map[string]bool{}
 	paths := make([]string, 0, len(byPath))
@@ -228,7 +227,7 @@ func keelDiff(st *model.KeelState, ref *model.KeelRef, byPath map[string][]Threa
 				quote, _ := model.CutBody(t.Quote, keelQuoteBytes)
 				events = append(events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: t.ID, Comment: c.ID, Author: c.Author,
 					Path: p, Detail: model.FirstLine(body), Text: c.Body})
-				items["keel-"+c.ID] = form.InboxItem{Kind: string(kind), By: c.Author, Time: c.Created.UTC().Format(time.RFC3339),
+				items["keel-"+c.ID] = model.InboxItem{Kind: string(kind), By: c.Author, Time: c.Created.UTC().Format(time.RFC3339),
 					Thread: t.ID, Path: p, Line: line, Quote: quote, Body: body, Cut: cut,
 					Fetch: fmt.Sprintf("keel %s, thread %s: GET %s | jq '.paths[%q][] | select(.id==%q)'", ref.Repo, t.ID, ThreadsPath(ref.Repo), p, t.ID)}
 			}
@@ -266,7 +265,7 @@ func buildIndex(ref *model.KeelRef, byPath map[string][]Thread) map[string]Index
 
 type keelRound struct {
 	events []model.Event
-	items  map[string]form.InboxItem
+	items  map[string]model.InboxItem
 	index  map[string]IndexEntry
 	// pos is each item's comment's place in its thread (0: the head), for
 	// the inbox scope.
@@ -357,7 +356,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 			}
 		}
 	}
-	r := keelRound{items: map[string]form.InboxItem{}, index: buildIndex(ref, byPath)}
+	r := keelRound{items: map[string]model.InboxItem{}, index: buildIndex(ref, byPath)}
 	repo := model.PRKey(ref.Repo)
 	done := map[string]bool{}
 	for _, e := range evs {
@@ -390,7 +389,7 @@ func feedDiff(after int64, ref *model.KeelRef, evs []FeedEvent, byPath map[strin
 			quote, _ := model.CutBody(x.t.Quote, keelQuoteBytes)
 			r.events = append(r.events, model.Event{Kind: kind, Tier: tier, PR: repo, ThreadID: x.t.ID, Comment: x.c.ID, Author: e.Signed,
 				Path: x.path, Detail: model.FirstLine(body), Text: x.c.Body})
-			r.items["keel-"+x.c.ID] = form.InboxItem{Kind: string(kind), By: e.Signed, Time: x.c.Created.UTC().Format(time.RFC3339),
+			r.items["keel-"+x.c.ID] = model.InboxItem{Kind: string(kind), By: e.Signed, Time: x.c.Created.UTC().Format(time.RFC3339),
 				Thread: x.t.ID, Path: x.path, Line: line, Quote: quote, Body: body, Cut: cut,
 				Fetch: fmt.Sprintf("keel %s, thread %s: GET %s | jq '.paths[%q][] | select(.id==%q)'", ref.Repo, x.t.ID, ThreadsPath(ref.Repo), x.path, x.t.ID)}
 		}

@@ -1,7 +1,8 @@
-package plugin
+package pluginrun
 
 import (
 	"context"
+	"github.com/gluck/ebac/sdk/plugin"
 	"net"
 	"os"
 	"os/exec"
@@ -10,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // probe is the fake plugin's look at the sandbox from inside: it reaches for
@@ -165,7 +166,7 @@ func TestSandboxShowsEachPluginOnlyItsGrants(t *testing.T) {
 	critic := &model.Critic{Name: "c"}
 
 	// Control 2: unsandboxed, the probe reaches every grant.
-	open, err := r.Call(context.Background(), "fake", Request{Op: OpRound, Critic: *critic})
+	open, err := r.Call(context.Background(), "fake", plugin.Request{Op: plugin.OpRound, Critic: *critic})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestSandboxShowsEachPluginOnlyItsGrants(t *testing.T) {
 			if err := os.Symlink(filepath.Join(r.Dir, "ebac-fake"), filepath.Join(r.Dir, "ebac-"+plug)); err != nil && !os.IsExist(err) {
 				t.Fatal(err)
 			}
-			got, err := rr.Call(context.Background(), plug, Request{Op: OpRound, Critic: *critic})
+			got, err := rr.Call(context.Background(), plug, plugin.Request{Op: plugin.OpRound, Critic: *critic})
 			if err != nil {
 				t.Fatalf("sandboxed plugin failed outright: %v", err)
 			}

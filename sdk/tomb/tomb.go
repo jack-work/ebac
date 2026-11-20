@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/sdk/forge"
 )
 
 type TeamsMsg struct {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func TestGlobMatchesSegmentsAndDoubleStarAnywhere(t *testing.T) {

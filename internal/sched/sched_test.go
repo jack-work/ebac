@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/budget"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 const ghe = "github:microsoft.ghe.com"
@@ -43,25 +43,25 @@ func critic(name string, every time.Duration) *model.Critic {
 type fake struct {
 	mu      sync.Mutex
 	started []string
-	release map[string]chan []budget.Spend
+	release map[string]chan []model.Spend
 	running atomic.Int32
 	maxRun  atomic.Int32
 }
 
-func newFake() *fake { return &fake{release: map[string]chan []budget.Spend{}} }
+func newFake() *fake { return &fake{release: map[string]chan []model.Spend{}} }
 
-func (f *fake) ch(name string) chan []budget.Spend {
+func (f *fake) ch(name string) chan []model.Spend {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c, ok := f.release[name]
 	if !ok {
-		c = make(chan []budget.Spend, 1)
+		c = make(chan []model.Spend, 1)
 		f.release[name] = c
 	}
 	return c
 }
 
-func (f *fake) run(ctx context.Context, name string, settle func([]budget.Spend)) error {
+func (f *fake) run(ctx context.Context, name string, settle func([]model.Spend)) error {
 	f.mu.Lock()
 	f.started = append(f.started, name)
 	f.mu.Unlock()
@@ -281,7 +281,7 @@ func TestAHungRoundReleasesItsSlotAndIsNotRunAgain(t *testing.T) {
 		cmu.Unlock()
 		return x, cancel
 	}
-	s.Run = func(ctx context.Context, name string, settle func([]budget.Spend)) error {
+	s.Run = func(ctx context.Context, name string, settle func([]model.Spend)) error {
 		if name == "hung" {
 			f.mu.Lock()
 			f.started = append(f.started, name)
@@ -323,7 +323,7 @@ func TestARoundSettlesItsSpendAndTheEstimateFollows(t *testing.T) {
 	s.Jitter = func(time.Duration) time.Duration { return 0 }
 	s.Tick(context.Background())
 	waitFor(t, "a started", func() bool { return f.count("a") == 1 })
-	f.ch("a") <- []budget.Spend{{Limit: "graphql", N: 5, Remaining: 4000}}
+	f.ch("a") <- []model.Spend{{Limit: "graphql", N: 5, Remaining: 4000}}
 	s.Wait()
 	if got := l.Levels()[ghe]["graphql"]; got.Tokens != 3 || got.Wake != 2 || got.Remaining != 4000 {
 		t.Fatalf("bucket %+v, want shared 3 wake 2 remaining 4000", got)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 	"github.com/jack-work/figaro/api/form"
 )
 

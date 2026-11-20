@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // item is one upstream PR or issue the fake GitHub serves.

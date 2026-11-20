@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	ebacbrief "github.com/gluck/ebac/internal/brief"
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/github"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func TestAsReviewerWakesOnPushAndOwnDismissal(t *testing.T) {

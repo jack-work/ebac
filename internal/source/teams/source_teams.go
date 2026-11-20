@@ -12,11 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/tomb"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/tomb"
 )
 
 // teamsChat translates one Teams chat, read through tomb, into a critic's
@@ -81,8 +80,8 @@ func teamsText(content string) string {
 
 // teamsDiff compares a fetch with what was seen. The first round only
 // records: a watcher that starts by announcing fifty old messages is noise.
-func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]form.InboxItem) {
-	items = map[string]form.InboxItem{}
+func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) (events []model.Event, items map[string]model.InboxItem) {
+	items = map[string]model.InboxItem{}
 	first := st.Seen == nil
 	if first {
 		st.Seen = map[string]string{}
@@ -144,7 +143,7 @@ func teamsDiff(st *model.TeamsState, msgs []tomb.TeamsMsg, chat *model.ChatRef) 
 			AuthorID: m.SenderID(), Detail: model.FirstLine(body), Text: text})
 		// One item per message, written once. chat and the fetch command
 		// live once in the role form's inbox_fetch, not on every item.
-		it := form.InboxItem{Kind: kind, By: who, Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(), Self: self}
+		it := model.InboxItem{Kind: kind, By: who, Time: m.ComposeTime, Body: body, Cut: cut, HasImage: m.HasImage(), Self: self}
 		if self {
 			// Fewest leaves: self says who, and the id is the compose time (ms).
 			it.By, it.Time = "", ""

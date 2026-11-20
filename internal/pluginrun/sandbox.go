@@ -1,4 +1,4 @@
-package plugin
+package pluginrun
 
 import (
 	"fmt"
@@ -7,12 +7,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // BwrapPath is bubblewrap's absolute path, fixed at build time:
 //
-//	-ldflags "-X github.com/gluck/ebac/internal/plugin.BwrapPath=<store>/bin/bwrap"
+//	-ldflags "-X github.com/gluck/ebac/internal/pluginrun.BwrapPath=<store>/bin/bwrap"
 //
 // It is never looked up on PATH: whoever controls PATH would choose the
 // sandbox.
@@ -75,7 +75,7 @@ func Needs(plugin string, c *model.Critic) []Grant {
 		// The hub, and GHE for the superseded check's branch tips.
 		return []Grant{GrantBandHub, GrantBandCred, GrantCredCache}
 	case "roster":
-		// Its whole input arrives on stdin (Request.Arias): no grant at all.
+		// Its whole input arrives on stdin (plugin.Request.Arias): no grant at all.
 		return nil
 	}
 	return nil
@@ -183,7 +183,7 @@ func NewSandbox(grants Grants) (*Sandbox, error) {
 		return nil, nil
 	}
 	if BwrapPath == "" {
-		return nil, fmt.Errorf("this ebac was built without bubblewrap (plugin.BwrapPath): refusing to run plugins unsandboxed; set %s=off to allow it", SandboxOffEnv)
+		return nil, fmt.Errorf("this ebac was built without bubblewrap (pluginrun.BwrapPath): refusing to run plugins unsandboxed; set %s=off to allow it", SandboxOffEnv)
 	}
 	if len(grants[GrantFigaro]) == 0 {
 		return nil, fmt.Errorf("sandbox: no figaro socket to hide")

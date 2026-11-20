@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge/forgetest"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/forge/forgetest"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func cmt(id, author, body string, bot bool) *model.Comment {

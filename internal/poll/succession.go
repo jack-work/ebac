@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/brief"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Succession lives HERE, in the binary, not in ~/.config/figaro/outfits.

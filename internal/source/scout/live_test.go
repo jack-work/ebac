@@ -12,9 +12,9 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Live, through the core on real (scratch) forms: the first pass writes one pr:<n> / issue:<n> entry per relevant

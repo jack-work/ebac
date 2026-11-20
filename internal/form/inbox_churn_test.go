@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 	fform "github.com/jack-work/figaro/api/form"
 )
 
@@ -13,13 +13,13 @@ import (
 // Each test pairs the refusal with a positive control, so a no-op merge
 // cannot pass for an immutable one.
 
-func boxOf(t *testing.T, items map[string]InboxItem) json.RawMessage {
+func boxOf(t *testing.T, items map[string]model.InboxItem) json.RawMessage {
 	t.Helper()
 	return model.MustJSON(items)
 }
 
-func held() map[string]InboxItem {
-	return map[string]InboxItem{
+func held() map[string]model.InboxItem {
+	return map[string]model.InboxItem{
 		"teams-1": {Kind: "teams_new", By: "Akshay", At: "2026-11-13T01:00:00Z", Time: "t1", Body: "first", FromID: "8:orgid:a"},
 	}
 }
@@ -27,7 +27,7 @@ func held() map[string]InboxItem {
 // (a) an old entry's at is never re-touched, by an edit or by a resend.
 func TestInboxOldEntryAtNeverRetouched(t *testing.T) {
 	cur := boxOf(t, held())
-	got := mergeInbox(cur, map[string]InboxItem{
+	got := mergeInbox(cur, map[string]model.InboxItem{
 		"teams-1": {Kind: "teams_edited", By: "Akshay", At: "2026-11-13T02:00:00Z", Body: "first, edited"},
 	})
 	if got["teams-1"].At != "2026-11-13T01:00:00Z" || got["teams-1"].Kind != "teams_new" || got["teams-1"].FromID != "8:orgid:a" {
@@ -37,7 +37,7 @@ func TestInboxOldEntryAtNeverRetouched(t *testing.T) {
 		t.Fatalf("control: the edit itself did not land: %+v", got["teams-1"])
 	}
 	// control: a new item does get its own at.
-	got = mergeInbox(cur, map[string]InboxItem{"teams-2": {Kind: "teams_new", By: "B", At: "2026-11-13T02:00:00Z", Body: "x"}})
+	got = mergeInbox(cur, map[string]model.InboxItem{"teams-2": {Kind: "teams_new", By: "B", At: "2026-11-13T02:00:00Z", Body: "x"}})
 	if got["teams-2"].At != "2026-11-13T02:00:00Z" || got["teams-1"].At != "2026-11-13T01:00:00Z" {
 		t.Fatalf("new item: %+v", got)
 	}
@@ -47,11 +47,11 @@ func TestInboxOldEntryAtNeverRetouched(t *testing.T) {
 // delete (or a delete of an item never held) writes nothing.
 func TestInboxTeamsDeletedOnce(t *testing.T) {
 	cur := boxOf(t, held())
-	got := mergeInbox(cur, map[string]InboxItem{"teams-1": {Kind: "teams_deleted", At: "later"}})
+	got := mergeInbox(cur, map[string]model.InboxItem{"teams-1": {Kind: "teams_deleted", At: "later"}})
 	if _, ok := got["teams-1"]; ok {
 		t.Fatalf("control: delete did not remove the item: %+v", got)
 	}
-	again := mergeInbox(boxOf(t, got), map[string]InboxItem{"teams-1": {Kind: "teams_deleted", At: "later2"}, "teams-9": {Kind: "teams_deleted"}})
+	again := mergeInbox(boxOf(t, got), map[string]model.InboxItem{"teams-1": {Kind: "teams_deleted", At: "later2"}, "teams-9": {Kind: "teams_deleted"}})
 	if string(model.MustJSON(again)) != string(model.MustJSON(got)) {
 		t.Fatalf("a second delete wrote: %s -> %s", model.MustJSON(got), model.MustJSON(again))
 	}
@@ -64,18 +64,18 @@ func TestInboxTeamsDeletedOnce(t *testing.T) {
 // teams_new for a held id, or an edit with the same body.
 func TestInboxUnchangedRepostWritesNothing(t *testing.T) {
 	cur := boxOf(t, held())
-	for name, fresh := range map[string]InboxItem{
+	for name, fresh := range map[string]model.InboxItem{
 		"resend": {Kind: "teams_new", By: "Akshay", At: "2026-11-13T03:00:00Z", Body: "first"},
 		"edit":   {Kind: "teams_edited", By: "Akshay", At: "2026-11-13T03:00:00Z", Body: "first"},
 		"other":  {Kind: "teams_new", By: "Akshay", At: "2026-11-13T03:00:00Z", Body: "", Time: "t9"},
 	} {
-		got := mergeInbox(cur, map[string]InboxItem{"teams-1": fresh})
+		got := mergeInbox(cur, map[string]model.InboxItem{"teams-1": fresh})
 		if string(model.MustJSON(got)) != string(cur) {
 			t.Fatalf("%s rewrote a held item: %s", name, model.MustJSON(got))
 		}
 	}
 	// control: an edit that changes the body does write.
-	got := mergeInbox(cur, map[string]InboxItem{"teams-1": {Kind: "teams_edited", At: "x", Body: "changed"}})
+	got := mergeInbox(cur, map[string]model.InboxItem{"teams-1": {Kind: "teams_edited", At: "x", Body: "changed"}})
 	if string(model.MustJSON(got)) == string(cur) {
 		t.Fatal("control: a real edit wrote nothing")
 	}
@@ -89,7 +89,7 @@ func TestInboxUnchangedWriteSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	same := mergeInbox(cur, map[string]InboxItem{"teams-1": {Kind: "teams_new", At: "later", Body: "first"}})
+	same := mergeInbox(cur, map[string]model.InboxItem{"teams-1": {Kind: "teams_new", At: "later", Body: "first"}})
 	next, err := nextBoard(snap, map[string]json.RawMessage{"inbox": model.MustJSON(same)}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestInboxUnchangedWriteSkipped(t *testing.T) {
 		t.Fatalf("an unchanged inbox wrote a patch: %+v", p)
 	}
 	// control: one new item is a patch of that item's leaves only.
-	grown := mergeInbox(cur, map[string]InboxItem{"teams-2": {Kind: "teams_new", At: "later", Body: "two"}})
+	grown := mergeInbox(cur, map[string]model.InboxItem{"teams-2": {Kind: "teams_new", At: "later", Body: "two"}})
 	next, _ = nextBoard(snap, map[string]json.RawMessage{"inbox": model.MustJSON(grown)}, nil)
 	p := next.Diff(snap)
 	if p.IsIdentity() {

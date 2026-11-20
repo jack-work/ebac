@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The brief is what actually costs money: it is a turn. The round's change is

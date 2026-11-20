@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/bandstate"
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin serves github-scout. GH, Hub and Now replace the forge, the band hub
@@ -40,7 +40,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	hub := pl.Hub
 	if hub == nil {
-		hub = hubClient{&bandstate.Client{Socket: bandstate.DefaultSocket}}
+		hub = hubClient{&bandhub.Client{Socket: bandhub.DefaultSocket}}
 	}
 	now := time.Now
 	if pl.Now != nil {
@@ -80,7 +80,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 }
 
 // hubClient reads the band hub as a metadata reader.
-type hubClient struct{ c *bandstate.Client }
+type hubClient struct{ c *bandhub.Client }
 
 func (h hubClient) Jobs(ctx context.Context, since time.Time) ([]HubJob, error) {
 	var jobs []HubJob

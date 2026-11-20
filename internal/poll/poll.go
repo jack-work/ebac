@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gluck/ebac/internal/budget"
+	"github.com/gluck/ebac/internal/pluginrun"
 	"io"
 	"sort"
 	"strings"
@@ -13,8 +13,8 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // backoff mirrors prangl's proven policy: five attempts, 30s doubling to a
@@ -29,7 +29,7 @@ const (
 type Poller struct {
 	Store *form.Store
 	Fig   *figaro.Figaro
-	// Plugins runs the source plugins: a plugin.Runner in production, a
+	// Plugins runs the source plugins: a pluginrun.Runner in production, a
 	// plugin.InProc in tests.
 	Plugins plugin.Caller
 	Out     io.Writer
@@ -51,7 +51,7 @@ type Poller struct {
 	PauseFile  string
 	// OnSpend, when set, receives what each plugin call spent (ebacd settles
 	// the budget ledger with it; a poll by hand leaves it nil).
-	OnSpend func(spent []budget.Spend)
+	OnSpend func(spent []model.Spend)
 	// Roles replaces the role-name lookup for trigger role_in_path in tests
 	// (nil: RoleNames, read from the roster critic's form).
 	Roles func(ctx context.Context) (map[string]string, error)
@@ -62,7 +62,7 @@ type Poller struct {
 }
 
 func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) (*plugin.Reply, error) {
-	name, err := plugin.For(w.SourceName())
+	name, err := pluginrun.For(w.SourceName())
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func SourceKeysOnly(source string, rep *plugin.Reply) error {
 	if source == "" {
 		source = "github-pr"
 	}
-	name, _ := plugin.For(source)
+	name, _ := pluginrun.For(source)
 	allowed := SourceKeys[source]
 	check := func(verb, k string) error {
 		for _, a := range allowed {
@@ -405,10 +405,10 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 
 // classify runs the trigger rules over the round's events and drops the
 // inbox items of every dropped event (unless a kept event shares them).
-func (p *Poller) classify(ctx context.Context, w *model.Critic, rep *plugin.Reply) ([]model.Event, map[string]form.InboxItem) {
+func (p *Poller) classify(ctx context.Context, w *model.Critic, rep *plugin.Reply) ([]model.Event, map[string]model.InboxItem) {
 	inbox := rep.Inbox
 	if inbox == nil {
-		inbox = map[string]form.InboxItem{}
+		inbox = map[string]model.InboxItem{}
 	}
 	evs := plugin.Unwire(rep.Events)
 	keysOf := map[string][]string{}

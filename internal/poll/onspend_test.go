@@ -6,9 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/budget"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 type spendCaller struct{ rep *plugin.Reply }
@@ -25,9 +24,9 @@ func (c spendCaller) Call(context.Context, string, plugin.Request) (*plugin.Repl
 // calls nothing; a hand poll (OnSpend nil) is unaffected. RED if call() stops forwarding Spend.
 func TestCallForwardsTheRoundsSpend(t *testing.T) {
 	w := &model.Critic{Name: "author-jack", Source: "github-author"}
-	sp := []budget.Spend{{Limit: "graphql", N: 3, Remaining: 4100}, {Limit: "rest", N: 2, Remaining: -1}}
-	var got [][]budget.Spend
-	p := &Poller{Plugins: spendCaller{&plugin.Reply{Spend: sp}}, OnSpend: func(s []budget.Spend) { got = append(got, s) }}
+	sp := []model.Spend{{Limit: "graphql", N: 3, Remaining: 4100}, {Limit: "rest", N: 2, Remaining: -1}}
+	var got [][]model.Spend
+	p := &Poller{Plugins: spendCaller{&plugin.Reply{Spend: sp}}, OnSpend: func(s []model.Spend) { got = append(got, s) }}
 	if _, err := p.call(context.Background(), w, plugin.Request{Op: plugin.OpRound}); err != nil {
 		t.Fatal(err)
 	}

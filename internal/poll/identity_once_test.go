@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // A missing stamp key (normal before the first ebac review) is reported once per process, not every round; any

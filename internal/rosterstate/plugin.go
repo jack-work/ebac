@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin is ebac-roster: one round derives the roster from the aria list the

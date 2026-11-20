@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // The 2026-11-10 wipe: after a TLS outage the blind-recovery round of 4 Teams critics wrote critic: {} and they

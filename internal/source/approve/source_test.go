@@ -91,7 +91,7 @@ func TestNoOtherGHEWriteIsReachable(t *testing.T) {
 		imps = append(imps, p)
 	}
 	sort.Strings(imps)
-	if strings.Join(imps, ",") != "context,github.com/gluck/ebac/internal/model,github.com/gluck/ebac/internal/plugin,github.com/gluck/ebac/internal/source/approve,github.com/gluck/ebac/internal/source/orgapprove" {
+	if strings.Join(imps, ",") != "context,github.com/gluck/ebac/internal/source/approve,github.com/gluck/ebac/internal/source/orgapprove,github.com/gluck/ebac/sdk/model,github.com/gluck/ebac/sdk/plugin" {
 		t.Fatalf("ebac-approve imports %v", imps)
 	}
 	// org-approve, the binary's other source, reaches GHE only through this
@@ -110,7 +110,7 @@ func TestNoOtherGHEWriteIsReachable(t *testing.T) {
 		}
 		for _, im := range af.Imports {
 			switch p, _ := strconv.Unquote(im.Path.Value); p {
-			case "github.com/gluck/ebac/internal/forge", "os/exec", "net/http":
+			case "github.com/gluck/ebac/sdk/forge", "os/exec", "net/http":
 				t.Errorf("%s imports %s: org-approve reaches GHE only through approve.GH", f, p)
 			}
 		}

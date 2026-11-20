@@ -11,8 +11,8 @@ import (
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/sched"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The roster is a special role: one form holding a view of every active PR

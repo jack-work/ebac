@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 const fakeTok = "gho_FAKE0123456789abcdef"

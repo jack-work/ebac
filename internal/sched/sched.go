@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/budget"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Defaults. Each is pinned by a test that states the number.
@@ -31,7 +31,7 @@ const (
 
 // Runner runs one round of the named critic. settle is called with what the
 // round spent (it may be called more than once: once per plugin call).
-type Runner func(ctx context.Context, name string, settle func([]budget.Spend)) error
+type Runner func(ctx context.Context, name string, settle func([]model.Spend)) error
 
 // Entry is one critic's place in the schedule, as the heartbeat shows it.
 type Entry struct {
@@ -290,10 +290,10 @@ func (s *Scheduler) round(ctx context.Context, name string, g budget.Grant) {
 	rctx, cancel := dl(ctx)
 	defer cancel()
 	var spentMu sync.Mutex
-	var spent []budget.Spend
+	var spent []model.Spend
 	done := make(chan error, 1)
 	go func() {
-		done <- s.Run(rctx, name, func(sp []budget.Spend) {
+		done <- s.Run(rctx, name, func(sp []model.Spend) {
 			spentMu.Lock()
 			spent = append(spent, sp...)
 			spentMu.Unlock()
@@ -322,9 +322,9 @@ func (s *Scheduler) round(ctx context.Context, name string, g budget.Grant) {
 	s.finish(name, g, spent, &spentMu, err, true)
 }
 
-func (s *Scheduler) finish(name string, g budget.Grant, spent []budget.Spend, mu *sync.Mutex, err error, releaseSlot bool) {
+func (s *Scheduler) finish(name string, g budget.Grant, spent []model.Spend, mu *sync.Mutex, err error, releaseSlot bool) {
 	mu.Lock()
-	sp := append([]budget.Spend(nil), spent...)
+	sp := append([]model.Spend(nil), spent...)
 	mu.Unlock()
 	s.Ledger.Settle(g, sp)
 	s.mu.Lock()

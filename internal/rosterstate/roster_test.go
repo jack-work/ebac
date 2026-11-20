@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 var now = time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)

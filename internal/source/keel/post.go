@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // DefaultWriteSocket is keel's write door for ebac: POST a thread or a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gluck/ebac/internal/livetest"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"os"
 	"strings"
 	"testing"
@@ -11,13 +12,13 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func mirror() model.Critic {
-	return model.Critic{Name: "band-state", FormID: "@x", Source: model.SourceBandHub, Band: &model.BandRef{Socket: DefaultSocket, Utility: []string{"leob", "ross"}}}
+	return model.Critic{Name: "band-state", FormID: "@x", Source: model.SourceBandHub, Band: &model.BandRef{Socket: bandhub.DefaultSocket, Utility: []string{"leob", "ross"}}}
 }
 
 // Through the wire (InProc encodes like an exec): the first round sets the keys and stores the state; the state comes

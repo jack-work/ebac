@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge/fakegql"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/forge/fakegql"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // fakeGH points GH.run at THIS test binary, re-executed as a child process

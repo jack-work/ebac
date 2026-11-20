@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/tomb"
-	"github.com/gluck/ebac/internal/trigger"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/tomb"
+	"github.com/gluck/ebac/sdk/trigger"
 )
 
 func tmsg(id, from, content string) tomb.TeamsMsg {

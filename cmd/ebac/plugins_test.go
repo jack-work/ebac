@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/gluck/ebac/internal/pluginrun"
 	"net"
 	"net/http"
 	"os"
@@ -10,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // The shipped plugin binaries answer the protocol through a real exec: each
@@ -29,8 +30,8 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		t.Fatalf("build plugins: %v\n%s", err, out)
 	}
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
-	t.Setenv(plugin.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/plugin tests that)
-	r, err := plugin.NewRunner(nil)
+	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)
+	r, err := pluginrun.NewRunner(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		{model.Critic{Name: "k", FormID: "@k", Source: "keel-threads", Keel: &model.KeelRef{Repo: "notes/x"}}, "answered on keel notes/x"},
 		{model.Critic{Name: "t", FormID: "@t", Source: "teams-chat", Chat: &model.ChatRef{ID: "19:x", Topic: "chat"}}, `in "chat"`},
 	} {
-		name, err := plugin.For(c.critic.SourceName())
+		name, err := pluginrun.For(c.critic.SourceName())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,15 +96,15 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	t.Cleanup(func() { srv.Close() })
 
 	t.Setenv("EBAC_PLUGIN_DIR", dir)
-	t.Setenv(plugin.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/plugin tests that)
-	r, err := plugin.NewRunner(nil)
+	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)
+	r, err := pluginrun.NewRunner(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := model.Critic{Name: "band-state", FormID: "@b", Source: model.SourceBandHub, Band: &model.BandRef{Socket: sock, Utility: []string{"leob"}}}
-	name, err := plugin.For(c.SourceName())
+	name, err := pluginrun.For(c.SourceName())
 	if err != nil || name != "bandhub" {
-		t.Fatalf("plugin.For(band-hub) = %q, %v", name, err)
+		t.Fatalf("pluginrun.For(band-hub) = %q, %v", name, err)
 	}
 	rep, err := r.Call(context.Background(), name, plugin.Request{Op: plugin.OpRound, Critic: c})
 	if err != nil {
@@ -139,13 +140,13 @@ func TestRosterPluginBinaryRound(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", dir, "../ebac-roster").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	r := &plugin.Runner{Dir: dir, Timeout: plugin.DefaultTimeout, Stderr: os.Stderr}
+	r := &pluginrun.Runner{Dir: dir, Timeout: pluginrun.DefaultTimeout, Stderr: os.Stderr}
 	if bw := os.Getenv("EBAC_TEST_BWRAP"); bw != "" {
 		fig := filepath.Join(t.TempDir(), "figaro")
 		if err := os.Mkdir(fig, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		r.Sandbox = &plugin.Sandbox{Bwrap: bw, Grants: plugin.Grants{plugin.GrantFigaro: {filepath.Join(fig, "angelus.sock")}}}
+		r.Sandbox = &pluginrun.Sandbox{Bwrap: bw, Grants: pluginrun.Grants{pluginrun.GrantFigaro: {filepath.Join(fig, "angelus.sock")}}}
 	}
 	arias := []model.Aria{
 		{ID: "11111111aaaaaaaaaaaaaaaaaaaaaaaa", Handle: "lead-seat", Kind: "conversation", State: "idle"},

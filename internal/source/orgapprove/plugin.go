@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/source/approve"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin serves org-approve (in the ebac-approve binary). nil fields are the

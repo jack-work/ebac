@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/budget"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // GraphQL points are charged per CALL (min 1), not per node, and every gh
@@ -31,13 +30,13 @@ type Spend struct {
 
 // Budget is the spend in the budget ledger's terms: GraphQL points (with the
 // account's remaining and reset when a call reported them) and REST calls.
-func (s Spend) Budget() []budget.Spend {
-	var out []budget.Spend
+func (s Spend) Budget() []model.Spend {
+	var out []model.Spend
 	if s.Calls > 0 {
-		out = append(out, budget.Spend{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining, ResetAt: s.ResetAt})
+		out = append(out, model.Spend{Limit: "graphql", N: float64(s.Points), Remaining: s.Remaining, ResetAt: s.ResetAt})
 	}
 	if rest := s.All - s.Calls; rest > 0 {
-		out = append(out, budget.Spend{Limit: "rest", N: float64(rest), Remaining: -1})
+		out = append(out, model.Spend{Limit: "rest", N: float64(rest), Remaining: -1})
 	}
 	return out
 }

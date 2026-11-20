@@ -3,7 +3,7 @@ package form
 import (
 	"encoding/json"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Hooks for form_test, which also imports the github source (a cycle for an

@@ -14,7 +14,7 @@ import (
 	"github.com/jack-work/figaro/api/rpc"
 
 	"github.com/gluck/ebac/internal/figclient"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 	"github.com/jack-work/figaro/api/transport"
 	"github.com/jack-work/figaro/sdk"
 )

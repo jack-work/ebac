@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/author"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // cmdAddAuthor mints an author watch: role form, critic, optional seat, timer.

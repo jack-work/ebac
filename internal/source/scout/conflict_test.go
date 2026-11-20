@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // A merge into a PR's base does not bump the PR's updatedAt (gate-10 #108680, 11-12): the base-head watch rides the

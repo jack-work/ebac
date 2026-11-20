@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // A review critic's PR detail (every thread, review and comment, as identity
@@ -96,7 +96,7 @@ func prsHeads(s *model.Snapshot) map[string]*prHead {
 				h.WaitingOn[who]++
 			}
 		}
-		out[PrFormKey(k)] = h
+		out[model.PrFormKey(k)] = h
 	}
 	return out
 }

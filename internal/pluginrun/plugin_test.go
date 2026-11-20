@@ -1,9 +1,10 @@
-package plugin
+package pluginrun
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/plugin"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The test binary doubles as a plugin: run as ebac-fake with
@@ -27,25 +28,27 @@ func TestMain(m *testing.M) {
 func fakePlugin(mode string) {
 	switch mode {
 	case "echo":
-		Serve(func(_ context.Context, req Request) (*Reply, error) {
-			evs := Unwire(req.Pending)
+		plugin.Serve(func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
+			evs := plugin.Unwire(req.Pending)
 			for i := range evs {
 				evs[i].Text += " (seen)"
 			}
-			rep := &Reply{Critic: &req.Critic, Events: Wire(evs), Brief: string(req.Op)}
+			rep := &plugin.Reply{Critic: &req.Critic, Events: plugin.Wire(evs), Brief: string(req.Op)}
 			rep.Events[0].Inbox = []string{"k1"}
 			return rep, nil
 		})
 	case "probe":
-		Serve(func(context.Context, Request) (*Reply, error) { return &Reply{Log: probe()}, nil })
+		plugin.Serve(func(context.Context, plugin.Request) (*plugin.Reply, error) { return &plugin.Reply{Log: probe()}, nil })
 	case "fail":
-		Serve(func(context.Context, Request) (*Reply, error) { return nil, fmt.Errorf("upstream said no") })
+		plugin.Serve(func(context.Context, plugin.Request) (*plugin.Reply, error) {
+			return nil, fmt.Errorf("upstream said no")
+		})
 	case "garbage":
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		fmt.Print("not json")
 	case "unknown-field":
 		_, _ = io.Copy(io.Discard, os.Stdin)
-		fmt.Printf(`{"protocol":%d,"surprise":true}`, Version)
+		fmt.Printf(`{"protocol":%d,"surprise":true}`, plugin.Version)
 	case "version":
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		fmt.Print(`{"protocol":99}`)
@@ -76,21 +79,21 @@ func runner(t *testing.T, mode string) *Runner {
 	return &Runner{Dir: dir, Timeout: 5 * time.Second, Stderr: &stderr}
 }
 
-func pending() []Event {
+func pending() []plugin.Event {
 	e := model.Event{Kind: "teams_new", Tier: model.TierWake, Comment: "c1", Author: "a"}
 	e.Text = "full body"
-	return Wire([]model.Event{e})
+	return plugin.Wire([]model.Event{e})
 }
 
 // The full text of an event and its inbox keys cross the wire both ways:
 // model.Event alone drops Text (json:"-").
 func TestRunnerRoundTripKeepsTextAndInbox(t *testing.T) {
 	r := runner(t, "echo")
-	rep, err := r.Call(context.Background(), "fake", Request{Op: OpBrief, Critic: model.Critic{Name: "c"}, Pending: pending()})
+	rep, err := r.Call(context.Background(), "fake", plugin.Request{Op: plugin.OpBrief, Critic: model.Critic{Name: "c"}, Pending: pending()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	evs := Unwire(rep.Events)
+	evs := plugin.Unwire(rep.Events)
 	if len(evs) != 1 || evs[0].Text != "full body (seen)" {
 		t.Fatalf("event text lost on the wire: %+v", rep.Events)
 	}
@@ -121,7 +124,7 @@ func TestRunnerFailures(t *testing.T) {
 	} {
 		t.Run(c.mode, func(t *testing.T) {
 			r := runner(t, c.mode)
-			_, err := r.Call(context.Background(), "fake", Request{Op: OpRound})
+			_, err := r.Call(context.Background(), "fake", plugin.Request{Op: plugin.OpRound})
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want %q", err, c.want)
 			}
@@ -133,7 +136,7 @@ func TestRunnerTimeout(t *testing.T) {
 	r := runner(t, "sleep")
 	r.Timeout = 300 * time.Millisecond
 	start := time.Now()
-	_, err := r.Call(context.Background(), "fake", Request{Op: OpRound})
+	_, err := r.Call(context.Background(), "fake", plugin.Request{Op: plugin.OpRound})
 	if err == nil || !strings.Contains(err.Error(), "timed out after 300ms") {
 		t.Fatalf("err = %v", err)
 	}
@@ -144,7 +147,7 @@ func TestRunnerTimeout(t *testing.T) {
 
 func TestRunnerMissingPlugin(t *testing.T) {
 	r := runner(t, "echo")
-	_, err := r.Call(context.Background(), "nope", Request{Op: OpRound})
+	_, err := r.Call(context.Background(), "nope", plugin.Request{Op: plugin.OpRound})
 	if err == nil || !strings.Contains(err.Error(), "ebac-nope") {
 		t.Fatalf("err = %v, want the missing path named", err)
 	}
@@ -154,24 +157,24 @@ func TestRunnerMissingPlugin(t *testing.T) {
 // to the journal; the call error says the plugin failed).
 func TestRunnerHandlerErrorGoesToStderr(t *testing.T) {
 	r := runner(t, "fail")
-	_, _ = r.Call(context.Background(), "fake", Request{Op: OpRound})
+	_, _ = r.Call(context.Background(), "fake", plugin.Request{Op: plugin.OpRound})
 	if got := r.Stderr.(*strings.Builder).String(); !strings.Contains(got, "upstream said no") {
 		t.Fatalf("stderr = %q", got)
 	}
 }
 
 func TestInProcMatchesTheWire(t *testing.T) {
-	ip := InProc{"x": func(_ context.Context, req Request) (*Reply, error) {
-		return &Reply{Events: req.Pending}, nil
+	ip := plugin.InProc{"x": func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
+		return &plugin.Reply{Events: req.Pending}, nil
 	}}
-	rep, err := ip.Call(context.Background(), "x", Request{Op: OpBrief, Pending: pending()})
+	rep, err := ip.Call(context.Background(), "x", plugin.Request{Op: plugin.OpBrief, Pending: pending()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if Unwire(rep.Events)[0].Text != "full body" {
+	if plugin.Unwire(rep.Events)[0].Text != "full body" {
 		t.Fatalf("in-process call lost the text: %+v", rep.Events)
 	}
-	if _, err := ip.Call(context.Background(), "y", Request{}); err == nil {
+	if _, err := ip.Call(context.Background(), "y", plugin.Request{}); err == nil {
 		t.Fatal("an unknown in-process plugin answered")
 	}
 }
@@ -194,7 +197,7 @@ func TestAdoptKeepsTheCoresFields(t *testing.T) {
 	from := &model.Critic{Name: "evil", FormID: "@other", Write: true, PRs: []model.PRRef{{Owner: "o", Repo: "r", Number: 1}}}
 	from.Runtime.LastError = "e"
 	from.Runtime.Stopped = true
-	Adopt(core, from)
+	plugin.Adopt(core, from)
 	if core.Name != "c" || core.FormID != "@f" || core.Write || len(core.Runtime.PendingEvents) != 1 || core.Runtime.OutboxWatermark != 7 {
 		t.Fatalf("a plugin rewrote a core field: %+v", core)
 	}
@@ -210,7 +213,7 @@ func TestAdoptKeepsTheProbe(t *testing.T) {
 	from := &model.Critic{}
 	from.Runtime.Probe, from.Runtime.FullReadAt = map[string]string{"bic/aether#1": "ab"}, &at
 	core := &model.Critic{}
-	Adopt(core, from)
+	plugin.Adopt(core, from)
 	if core.Runtime.Probe["bic/aether#1"] != "ab" || core.Runtime.FullReadAt == nil || !core.Runtime.FullReadAt.Equal(at) {
 		t.Fatalf("probe state not adopted: %+v %v", core.Runtime.Probe, core.Runtime.FullReadAt)
 	}
@@ -225,7 +228,7 @@ func TestOrgApprovePluginAndAdopt(t *testing.T) {
 	core := &model.Critic{Name: "oa", OrgApprove: &model.OrgApproveWatch{Approver: "jack"}}
 	from := &model.Critic{Name: "oa", OrgApprove: &model.OrgApproveWatch{Approver: "flake:x"}}
 	from.Runtime.OrgApprove = &model.OrgApproveState{Asks: map[string]*model.OrgAsk{"oa-1-aaaaaaa": {PR: 1}}}
-	Adopt(core, from)
+	plugin.Adopt(core, from)
 	if core.Runtime.OrgApprove == nil || core.Runtime.OrgApprove.Asks["oa-1-aaaaaaa"] == nil || core.OrgApprove.Approver != "jack" {
 		t.Fatalf("adopt: %+v", core)
 	}

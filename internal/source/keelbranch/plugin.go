@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // Plugin serves keel-branches. Keel and Now replace keel and the clock in

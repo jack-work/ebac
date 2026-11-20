@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // ForksEvery bounds how often the forks key is rewritten: fork births and

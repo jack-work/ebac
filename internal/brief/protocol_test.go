@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func protocolCritics() []model.Critic {

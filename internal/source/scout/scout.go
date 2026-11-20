@@ -37,9 +37,9 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/mergecheck"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/relevance"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/relevance"
 )
 
 // Batch is how many nodes one light GraphQL query reads (an issue batch).

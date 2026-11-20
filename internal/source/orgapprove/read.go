@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // leanFields: scalars and one totalCount, no comment bodies (1 point for 14

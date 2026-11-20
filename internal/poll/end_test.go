@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // An ended critic's kills: children first in key order, the role form last, and only when every child is gone; a

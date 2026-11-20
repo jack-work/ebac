@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/keel"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // The negative: a keel critic whose FORM carries a token_cmd (a script that leaves a marker) and a keel URL, read

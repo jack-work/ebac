@@ -46,7 +46,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // OperatorSender is the Boss's Teams sender id; `from: operator` matches it,

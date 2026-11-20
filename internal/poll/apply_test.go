@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/rosterstate"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // One round through a fake plugin against a live form: the core applies the
@@ -58,10 +58,10 @@ func TestLiveCoreAppliesAPluginReply(t *testing.T) {
 		}
 		rep := &plugin.Reply{Critic: &c, Events: plugin.Wire([]model.Event{
 			ev("1", "spam", "buy now"), ev("2", "friend", "this is URGENT"), ev("3", "friend", "fyi")}),
-			Inbox: map[string]form.InboxItem{}}
+			Inbox: map[string]model.InboxItem{}}
 		for i, e := range rep.Events {
 			k := "x-" + e.Comment
-			rep.Inbox[k] = form.InboxItem{Kind: "teams_new", By: e.Author, At: "2026-11-09T00:00:00Z", Body: e.Text}
+			rep.Inbox[k] = model.InboxItem{Kind: "teams_new", By: e.Author, At: "2026-11-09T00:00:00Z", Body: e.Text}
 			rep.Events[i].Inbox = []string{k}
 		}
 		rep.SetKey("blind", map[string]int{"n": 3})

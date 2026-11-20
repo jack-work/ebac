@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // setBoard writes the board's pr map and snapshot time as board-snapshot does: every open tracked PR of the world,

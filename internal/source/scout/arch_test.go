@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // archComment is an architect-review[bot] verdict comment on #101, shaped as the bot posts it (#110281, 11-12).

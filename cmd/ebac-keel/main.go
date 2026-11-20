@@ -1,15 +1,15 @@
 // ebac-keel is the keel plugin of ebac: one keel repo's comment threads
 // (keel-threads) and its work branches (keel-branches). It speaks
-// internal/plugin on stdin/stdout.
+// sdk/plugin on stdin/stdout.
 package main
 
 import (
 	"context"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/source/keel"
 	"github.com/gluck/ebac/internal/source/keelbranch"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func main() {

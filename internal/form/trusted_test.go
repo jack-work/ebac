@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // An unreadable config fails closed: defaults only, no per-critic values.

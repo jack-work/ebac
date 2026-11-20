@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Directory reads what identity needs, once per round or command (pollRound

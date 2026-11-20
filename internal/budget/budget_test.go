@@ -2,6 +2,7 @@ package budget
 
 import (
 	"fmt"
+	"github.com/gluck/ebac/sdk/model"
 	"math"
 	"os"
 	"path/filepath"
@@ -179,9 +180,9 @@ func TestSettleChargesThePoolTheGrantDrewOn(t *testing.T) {
 			if !ok {
 				t.Fatal("reserve")
 			}
-			var sp []Spend
+			var sp []model.Spend
 			if c.real > 0 {
-				sp = []Spend{{Limit: "graphql", N: c.real, Remaining: -1}}
+				sp = []model.Spend{{Limit: "graphql", N: c.real, Remaining: -1}}
 			}
 			l.Settle(g, sp)
 			if got := l.Levels()[ghe]["graphql"]; got.Tokens != c.shared || got.Wake != c.wake {
@@ -196,15 +197,15 @@ func TestSettleRecordsTheAccountRemainingAndItsReset(t *testing.T) {
 	l := open(t, ck)
 	g, _, _ := l.Reserve(ghe, WakeCritical, map[string]float64{"graphql": 1})
 	reset := ck.t.Add(17 * time.Minute)
-	l.Settle(g, []Spend{{Limit: "graphql", N: 1, Remaining: 4321, ResetAt: reset}})
+	l.Settle(g, []model.Spend{{Limit: "graphql", N: 1, Remaining: 4321, ResetAt: reset}})
 	if lv := l.Levels()[ghe]["graphql"]; lv.Remaining != 4321 || !lv.ResetAt.Equal(reset) {
 		t.Fatalf("level %+v", lv)
 	}
-	l.Settle(g, []Spend{{Limit: "graphql", N: 1, Remaining: 900}})
+	l.Settle(g, []model.Spend{{Limit: "graphql", N: 1, Remaining: 900}})
 	if lv := l.Levels()[ghe]["graphql"]; lv.Remaining != 900 || !lv.ResetAt.Equal(ck.t.Add(time.Hour)) {
 		t.Fatalf("a remaining without a reset must assume the hour window: %+v", lv)
 	}
-	l.Settle(g, []Spend{{Limit: "graphql", N: 1, Remaining: -1}})
+	l.Settle(g, []model.Spend{{Limit: "graphql", N: 1, Remaining: -1}})
 	if lv := l.Levels()[ghe]["graphql"]; lv.Remaining != 900 {
 		t.Fatalf("an unreported remaining (-1) overwrote the last report: %+v", lv)
 	}
@@ -223,7 +224,7 @@ func TestLedgerPersistsAndATornFileStartsEmpty(t *testing.T) {
 		t.Fatalf("missing ledger starts at %+v, want full 8 2", lv)
 	}
 	g, _, _ := l.Reserve(ghe, WakeCritical, map[string]float64{"graphql": 7}) // over the wake burst: shared 8 -> 1
-	l.Settle(g, []Spend{{Limit: "graphql", N: 7, Remaining: 2500}})
+	l.Settle(g, []model.Spend{{Limit: "graphql", N: 7, Remaining: 2500}})
 	l2, err := Open(cfg(), path, ck.now)
 	if err != nil {
 		t.Fatal(err)

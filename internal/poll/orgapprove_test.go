@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 var orgCritic = &model.Critic{Name: "oa", Source: model.SourceOrgApprove, InputsForm: "@board",

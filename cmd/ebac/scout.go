@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/relevance"
 	"github.com/gluck/ebac/internal/source/scout"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/relevance"
 )
 
 // cmdAddScout mints the GitHub scout (source github-scout): no seat; it

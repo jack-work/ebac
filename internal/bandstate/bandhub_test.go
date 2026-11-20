@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"net"
 	"net/http"
 	"os"
@@ -16,9 +17,9 @@ import (
 	"time"
 )
 
-func fixture(t *testing.T) *Hub {
+func fixture(t *testing.T) *bandhub.Hub {
 	t.Helper()
-	h := &Hub{}
+	h := &bandhub.Hub{}
 	read := func(name string, v any) {
 		b, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
@@ -33,7 +34,7 @@ func fixture(t *testing.T) *Hub {
 	}
 	read("stats.json", &h.Stats)
 	read("nodes.json", &h.Nodes)
-	var ready, leased []Job
+	var ready, leased []bandhub.Job
 	read("ready.json", &ready)
 	read("leased.json", &leased)
 	h.Live = append(ready, leased...)
@@ -131,7 +132,7 @@ func TestNodeStaleOnlyPastThreshold(t *testing.T) {
 	}
 }
 
-func clone(j Job, id int64, params map[string]string) Job {
+func clone(j bandhub.Job, id int64, params map[string]string) bandhub.Job {
 	c := j
 	c.ID = id
 	c.Payload.Params = map[string]json.RawMessage{}
@@ -144,7 +145,7 @@ func clone(j Job, id int64, params map[string]string) Job {
 	return c
 }
 
-func find(t *testing.T, h *Hub, id int64) Job {
+func find(t *testing.T, h *bandhub.Hub, id int64) bandhub.Job {
 	t.Helper()
 	for _, j := range h.Live {
 		if j.ID == id {
@@ -152,7 +153,7 @@ func find(t *testing.T, h *Hub, id int64) Job {
 		}
 	}
 	t.Fatalf("no job %d in the fixture", id)
-	return Job{}
+	return bandhub.Job{}
 }
 
 // hubSum is what the hub sends as params_sum: a digest of the FULL params, canonical (sorted keys).
@@ -163,8 +164,8 @@ func hubSum(full map[string]string) string {
 }
 
 // flakeCheck is a flake.check job as ebac's metadata view sees it: attrs hidden, only the hub's digest carries them.
-func flakeCheck(id int64, full map[string]string) Job {
-	var j Job
+func flakeCheck(id int64, full map[string]string) bandhub.Job {
+	var j bandhub.Job
 	j.ID, j.Queue, j.State, j.Created = id, "flake.check", "leased", 1
 	j.Payload.Template = "flake.check"
 	j.Payload.Params = map[string]json.RawMessage{}
@@ -247,13 +248,13 @@ func TestNeverRendersLogFields(t *testing.T) {
 	if !strings.Contains(raw, secret) {
 		t.Fatal("control: the input carries the secret")
 	}
-	var jobs []Job
+	var jobs []bandhub.Job
 	if err := json.Unmarshal([]byte(raw), &jobs); err != nil {
 		t.Fatal(err)
 	}
 	h := fixture(t)
 	h.Live = jobs
-	q := QueueStats{Queue: "q"}
+	q := bandhub.QueueStats{Queue: "q"}
 	q.Counts.Ready = 1
 	h.Stats.Queues = append(h.Stats.Queues, q)
 	out, _ := json.Marshal(Render(h, nil, nil, nil))
@@ -299,7 +300,7 @@ func TestClientPathsAndRefusal(t *testing.T) {
 	go srv.Serve(l)
 	t.Cleanup(func() { srv.Close() })
 
-	h, err := (&Client{Socket: sock}).Fetch(context.Background())
+	h, err := (&bandhub.Client{Socket: sock}).Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +314,7 @@ func TestClientPathsAndRefusal(t *testing.T) {
 	mu.Lock()
 	deny = true
 	mu.Unlock()
-	_, err = (&Client{Socket: sock}).Fetch(context.Background())
+	_, err = (&bandhub.Client{Socket: sock}).Fetch(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "HTTP 403") || !strings.Contains(err.Error(), "not a hub principal") {
 		t.Fatalf("refusal not surfaced with its text: %v", err)
 	}
@@ -410,7 +411,7 @@ func TestStepTipCadenceAndFailure(t *testing.T) {
 	}
 }
 
-func readyJob(t *testing.T, h *Hub) Job {
+func readyJob(t *testing.T, h *bandhub.Hub) bandhub.Job {
 	t.Helper()
 	for _, j := range h.Live {
 		if j.State == "ready" {
@@ -418,10 +419,10 @@ func readyJob(t *testing.T, h *Hub) Job {
 		}
 	}
 	t.Fatal("fixture has no ready job")
-	return Job{}
+	return bandhub.Job{}
 }
 
-func bump(h *Hub, queue string) {
+func bump(h *bandhub.Hub, queue string) {
 	for i := range h.Stats.Queues {
 		if h.Stats.Queues[i].Queue == queue {
 			h.Stats.Queues[i].Counts.Ready++

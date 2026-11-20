@@ -12,11 +12,11 @@ import (
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/poll"
-	"github.com/gluck/ebac/internal/trigger"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/trigger"
 )
 
 // ---------- ls / show ----------

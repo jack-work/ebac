@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // ghCLI answers GraphQL through the gh CLI as the calling user (read-only queries only), and records the

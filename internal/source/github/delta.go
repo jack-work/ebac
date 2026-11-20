@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Diff computes prev -> next.

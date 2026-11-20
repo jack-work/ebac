@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gluck/ebac/internal/identity"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 func TestCheckVerdictCountsOnlyAStampedBoundVerdictOfTheCurrentHolder(t *testing.T) {

@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/bandstate"
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // cmdAddBandHub mints a band-hub mirror (plugin ebac-bandhub): a role form its
@@ -17,7 +18,7 @@ import (
 func cmdAddBandHub(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("add-band-hub")
 	name := fs.String("name", "band-state", "critic name; the role form is ebac-<name>")
-	socket := fs.String("socket", bandstate.DefaultSocket, "the hub's unix socket (this account must be a hub meta reader)")
+	socket := fs.String("socket", bandhub.DefaultSocket, "the hub's unix socket (this account must be a hub meta reader)")
 	utility := fs.String("utility", "leob,ross", "the hub's utility nodes; every other node is heavy")
 	repo := fs.String("repo", bandstate.DefaultRepo, "repo of the jobs' branch params, for the superseded check")
 	every := fs.Duration("every", 45*time.Second, "poll interval")

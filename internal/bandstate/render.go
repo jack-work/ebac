@@ -3,6 +3,7 @@ package bandstate
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/bandhub"
 	"sort"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func str(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func (j Job) param(k string) string {
+func param(j bandhub.Job, k string) string {
 	if raw, ok := j.Payload.Params[k]; ok {
 		return str(raw)
 	}
@@ -70,10 +71,10 @@ func short(sha string) string {
 	return sha
 }
 
-func (j Job) what() string {
-	w := j.param("branch")
+func what(j bandhub.Job) string {
+	w := param(j, "branch")
 	if w == "" {
-		w = j.param("label")
+		w = param(j, "label")
 	}
 	if w == "" {
 		w = "-"
@@ -90,11 +91,11 @@ func (j Job) what() string {
 // a proven descendant is flagged; anything else (absent upstream, no verdict,
 // behind, diverged) is UNKNOWN: the forge lags the node mirrors, and
 // mirror-only branches never reach it.
-func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bool) View {
+func Render(h *bandhub.Hub, utility []string, tips map[string]string, desc map[string]bool) View {
 	now := h.Stats.Hub.Now
 	v := View{Queues: []string{}, Nodes: []string{}, Dupes: []string{}}
 
-	qs := append([]QueueStats(nil), h.Stats.Queues...)
+	qs := append([]bandhub.QueueStats(nil), h.Stats.Queues...)
 	sort.Slice(qs, func(i, j int) bool { return qs[i].Queue < qs[j].Queue })
 	for _, q := range qs {
 		if q.Counts.Ready+q.Counts.Leased == 0 {
@@ -103,7 +104,7 @@ func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bo
 		// The oldest ready job, from the jobs themselves: its id and queue INSTANT (an age, or the hub's
 		// wait percentiles, would move on every poll and rewrite the studied form).
 		oldest := "-"
-		var first Job
+		var first bandhub.Job
 		for _, j := range h.Live {
 			if j.Queue == q.Queue && j.State == "ready" && (first.ID == 0 || j.Created < first.Created || j.Created == first.Created && j.ID < first.ID) {
 				first = j
@@ -119,7 +120,7 @@ func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bo
 	for _, u := range utility {
 		util[u] = true
 	}
-	ns := append([]Node(nil), h.Nodes...)
+	ns := append([]bandhub.Node(nil), h.Nodes...)
 	sort.Slice(ns, func(i, j int) bool { return ns[i].Node < ns[j].Node })
 	for _, n := range ns {
 		class := "heavy"
@@ -153,7 +154,7 @@ func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bo
 		v.Nodes = append(v.Nodes, line)
 	}
 
-	live := append([]Job(nil), h.Live...)
+	live := append([]bandhub.Job(nil), h.Live...)
 	sort.Slice(live, func(i, j int) bool {
 		a, b := live[i], live[j]
 		if a.Queue != b.Queue {
@@ -171,7 +172,7 @@ func Render(h *Hub, utility []string, tips map[string]string, desc map[string]bo
 // branch, sha, label and node, so the full params arrive as the hub's digest
 // params_sum; a job without one is never grouped (flake.check 4709/4710: same
 // sha, attrs ci vs keel-web-*, were flagged and a real job was cancelled).
-func dupes(live []Job) []string {
+func dupes(live []bandhub.Job) []string {
 	groups := map[string][]int64{}
 	var order []string
 	for _, j := range live {
@@ -190,7 +191,7 @@ func dupes(live []Job) []string {
 		if len(ids) < 2 {
 			continue
 		}
-		var first Job
+		var first bandhub.Job
 		for _, j := range live {
 			if j.ID == ids[0] {
 				first = j
@@ -200,7 +201,7 @@ func dupes(live []Job) []string {
 		for i, id := range ids {
 			s[i] = fmt.Sprint(id)
 		}
-		out = append(out, fmt.Sprintf("dupe %s %s: %s", first.Queue, short(first.param("sha")), strings.Join(s, ",")))
+		out = append(out, fmt.Sprintf("dupe %s %s: %s", first.Queue, short(param(first, "sha")), strings.Join(s, ",")))
 	}
 	sort.Strings(out)
 	return out
@@ -213,10 +214,10 @@ var trunk = map[string]bool{"main": true, "master": true}
 // superseded names live jobs whose branch tip upstream is a PROVEN strict
 // descendant of their sha (warden 2026-11-10: jobs 4664-4669 were flagged by
 // an older tip). No tip, no verdict, or a negative one is never flagged.
-func superseded(live []Job, tips map[string]string, desc map[string]bool) []string {
+func superseded(live []bandhub.Job, tips map[string]string, desc map[string]bool) []string {
 	var out []string
 	for _, j := range live {
-		br, sha := j.param("branch"), j.param("sha")
+		br, sha := param(j, "branch"), param(j, "sha")
 		if br == "" || sha == "" || trunk[br] {
 			continue
 		}
@@ -224,7 +225,7 @@ func superseded(live []Job, tips map[string]string, desc map[string]bool) []stri
 		if tip == "" || tip == sha || !desc[Pair(sha, tip)] {
 			continue
 		}
-		out = append(out, fmt.Sprintf("superseded %d %s %s %s tip=%s", j.ID, j.Queue, j.what(), short(sha), short(tip)))
+		out = append(out, fmt.Sprintf("superseded %d %s %s %s tip=%s", j.ID, j.Queue, what(j), short(sha), short(tip)))
 	}
 	return out
 }
@@ -233,10 +234,10 @@ func superseded(live []Job, tips map[string]string, desc map[string]bool) []stri
 func Pair(sha, tip string) string { return sha + "..." + tip }
 
 // pairs are the (job sha, tip) pairs live jobs need a descent verdict for.
-func pairs(live []Job, tips map[string]string) map[string][2]string {
+func pairs(live []bandhub.Job, tips map[string]string) map[string][2]string {
 	out := map[string][2]string{}
 	for _, j := range live {
-		br, sha := j.param("branch"), j.param("sha")
+		br, sha := param(j, "branch"), param(j, "sha")
 		if br == "" || sha == "" || trunk[br] {
 			continue
 		}
@@ -248,11 +249,11 @@ func pairs(live []Job, tips map[string]string) map[string][2]string {
 }
 
 // Branches are the distinct branches live jobs build, for the tip check.
-func Branches(live []Job) []string {
+func Branches(live []bandhub.Job) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, j := range live {
-		if b := j.param("branch"); b != "" && j.param("sha") != "" && !trunk[b] && !seen[b] {
+		if b := param(j, "branch"); b != "" && param(j, "sha") != "" && !trunk[b] && !seen[b] {
 			seen[b] = true
 			out = append(out, b)
 		}

@@ -11,8 +11,8 @@ import (
 
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/sdk/forge"
 )
 
 const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake a seat on the delta

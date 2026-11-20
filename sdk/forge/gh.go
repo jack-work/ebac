@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // GitHub access goes through the authenticated `gh` CLI rather than a token

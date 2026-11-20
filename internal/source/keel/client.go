@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // DefaultSocket is ebac's own door to keel: admits uid 988 named ebac only,

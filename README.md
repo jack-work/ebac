@@ -233,7 +233,7 @@ Each upstream is a separate executable next to `ebac` (one Nix output; never fou
 | `ebac-bandhub` | `band-hub` (the hub mirror, no seat) |
 | `ebac-roster` | `aria-roster` (roles, holders, lieutenants, live fork counts per role from the aria store; no seat) |
 
-Protocol (`internal/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
+Protocol (`sdk/plugin`): one exec per op, one JSON request on stdin, one JSON reply on
 stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout or bad reply is a
 failed round. Ops: `round` (fetch and diff: events, inbox items, source form keys, gone markers,
 the critic's source fields and snapshot), `post` (posts the core has already authorized), `brief`
@@ -241,7 +241,7 @@ the critic's source fields and snapshot), `post` (posts the core has already aut
 delivery, lease, succession, archival and the schedule (ebacd).
 
 **Sandbox.** Each plugin execs under bubblewrap (path fixed at build time,
-`-X github.com/gluck/ebac/internal/plugin.BwrapPath=...`, never PATH): own user, pid and mount
+`-X github.com/gluck/ebac/internal/pluginrun.BwrapPath=...`, never PATH): own user, pid and mount
 namespaces, no capabilities, no nested user namespaces, host network. Of the core uid's grants it
 sees only what it needs; the others are empty tmpfs dirs. The figaro socket is hidden from all.
 

@@ -7,8 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // A scope trades completeness for size: rows (which threads, which inbox
@@ -251,7 +250,7 @@ func (s scope) apply(r *keelRound) {
 	}
 }
 
-func cutItem(it form.InboxItem, keep map[string]bool) form.InboxItem {
+func cutItem(it model.InboxItem, keep map[string]bool) model.InboxItem {
 	if !keep["time"] {
 		it.Time = ""
 	}

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/trigger"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/trigger"
 )
 
 // figaro's real recent tags (2026-11-09), newest first as the API returns them.

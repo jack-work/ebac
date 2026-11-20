@@ -19,10 +19,8 @@ package plugin
 
 import (
 	"encoding/json"
-	"github.com/gluck/ebac/internal/budget"
 
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Version is the protocol revision; a reply of any other version is refused.
@@ -156,9 +154,9 @@ type Reply struct {
 	// fields a source owns (see Adopt); everything else stays the core's.
 	Critic *model.Critic `json:"critic,omitempty"`
 	// Snapshot, when set, is saved as the critic's snapshot.
-	Snapshot *model.Snapshot           `json:"snapshot,omitempty"`
-	Events   []Event                   `json:"events,omitempty"`
-	Inbox    map[string]form.InboxItem `json:"inbox,omitempty"`
+	Snapshot *model.Snapshot            `json:"snapshot,omitempty"`
+	Events   []Event                    `json:"events,omitempty"`
+	Inbox    map[string]model.InboxItem `json:"inbox,omitempty"`
 	// Set and Unset are role-form keys the source owns (threads, authored,
 	// blind, ...). The core writes a key only when its value changed.
 	Set   map[string]json.RawMessage `json:"set,omitempty"`
@@ -197,7 +195,7 @@ type Reply struct {
 	// Spend is what the round spent on the critic's credential, by limit
 	// ("graphql" points, "rest" calls): the core settles its budget with it.
 	// A plugin that reports none settles at nothing spent.
-	Spend []budget.Spend `json:"spend,omitempty"`
+	Spend []model.Spend `json:"spend,omitempty"`
 }
 
 // Logf appends one line to the reply's log.

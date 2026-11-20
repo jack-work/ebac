@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
 	"github.com/gluck/ebac/internal/source/github"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 const formID = "@ac44d671aaaaaaaaaaaaaaaaaaaaaaaa"

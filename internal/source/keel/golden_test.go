@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/golden")

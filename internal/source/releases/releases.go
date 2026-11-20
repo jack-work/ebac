@@ -18,9 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 const (
@@ -187,11 +186,11 @@ func (pl Plugin) round(ctx context.Context, w *model.Critic) *plugin.Reply {
 	}
 	st.ETag = a.etag
 	news := Diff(st, rels)
-	rep.Inbox = map[string]form.InboxItem{}
+	rep.Inbox = map[string]model.InboxItem{}
 	for _, n := range news {
 		notes, cut := model.CutBody(strings.TrimSpace(n.Release.Body), model.InboxItemBytes)
 		key := "release-" + n.Release.Tag
-		rep.Inbox[key] = form.InboxItem{Kind: string(EvRelease), By: n.Release.Author.Login, Time: n.Release.Published, Body: notes, Cut: cut,
+		rep.Inbox[key] = model.InboxItem{Kind: string(EvRelease), By: n.Release.Author.Login, Time: n.Release.Published, Body: notes, Cut: cut,
 			Fetch: fmt.Sprintf("curl -s %s/repos/%s/releases/tags/%s | jq -r .body", DefaultAPI, w.Releases.Repo, n.Release.Tag)}
 		ev := plugin.Event{Event: model.Event{Kind: EvRelease, Tier: model.TierWake, PR: model.PRKey(w.Releases.Repo),
 			Author: n.Release.Author.Login, URL: n.Release.URL, Detail: n.Line()}, Text: n.Release.Body, Inbox: []string{key}}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // Health reads ebacd's heartbeat, never last_polled (a quiet round persists nothing, so last_polled lags by hours on

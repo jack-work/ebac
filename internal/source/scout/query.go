@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gluck/ebac/internal/mergecheck"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // prFields is everything a pass reads about one PR, in one GraphQL selection:

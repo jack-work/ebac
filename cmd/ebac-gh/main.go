@@ -1,16 +1,16 @@
 // ebac-gh is the GitHub plugin of ebac: pull request review (github-pr),
-// author watches (github-author), release watches (github-releases) and the scout (github-scout). It speaks internal/plugin on stdin/stdout.
+// author watches (github-author), release watches (github-releases) and the scout (github-scout). It speaks sdk/plugin on stdin/stdout.
 package main
 
 import (
 	"context"
 
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/source/author"
 	"github.com/gluck/ebac/internal/source/github"
 	"github.com/gluck/ebac/internal/source/releases"
 	"github.com/gluck/ebac/internal/source/scout"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func main() {

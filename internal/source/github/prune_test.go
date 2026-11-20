@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/forge/forgetest"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
 	"github.com/gluck/ebac/internal/poll"
+	"github.com/gluck/ebac/sdk/forge/forgetest"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 func prState(owner, repo string, n int, state string, updated time.Time) *model.PRState {
@@ -129,7 +129,7 @@ func TestLiveLongMergedPRLeavesTheForm(t *testing.T) {
 	}
 	before := prsKey()
 	for _, want := range []string{"acme/widget#2", "T2", "acme/widget#3"} {
-		if !strings.Contains(before, form.PrFormKey(model.PRKey(want))) && !strings.Contains(before, want) {
+		if !strings.Contains(before, model.PrFormKey(model.PRKey(want))) && !strings.Contains(before, want) {
 			t.Fatalf("setup: prs lacks %s: %.300s", want, before)
 		}
 	}

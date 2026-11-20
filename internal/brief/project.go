@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // What a seat sees of its form (figaro 0.48, measured 2026-10-20): each

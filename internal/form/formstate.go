@@ -15,8 +15,8 @@ import (
 
 	"github.com/gluck/ebac/internal/brief"
 	"github.com/gluck/ebac/internal/figaro"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/trigger"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/trigger"
 	"github.com/jack-work/figaro/api/form"
 	"github.com/jack-work/figaro/api/rpc"
 )
@@ -85,9 +85,6 @@ type formPR struct {
 	Comments       map[string]*formItem   `json:"comments"`
 }
 
-// prFormKey makes a PR key safe as one path segment.
-func PrFormKey(k model.PRKey) string { return strings.ReplaceAll(string(k), ".", "%2E") }
-
 func prsTree(s *model.Snapshot) map[string]*formPR {
 	out := map[string]*formPR{}
 	if s == nil {
@@ -111,7 +108,7 @@ func prsTree(s *model.Snapshot) map[string]*formPR {
 		for id, c := range p.Comments {
 			f.Comments[id] = &formItem{By: c.Author, D: c.Digest, Bot: c.IsBot}
 		}
-		out[PrFormKey(k)] = f
+		out[model.PrFormKey(k)] = f
 	}
 	return out
 }
@@ -546,7 +543,7 @@ func (s *Store) Save(ctx context.Context, w *model.Critic, snap *model.Snapshot,
 }
 
 // SaveRound is Save plus the round's fresh inbox items (nil leaves the inbox).
-func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snapshot, receipts Receipts, fresh map[string]InboxItem) error {
+func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snapshot, receipts Receipts, fresh map[string]model.InboxItem) error {
 	if w.FormID == "" {
 		return fmt.Errorf("critic %s has no form", w.Name)
 	}

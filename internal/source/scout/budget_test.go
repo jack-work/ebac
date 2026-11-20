@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // synthetic is a world of prs PRs and issues issues shaped like the live scout's (2026-11-11: 83 PRs, 60 issues; title

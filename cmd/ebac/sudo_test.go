@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gluck/ebac/internal/brief"
-	"github.com/gluck/ebac/internal/model"
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // One row per refused flag, in both spellings and both value forms: refused through the sudo door, accepted without

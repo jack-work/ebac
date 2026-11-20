@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge/forgetest"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/forge/forgetest"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // prDoc is one PR as the single-PR query answered it: one thread whose comment says body, and a second reviews

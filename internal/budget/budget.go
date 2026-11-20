@@ -13,6 +13,7 @@ package budget
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/gluck/ebac/sdk/model"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,15 +85,6 @@ func (c Config) keep(cl Class) float64 {
 		return k
 	}
 	return DefaultKeep[Backfill] // an unknown class waits like backfill
-}
-
-// Spend is what one round spent on one limit, with the upstream's own
-// account-wide view when it reported one.
-type Spend struct {
-	Limit     string    `json:"limit"`
-	N         float64   `json:"n"`
-	Remaining int       `json:"remaining"`         // -1 = not reported
-	ResetAt   time.Time `json:"reset_at,omitzero"` // zero = not reported
 }
 
 // Level is one limit's state, persisted and shown: the shared pool (Tokens)
@@ -259,7 +251,7 @@ func (l *Ledger) Reserve(cred string, cl Class, est map[string]float64) (Grant, 
 // its estimate goes back to (or comes out of) the bucket, which may go below
 // zero (a debt the refill pays before anything else is granted). The
 // upstream's account-wide remaining and reset are recorded for the floor.
-func (l *Ledger) Settle(g Grant, spent []Spend) {
+func (l *Ledger) Settle(g Grant, spent []model.Spend) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	lims, metered := l.cfg.Credentials[g.Cred]

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // validPostID keeps an id usable as one form path segment.

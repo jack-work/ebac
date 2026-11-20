@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/gluck/ebac/internal/form"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
 )
 
 // MarkGone writes the gone marker for one resource of a critic: what is gone,

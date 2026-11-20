@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
+	"github.com/gluck/ebac/sdk/forge"
 )
 
 func TestTombErrorClassification(t *testing.T) {

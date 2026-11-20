@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/forge"
-	"github.com/gluck/ebac/internal/model"
-	"github.com/gluck/ebac/internal/plugin"
-	"github.com/gluck/ebac/internal/tomb"
+	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
+	"github.com/gluck/ebac/sdk/plugin"
+	"github.com/gluck/ebac/sdk/tomb"
 )
 
 // Plugin serves approve-requests. GH, Teams, Grants and Now replace the real
