@@ -628,7 +628,8 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		}
 		remove := retireKeys(w, cur, set)
 		for k := range cur {
-			if k == "delta" || k == "sync" {
+			// succession and succession_state were the deleted supervisor's keys (step 4 M3): retired on every save.
+			if k == "delta" || k == "sync" || k == "succession" || k == "succession_state" {
 				remove = append(remove, k)
 			}
 			if strings.HasPrefix(k, brief.ProtocolKeyPrefix) {

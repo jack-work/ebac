@@ -15,10 +15,8 @@ import (
 // The reconciler.
 //
 // A critic exists in three places that can drift apart: a file in critics/, a
-// role form in figaro, and a systemd timer. Nothing keeps them in step —
-// selfcheck DETECTS divergence and stops there, deliberately, because it is
-// meant to be safe to run from a develop-mode seat. This is the half that
-// acts, and it runs rarely (every 30m) because every fix it makes is a write
+// role form in figaro, and a systemd timer. Nothing else keeps them in step.
+// This is the half that acts, and it runs rarely (every 30m) because every fix it makes is a write
 // somebody else might be making at the same time.
 //
 // It also owns the roster form. That is the single-writer answer to the index

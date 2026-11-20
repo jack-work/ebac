@@ -443,68 +443,6 @@ func (f *Figaro) AriaExists(ctx context.Context, id string) bool {
 	return true
 }
 
-// AriaFill reports context fill as a fraction, plus the fields it came from.
-// Never take a seat's word for this number.
-func (f *Figaro) AriaFill(ctx context.Context, id string) (fill float64, tokens, limit int, err error) {
-	ctx, cancel := f.bound(ctx)
-	defer cancel()
-	ang, e := f.Angelus()
-	if e != nil {
-		return 0, 0, 0, e
-	}
-	resp, e := AuditAng(rpc.MethodList, "", ang).ListGlobal(ctx)
-	if e != nil {
-		return 0, 0, 0, e
-	}
-	found := false
-	for _, r := range resp.Figaros {
-		if r.ID == id {
-			tokens, limit, found = r.ContextTokens, r.ContextLimit, true
-			break
-		}
-	}
-	if !found {
-		return 0, 0, 0, fmt.Errorf("aria %s not found", id)
-	}
-	if limit <= 0 {
-		// Unknown is not roomy. Reporting 0% for a seat that may be full
-		// is the direction that loses the assignment.
-		return 0, tokens, limit, fmt.Errorf("context_limit unknown for %s", id)
-	}
-	return float64(tokens) / float64(limit), tokens, limit, nil
-}
-
-func (f *Figaro) ForkAt(ctx context.Context, id string, turn int, outfits, prompt string) (string, error) {
-	ctx, cancel := f.bound(ctx)
-	defer cancel()
-	ang, err := f.Angelus()
-	if err != nil {
-		return "", err
-	}
-	var names []string
-	if outfits != "" {
-		names = splitComma(outfits)
-	}
-	resp, err := AuditAng(rpc.MethodFork, id, ang).Fork(ctx, id, uint64(turn), 0, names, nil)
-	if err != nil {
-		return "", fmt.Errorf("fork %s at turn %d: %w", id, turn, err)
-	}
-	// fork KEEPS the parent's id and mints an ALTERNATIVE: the branch is
-	// the alternative, not the continuation.
-	child := resp.Alternative
-	if child == "" {
-		return "", fmt.Errorf("fork of %s returned no id", id)
-	}
-	if prompt != "" {
-		if err := f.SendTo(ctx, child, prompt); err != nil {
-			// The fork happened; report the partial rather than losing
-			// the id, which would orphan a live aria.
-			return child, fmt.Errorf("forked %s but could not brief it: %w", child, err)
-		}
-	}
-	return child, nil
-}
-
 // ListFormIDs enumerates every unbound form the daemon knows about.
 func (f *Figaro) ListFormIDs(ctx context.Context) ([]string, error) {
 	ctx, cancel := f.bound(ctx)

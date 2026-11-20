@@ -199,8 +199,7 @@ func DisableTimer(name string) error {
 // The first version of this returned "active/enabled" and callers compared
 // against literals like "inactive/disabled". systemd actually emits
 // "not-found" for a unit that was never installed, so the roster's health
-// column scored an unarmed critic as "ok" while the selfcheck correctly
-// called it unarmed. Match the fact, not the shape it arrived in.
+// column scored an unarmed critic as "ok". Match the fact, not the shape it arrived in.
 type TimerStatus struct {
 	Active  bool
 	Enabled bool
@@ -219,7 +218,7 @@ func TimerState(name string) TimerStatus {
 	t.Active = activeErr == nil && activeOut == "active"
 	// An ELAPSED timer is "active" but will never fire again (every trigger is
 	// in the past: a drop-in that wiped OnUnitActiveSec left exactly that, and
-	// ls said "armed"). It is not armed: R3 re-arms it, selfcheck flags it.
+	// ls said "armed"). It is not armed: R3 re-arms it.
 	if t.Active {
 		if sub, _ := systemctlOut("show", unit, "-p", "SubState", "--value"); sub == "elapsed" {
 			t.Active, activeOut = false, "elapsed"

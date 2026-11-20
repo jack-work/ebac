@@ -103,8 +103,7 @@ func BuildRoster(ctx context.Context, st *form.Store, fig *figaro.Figaro, me str
 		row.Every = w.Interval().String()
 		row.End = w.EndLabel()
 
-		// Seat health is the SAME question the selfcheck asks, asked the
-		// same way. Two instruments that disagree about one fact are worse
+		// Seat health is asked the one way everything else asks it. Two instruments that disagree about one fact are worse
 		// than one instrument: the roster used to score an unreachable seat
 		// as "ok" because it only tested for emptiness.
 		seat, seatOK, _ := SeatOf(ctx, fig, w)
