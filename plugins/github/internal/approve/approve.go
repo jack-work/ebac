@@ -457,6 +457,12 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 		// This request's approve is on GitHub with no record here: settle it.
 		return found(rv), true, nil
 	}
+	if rv := forAsk(reviews, Body(w.Asker(), r.MsgID)); rv != nil {
+		// An approve for this ASK under any request id (a re-filed request
+		// after a push dismissed ours, or an interim approve with no marker),
+		// in any state: the ask was served; never post for it again.
+		return found(rv), true, nil
+	}
 	for _, rv := range reviews {
 		if rv.State != "APPROVED" {
 			continue
@@ -483,6 +489,18 @@ func decide(ctx context.Context, gh *GH, teams Teams, p Pass, id string, used ma
 	used[r.MsgID] = id
 	out.Log = append(out.Log, fmt.Sprintf("request %s: checks passed; approve of %s#%d prepared (posted at commit)", id, Repo, r.PR))
 	return Result{}, false, nil
+}
+
+// forAsk is a review whose body starts with the ask's Body, in ANY state:
+// Body names the asker and the Teams message, so it is the ask's whatever
+// request id carried it.
+func forAsk(rs []Review, body string) *Review {
+	for i := range rs {
+		if strings.HasPrefix(strings.TrimSpace(rs[i].Body), body) {
+			return &rs[i]
+		}
+	}
+	return nil
 }
 
 // ours is the review carrying marker, in ANY state: an approve of ours that a

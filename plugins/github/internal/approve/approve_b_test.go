@@ -185,3 +185,24 @@ func TestAPostErrorIsReadBackNeverRetried(t *testing.T) {
 		t.Fatalf("at LostAfter: %+v posts %d pings %+v", r, h.posts(), out.Pings)
 	}
 }
+
+// Review approve-b B1: after a push dismissed our approve, a RE-FILED request (new id, the old one removed or its
+// result overwritten) for the same ask posts nothing: the ask's Body in any state settles it. Also an interim approve
+// (Body, no marker). RED if the ask-body match goes (mutant A1: a second APPROVE for one ask).
+func TestARefiledRequestForAServedAskNeverPosts(t *testing.T) {
+	for _, c := range []struct {
+		desc  string
+		state string
+		body  string
+	}{
+		{"dismissed, marker of the old request", "DISMISSED", PostBody(watch.Asker(), msgID, "r1")},
+		{"approved, interim body without a marker", "APPROVED", Body(watch.Asker(), msgID)},
+	} {
+		h, tm := world()
+		h.reviews[110001] = append(h.reviews[110001], Review{ID: 880, State: c.state, Body: c.body, SubmittedAt: "2026-11-12T20:55:00Z"})
+		out, _ := run(t, h, tm, map[string]json.RawMessage{"r2": reqJSON(good())})
+		if r := out.Results["r2"]; !r.OK || r.ReviewID != 880 || h.posts() != 0 {
+			t.Errorf("%s: %+v posts %d", c.desc, r, h.posts())
+		}
+	}
+}

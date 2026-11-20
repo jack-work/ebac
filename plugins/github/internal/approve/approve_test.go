@@ -522,11 +522,11 @@ func TestLiveGrantShape(t *testing.T) {
 // not a past approve, so the approve is still posted.
 func TestApproveRecoveryNeedsAnApproval(t *testing.T) {
 	h, tm := world()
-	// A comment quoting the body without the marker is not ours: the approve is posted.
+	// A review carrying the ask's Body in a non-approve state: the ask is taken, never posted; a final refusal.
 	h.reviews[110001] = append(h.reviews[110001], Review{ID: 556, State: "COMMENTED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
-	if r := out.Results["r1"]; !r.OK || r.ReviewID == 556 || h.posts() != 1 {
-		t.Fatalf("a comment counted as the approve: %+v posts %d", r, h.posts())
+	if r := out.Results["r1"]; r.OK || r.Reason != ReadBackFailed+"review 556 carries the request's marker in state COMMENTED" || h.posts() != 0 {
+		t.Fatalf("a comment with the ask's body: %+v posts %d", r, h.posts())
 	}
 	// The marker on a non-approve review: ours, never posted again, a final refusal (not ok).
 	h, tm = world()
@@ -668,7 +668,8 @@ func TestAnApproveOnPageTwoIsFound(t *testing.T) {
 // not post again.
 func TestDismissedApproveCountsAsPosted(t *testing.T) {
 	h, tm := world()
-	h.reviews[110001] = append(h.reviews[110001], Review{ID: 557, State: "DISMISSED", Body: PostBody(watch.Asker(), msgID, "r1"), SubmittedAt: "2026-11-12T20:55:00Z"})
+	// The original intent (bd08e58): our approve as the interim posted it (Body, no marker), dismissed by a push.
+	h.reviews[110001] = append(h.reviews[110001], Review{ID: 557, State: "DISMISSED", Body: Body(watch.Asker(), msgID), SubmittedAt: "2026-11-12T20:55:00Z"})
 	out, _ := run(t, h, tm, map[string]json.RawMessage{"r1": reqJSON(good())})
 	if r := out.Results["r1"]; !r.OK || r.ReviewID != 557 || h.posts() != 0 {
 		t.Fatalf("dismissed approve: %+v posts %d", r, h.posts())

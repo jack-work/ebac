@@ -30,6 +30,8 @@ MUTANTS = [
      "\t\tif strings.Contains(rs[i].Body, marker) {\n", "\t\tif rs[i].State == \"APPROVED\" && strings.Contains(rs[i].Body, marker) {\n"),
     ("M2 org marker only on APPROVED", O + "orgapprove.go",
      "\t\tif strings.Contains(r.Body, approve.Marker(id)) ||", "\t\tif (r.State == \"APPROVED\" && strings.Contains(r.Body, approve.Marker(id))) ||"),
+    ("A1 approve drops the ask-body match", A + "approve.go",
+     "\tif rv := forAsk(reviews, Body(w.Asker(), r.MsgID)); rv != nil {\n", "\tif rv := forAsk(reviews, Body(w.Asker(), r.MsgID)); rv != nil && false {\n"),
     ("G1 single review page", A + "gh.go", "\t\tif len(rs) < ReviewsPerPage {\n", "\t\tif true {\n"),
     ("C1 approve checks re-run after the record", A + "approve.go",
      "\t\tif rec := out.Posts[id]; rec != nil {\n", "\t\tif rec := out.Posts[id]; rec != nil && false {\n"),
@@ -58,7 +60,7 @@ def test(tree):
 
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
-    if len(MUTANTS) < 14:
+    if len(MUTANTS) < 15:
         print(f"only {len(MUTANTS)} mutants", file=sys.stderr)
         sys.exit(2)
     ok, fails, out = test(root)
