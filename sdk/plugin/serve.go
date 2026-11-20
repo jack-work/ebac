@@ -21,6 +21,8 @@ type Caller interface {
 // apply (a blind marker, a failure count) returns a Reply with Error set.
 type Handler func(ctx context.Context, req Request) (*Reply, error)
 
+// Decode reads one plugin Reply: unknown fields and any other protocol version
+// are refused, so a plugin and a core out of step fail loudly.
 func Decode(plugin string, op Op, b []byte) (*Reply, error) {
 	var rep Reply
 	dec := json.NewDecoder(bytes.NewReader(b))
