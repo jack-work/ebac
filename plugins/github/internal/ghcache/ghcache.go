@@ -147,6 +147,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		for _, k := range prev.Wrote[p.Landed:] {
 			if e := ents[k]; e != nil {
 				e.Redo = true
+				e.Digest = "" // what was sent never landed: the rewrite must not be skipped as unchanged
 			}
 		}
 	}

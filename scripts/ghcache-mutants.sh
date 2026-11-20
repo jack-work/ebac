@@ -35,6 +35,7 @@ MUTANTS=(
   "N5|$G/ghcache.go|if c.want > c.got {|if c.want > c.got && false {|./$G/"
   "N6|$G/config.go|if c.Max < 1 \|\| c.Max > MaxMax {|if c.Max < 1 {|./$G/"
   "N7|sdk/forge/gh.go|return data, out, nil|return data, nil, nil|./sdk/forge/"
+  "N8|$G/ghcache.go|e.Digest = \"\" // what was sent never landed|_ = e.Digest // what was sent never landed|./$G/"
   "R9|$G/config.go|if !termRe.MatchString(t) {|if false {|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
@@ -68,5 +69,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 25 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 26 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad

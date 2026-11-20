@@ -157,3 +157,30 @@ func TestAnIncompleteSearchUntracksNothing(t *testing.T) {
 }
 
 type forgeErr = forge.GQLError
+
+// Review r2: a failed UPDATE of a child the core already holds is rewritten next round, though gh+parsed equal what
+// was sent. RED if the unlanded write's digest is kept (mutant N8): the redo read finds "unchanged" and writes nothing.
+func TestAnUnlandedUpdateOfAHeldChildIsRewritten(t *testing.T) {
+	gh := world(t)
+	c, ttl := cfg(t, hotAuthor)
+	r, _ := round(t, gh, State{}, c, ttl, t0)
+	if len(gh.children) != 2 {
+		t.Fatalf("children %v", gh.children)
+	}
+	gh.prs["bic/aether"][116018].UpdatedAt = "2026-11-20T04:04:00Z"
+	gh.prs["bic/aether"][127740].UpdatedAt = "2026-11-20T04:04:00Z"
+	gh.failLand = 0 // neither update lands
+	r, _ = round(t, gh, r.State, c, ttl, t0.Add(HotEvery))
+	if keys(r) != "aether-pr-116018,aether-pr-127740" || gh.landed != 0 {
+		t.Fatalf("updates: writes %q, landed %d", keys(r), gh.landed)
+	}
+	gh.failLand = -1
+	r, calls := round(t, gh, r.State, c, ttl, t0.Add(HotEvery+time.Minute))
+	if calls != 1 || keys(r) != "aether-pr-116018,aether-pr-127740" {
+		t.Fatalf("rewrite: %d calls, writes %q", calls, keys(r))
+	}
+	var g GH
+	if err := json.Unmarshal(r.Forms[0].Set["gh"], &g); err != nil || g.UpdatedAt != "2026-11-20T04:04:00Z" {
+		t.Fatalf("rewritten gh: %+v %v", g.UpdatedAt, err)
+	}
+}
