@@ -86,7 +86,7 @@ for a busy afternoon.
 | Mode | The seat's charge |
 |---|---|
 | `review` | Read the delta, tell the operator only what matters, ack, stay quiet. |
-| `develop` | Treat every delta as a claim to be falsified: hunt false positives, **false absences**, and mistiering; run `ebac selfcheck`; make one focused improvement with a test; file harness defects with `ebac issue`. |
+| `develop` | Treat every delta as a claim to be falsified: hunt false positives, **false absences**, and mistiering; make one focused improvement with a test; file harness defects with `ebac issue`. |
 | `reviewer` | Review someone else's PR: check out the head, verify before suggesting, post one terse review per head, never block. Every push wakes it. |
 
 Both modes are **read-only on the pull requests by default**. The brief says so in
@@ -205,20 +205,7 @@ literal and the old leaves are orphaned into flat garbage the same way.
 
 ebac therefore writes **top-level keys only, always to a complete value**,
 and anything a seat writes back is a **flat scalar** (`ack_round`, `ack_note`)
-reached through `ebac ack`. `selfcheck` check 6 detects the decoy signature
-in case it ever happens anyway.
-
-## Selfcheck
-
-Seven checks, ≤20 lines of output, each printing what it *measured*:
-
-```
-ebac selfcheck --strict
-```
-
-`UNTESTABLE` is a distinct verdict from `WARN` and carries the number it would
-have warned about — a check that cannot tell "not evaluable" from "failing"
-trains an operator to ignore warnings, and that costs more than any defect.
+reached through `ebac ack`.
 
 ## Plugins
 
@@ -238,7 +225,7 @@ stdout, stderr to the journal; 120 s timeout, 8 MiB reply cap; a crash, timeout 
 failed round. Ops: `round` (fetch and diff: events, inbox items, source form keys, gone markers,
 the critic's source fields and snapshot), `post` (posts the core has already authorized), `brief`
 (the wake text). The core owns everything figaro: the role form, trigger rules, pending events,
-delivery, lease, succession, archival and the schedule (ebacd).
+delivery, lease, archival and the schedule (ebacd).
 
 **Sandbox.** Each plugin execs under bubblewrap (path fixed at build time,
 `-X github.com/gluck/ebac/internal/pluginrun.BwrapPath=...`, never PATH): own user, pid and mount

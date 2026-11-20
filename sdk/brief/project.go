@@ -58,7 +58,6 @@ type HarnessContract struct {
 	Truncation string `json:"if_a_value_looks_cut"`
 	Rule       string `json:"key_writing_rule"`
 	Ack        string `json:"ack_when_done"`
-	Selfcheck  string `json:"selfcheck"`
 	Issue      string `json:"file_harness_bug"`
 	Authority  string `json:"authority"`
 	Post       string `json:"post"`
@@ -71,7 +70,6 @@ func NewHarnessContract(w *model.Critic) HarnessContract {
 		Rule:       "write ONLY post.<id>, and acknowledge with the ack command (it writes read.<critic>). ebac owns kind, critic, prs, harness and harness_protocol_*: anything written there is overwritten next round.",
 		Post:       fmt.Sprintf("Post through this form, never with gh directly: `ebac post --critic %s --pr <owner/repo#n> [--reply-to <thread id> [--react +1] [--resolve] | --path <file> --line <n>] [--event COMMENT|APPROVE] --body-file - < <file>` (the body on stdin: through the sudo door --body-file takes only -). --react reacts to the comment that opened the thread; --resolve resolves it after the reply; with either, --body-file is optional. A top-level PR comment omits --event; --event submits a review, and so does --path. ebac sends it within one round and writes post.<id>.sent (url), .reacted, .resolved, .refused (why) or .error. A pending (unsubmitted) review of yours on the PR swallows replies unseen and blocks reviews: ebac refuses those until the operator submits or deletes it.", w.Name),
 		Ack:        fmt.Sprintf("ebac ack --critic %s --round <delta.round> [--note '<one line>']", w.Name),
-		Selfcheck:  fmt.Sprintf("ebac selfcheck --critic %s", w.Name),
 		Authority:  "READ-ONLY on the pull requests: never comment, review, approve, push, label or merge. Report to the operator instead.",
 		Protocol:   "Your standing protocol is keys " + ProtocolKeyPrefix + "1, 2, ... read in order. Deliveries carry only the delta and the ack command.",
 	}

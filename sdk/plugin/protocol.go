@@ -12,7 +12,7 @@
 // else: it fetches, diffs, and returns events, inbox items, form keys, gone
 // markers and its own state. The core owns everything figaro: the role form
 // (one Commit per round), the trigger rules, pending events, delivery, the
-// lease, succession, archival and timers. Plugins run as the core's uid, so
+// lease, archival and timers. Plugins run as the core's uid, so
 // the boundary is the sandbox (Sandbox): each plugin execs under bubblewrap
 // with the angelus socket's directory hidden from its mount namespace.
 package plugin
@@ -184,9 +184,6 @@ type Reply struct {
 	Error string `json:"error,omitempty"`
 	// Archive asks the core to run its archival check (PR sources).
 	Archive bool `json:"archive,omitempty"`
-	// Succession asks the core to supervise the seat's succession after a
-	// delivered round.
-	Succession bool `json:"succession,omitempty"`
 	// Outbox says this source carries posts: the core flushes the outbox
 	// through OpPost after the round.
 	Outbox bool `json:"outbox,omitempty"`
@@ -218,7 +215,7 @@ func (r *Reply) SetKey(key string, v any) {
 }
 
 // Adopt copies the fields a source owns from the plugin's critic onto the
-// core's. Identity, mode, grants, delivery, triggers, succession, the outbox
+// core's. Identity, mode, grants, delivery, triggers, the outbox
 // watermark and archival stay the core's whatever the plugin returns.
 func Adopt(core, from *model.Critic) {
 	if from == nil {

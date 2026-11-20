@@ -81,7 +81,7 @@ func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) 
 //
 // The source plugin does the upstream half of the round (plugin.OpRound);
 // everything else here is the core's: trigger rules, pending events, the
-// one form patch, the outbox, delivery, succession and archival.
+// one form patch, the outbox, delivery and archival.
 // Poll runs one round for a critic, unless a figaro bounce has paused ebac
 // or the critic is backing off from an unreachable daemon (figbackoff.go).
 func (p *Poller) Poll(ctx context.Context, name string) error {
@@ -383,11 +383,6 @@ func (p *Poller) apply(ctx context.Context, w *model.Critic, rep *plugin.Reply) 
 	figaro.Renew(ctx, p.Fig, w.FormID)
 
 	derr := p.Deliver(ctx, w, rep.Snapshot)
-	if derr == nil && rep.Succession {
-		// Succession runs on the same heartbeat: the timer already fires
-		// and already knows the seat.
-		p.SuperviseSuccession(ctx, w)
-	}
 	if err := p.Store.SaveCritic(ctx, w); err != nil {
 		return err
 	}

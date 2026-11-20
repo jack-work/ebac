@@ -308,7 +308,7 @@ func round(ctx context.Context, gh *forge.GH, req plugin.Request, me string, rep
 		rep.Logf("%s: dropped %d closed/merged PR(s) past the archival grace: %s", name, len(dropped), strings.Join(dropped, ", "))
 	}
 	rep.Snapshot = next
-	rep.Outbox, rep.Succession, rep.Archive = true, true, true
+	rep.Outbox, rep.Archive = true, true
 }
 
 // pruneClosed drops a closed or merged PR from the critic and its snapshot

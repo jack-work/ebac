@@ -118,15 +118,6 @@ type Runtime struct {
 	// last wrote.
 	Roster json.RawMessage `json:"roster,omitempty"`
 
-	// Succession bookkeeping. Generation counts completed hand-overs, so a
-	// critic can say how many seats it has burned through.
-	Generation      int    `json:"generation,omitempty"`
-	Standby         string `json:"standby,omitempty"`
-	StandbyMintedAt string `json:"standby_minted_at,omitempty"`
-	// SuccessionReported is the holder last reported near capacity (report mode, no fork): one report per holder.
-	SuccessionReported string `json:"succession_reported,omitempty"`
-	LastRecast         string `json:"last_recast,omitempty"`
-
 	// OutboxWatermark is the form version up to which every post has
 	// reached an end (outbox.go).
 	OutboxWatermark uint64 `json:"outbox_watermark,omitempty"`

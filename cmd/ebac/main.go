@@ -103,7 +103,6 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             round now, keeping only tracked PRs; sizes before and after)
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
-  ebac selfcheck [--critic N]                harness invariants, for develop mode
   ebac issue  --critic N --title T --body-file - < F   file a harness defect
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
@@ -225,8 +224,6 @@ func main() {
 		err = cmdAck(ctx, g, args)
 	case "roster":
 		err = cmdRoster(ctx, g, args)
-	case "selfcheck":
-		err = cmdSelfcheck(ctx, g, args)
 	case "issue":
 		err = cmdIssue(ctx, g, args)
 	case "queue":

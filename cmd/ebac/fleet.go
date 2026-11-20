@@ -64,26 +64,7 @@ func cmdRoster(ctx context.Context, g globals, args []string) error {
 	return nil
 }
 
-// ---------- selfcheck / issue / gc ----------
-
-func cmdSelfcheck(ctx context.Context, g globals, args []string) error {
-	fs := flag.NewFlagSet("selfcheck", flag.ExitOnError)
-	name := fs.String("critic", "", "restrict to one critic")
-	strict := fs.Bool("strict", false, "exit nonzero if any check WARNs")
-	_ = fs.Parse(args)
-	st, err := form.NewStore(figaro.NewFigaro(g.figaro))
-	if err != nil {
-		return err
-	}
-	warns, err := fleet.Selfcheck(ctx, st, st.Fig, os.Stdout, *name)
-	if err != nil {
-		return err
-	}
-	if *strict && warns > 0 {
-		return fmt.Errorf("%d check(s) warned", warns)
-	}
-	return nil
-}
+// ---------- issue / gc ----------
 
 func cmdIssue(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("issue", flag.ExitOnError)

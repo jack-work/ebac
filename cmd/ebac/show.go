@@ -69,7 +69,7 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 		fmt.Printf("source: index, %s old\n", age.Round(time.Second))
 	}
 	if sum.Unhealthy > 0 {
-		fmt.Printf("%d unhealthy — ebac selfcheck\n", sum.Unhealthy)
+		fmt.Printf("%d unhealthy — ebac show --critic N\n", sum.Unhealthy)
 	}
 	return nil
 }
