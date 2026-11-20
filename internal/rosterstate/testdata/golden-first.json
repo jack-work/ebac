@@ -1,0 +1,16 @@
+{
+  "set": {
+    "forks": "alpha-leader/alpha-steward 1, loner.v2 1",
+    "role:alpha-builder": "@aaaa0003 -\u003e 22222222 lt-seat under alpha-leader/alpha-steward",
+    "role:alpha-leader": "@aaaa0001 -\u003e 11111111 lead-seat",
+    "role:alpha-steward": "@aaaa0002 -\u003e 11111111 lead-seat",
+    "role:ebac-pr-critic": "@aaaa0008 -\u003e 22222222 lt-seat under alpha-leader/alpha-steward",
+    "role:ghost": "@aaaa0004 -\u003e deadbeef (not in the store)",
+    "role:loner%2Ev2": "@aaaa0005 -\u003e 33333333 lone-seat",
+    "role:short-lived": "@aaaa0006 -\u003e 77777777 ttl-holder under alpha-leader/alpha-steward"
+  },
+  "unset": [
+    "updated"
+  ],
+  "done": true
+}

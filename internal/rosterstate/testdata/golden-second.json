@@ -1,0 +1,9 @@
+{
+  "set": {
+    "role:alpha-scout": "@aaaa0009 -\u003e 33333333 lone-seat"
+  },
+  "unset": [
+    "role:ghost"
+  ],
+  "done": true
+}
