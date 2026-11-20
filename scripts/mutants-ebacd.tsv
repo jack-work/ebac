@@ -121,9 +121,9 @@ R12-logins	internal/model/authority.go	96	\t\to.Logins, o.KnownBreaks = slices.C
 LIVE-L1-ls-live	cmd/ebac/show.go	36	\trows, sum, err := fleet.BuildRoster(ctx, st, st.Fig, "")	\trows, sum, age0, err := fleet.ReadRoster(ctx, st, st.Fig)\n\t_ = age0	./cmd/ebac	TestLiveLsShowsASetEndAtOnce
 LIVE-M1-merge	internal/form/formstate.go	584	\t\tmerged, c, merr := mergeCritic(base, cfgRaw, cur["critic"])	\t\tmerged, c, merr := json.RawMessage(cfgRaw), []string(nil), error(nil)\n\t\t_ = base	./internal/form	TestLiveRacingCriticSetSurvivesSave
 A11-creation-least	internal/model/authority.go	120	\ta := Authority{Source: w.Source, Mode: mode}	\ta := AuthorityOf(w)	./internal/model	TestCreationAuthority|TestAuthorityReadTargets
-G1-check-differs	sdk/model/registry.go	60	\t\t\tout = append(out, fmt.Sprintf("%s: critic.%s differs", name, k))\n		./sdk/model	TestCheckRegistrations
-G2-check-undeclared	sdk/model/registry.go	65	\t\t\tout = append(out, fmt.Sprintf("%s: live (form %s) but undeclared", name, l.Form))\n		./sdk/model	TestCheckRegistrations
+G1-check-differs	sdk/model/registry.go	60	\t\t\tout = append(out, fmt.Sprintf("%s: critic.%s differs", name, k))\n	\t\t\t_ = k\n	./sdk/model	TestCheckRegistrations
+G2-check-undeclared	sdk/model/registry.go	65	\t\t\tout = append(out, fmt.Sprintf("%s: live (form %s) but undeclared", name, l.Form))\n	\t\t\t_ = l\n	./sdk/model	TestCheckRegistrations
 G3-check-form	sdk/model/registry.go	56	\t\tif l.Form != r.Form {	\t\tif false {	./sdk/model	TestCheckRegistrations
-G4-undeclared-flag	internal/form/formstate.go	318	\tw.Undeclared = undeclared(w.Name, w.FormID)\n		./internal/form	TestUndeclared
-G5-undeclared-form	internal/form/formstate.go	1053	\treturn !ok || d.Form != formID	\treturn !ok	./internal/form	TestUndeclared
+G4-undeclared-flag	internal/form/formstate.go	318	\tw.Undeclared = undeclared(w.Name, w.FormID)\n		./internal/form	TestUndeclared|TestCriticLoadSetsUndeclared
+G5-undeclared-form	internal/form/formstate.go	1053	\treturn !ok || d.Form != formID	\t_ = d\n\treturn !ok	./internal/form	TestUndeclared
 G6-ls-flag	internal/fleet/roster.go	192	\tcase w.Undeclared:\n\t\treturn model.UndeclaredNote\n		./internal/fleet	TestUndeclared

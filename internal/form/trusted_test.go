@@ -134,3 +134,22 @@ func TestUndeclaredFlag(t *testing.T) {
 		t.Fatal("flagged with nothing declared")
 	}
 }
+
+// The flag reaches the loaded critic: Critic() sets Undeclared from the registrations. RED if the load stops asking.
+func TestCriticLoadSetsUndeclared(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	_ = os.WriteFile(p, []byte(`{"registrations":{"a":{"form":"@a","critic":{}}}}`), 0o600)
+	ResetTrusted(p)
+	t.Cleanup(func() { ResetTrusted(model.TrustedConfigPath) })
+	for _, c := range []struct {
+		name, form string
+		want       bool
+	}{{"a", "@a", false}, {"b", "@b", true}} {
+		b, _ := json.Marshal(map[string]any{"name": c.name})
+		w, err := (&CriticForm{ID: c.form, Keys: map[string]json.RawMessage{model.CriticKey: b}}).Critic()
+		if err != nil || w.Undeclared != c.want {
+			t.Errorf("%s: undeclared=%v err %v, want %v", c.name, w.Undeclared, err, c.want)
+		}
+	}
+}
