@@ -22,7 +22,7 @@ const SearchFirst = 100
 const markSel = `number updatedAt headRefOid state isDraft commits(last:1){nodes{commit{statusCheckRollup{state}}}}`
 
 // deepSel is everything gh and parsed are built from.
-const deepSel = `number url title body state isDraft mergeable mergeStateStatus headRefOid headRefName baseRefName additions deletions updatedAt createdAt
+const deepSel = `id number url title body state isDraft mergeable mergeStateStatus headRefOid headRefName baseRefName additions deletions updatedAt createdAt
  author{login} labels(first:20){totalCount nodes{name}}
  ready: timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{... on ReadyForReviewEvent{createdAt}}}
  commits(last:1){nodes{commit{tree{oid} statusCheckRollup{state contexts(first:60){totalCount nodes{__typename ... on CheckRun{name conclusion status detailsUrl completedAt} ... on StatusContext{context state targetUrl}}}}}}}
@@ -231,6 +231,7 @@ type Context struct {
 
 // PR is the deep read of one pull request.
 type PR struct {
+	ID        string `json:"id"` // the node id the writes name
 	Number    int    `json:"number"`
 	URL       string `json:"url"`
 	Title     string `json:"title"`

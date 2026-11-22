@@ -1,6 +1,6 @@
 # Internal names (case-insensitive regex, one per line). A hit is a CANDIDATE: a fork judges context
 # (e.g. "steward" or "knight" in ordinary prose is not a disclosure).
-# ebac copy (internal/poll/disclose_names.txt): a HARD refuse list. Plain prose words (minister, knight, thinker,
+# ebac copy (sdk/disclose/disclose_names.txt): a HARD refuse list. Plain prose words (minister, knight, thinker,
 # secretary, steward, aria, merge queue, notes/, bare band) and "fork" after a hex id are dropped (ebac-leader, 11-16).
 \bcheroot\b
 \bwarden\b

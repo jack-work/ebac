@@ -73,6 +73,13 @@ func TestHelperProcess(t *testing.T) {
 	q := fakegql.Query(rest)
 
 	switch scenario {
+	case "mutate":
+		// Echo the argv (after the binary) as the mutation's data, so a test sees exactly what gh was given.
+		b, _ := json.Marshal(map[string]any{"data": map[string]any{"argv": rest}})
+		os.Stdout.Write(b)
+	case "mutate-refused":
+		// GitHub's shape for a refused mutation: null data plus an error (gh exits 0 on this with -f query=).
+		os.Stdout.WriteString(`{"data":{"addLabelsToLabelable":null},"errors":[{"type":"FORBIDDEN","path":["addLabelsToLabelable"],"message":"Resource not accessible by integration"}]}`)
 	case "partial":
 		// The measured GHE shape of an aliased read naming a missing PR: null data, a NOT_FOUND on its path.
 		os.Stdout.WriteString(`{"data":{"rateLimit":{"cost":1,"remaining":4888,"resetAt":"2026-11-20T05:00:00Z"},"r0":{"p1":{"number":1},"p99999999":null}},` +
@@ -354,5 +361,36 @@ func TestGraphQLPartialKeepsTheAnsweredAliases(t *testing.T) {
 	if _, err := g.GraphQL(context.Background(), `{ r0: repository(owner:"bic",name:"aether"){ p1: pullRequest(number:1){number} } }`); err == nil ||
 		err.Error() != "graphql: Could not resolve to a PullRequest with the number of 99999999." {
 		t.Fatalf("GraphQL on the same answer: %v", err)
+	}
+}
+
+// Mutate hands gh the mutation and each variable as one -f argument, sorted by name, the body verbatim (quotes,
+// newlines, a leading @ or = are not interpreted by -f); it counts one call of one point; an error beside the data
+// fails the write with its type and message. RED if the variables are reordered, re-quoted or dropped, or the
+// error beside the data is ignored.
+func TestMutateSendsVariablesVerbatimAndFailsOnAnyError(t *testing.T) {
+	g := fakeGH(t, "mutate")
+	body := "line one \"quoted\"\n## heading\n@not-a-file =x"
+	data, err := g.Mutate(context.Background(), `mutation($b:String!){x(input:{body:$b}){y}}`, map[string]string{"b": body, "a": "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Argv []string `json:"argv"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"api", "graphql", "-f", `query=mutation($b:String!){x(input:{body:$b}){y}}`, "-f", "a=first", "-f", "b=" + body}
+	if strings.Join(got.Argv, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv\n got %q\nwant %q", got.Argv, want)
+	}
+	if s := g.Spent(); s.Calls != 1 || s.Points != 1 || s.All != 1 {
+		t.Fatalf("spend %+v, want 1 call, 1 point, 1 gh call", s)
+	}
+	r := fakeGH(t, "mutate-refused")
+	if _, err := r.Mutate(context.Background(), `mutation{addLabelsToLabelable(input:{labelableId:"PR_1",labelIds:["LA_1"]}){clientMutationId}}`, nil); err == nil ||
+		err.Error() != "mutation: FORBIDDEN Resource not accessible by integration" {
+		t.Fatalf("refused mutation: %v", err)
 	}
 }

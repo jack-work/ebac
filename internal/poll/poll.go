@@ -173,9 +173,10 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 			err = fmt.Errorf("list arias: %w", err)
 		}
 	}
-	if err == nil && w.SourceName() == model.SourceKeelBranches {
+	if err == nil && (w.SourceName() == model.SourceKeelBranches || w.SourceName() == model.SourceGHCache) {
 		// Keel branches cite their child forms and read each one's
-		// holder-owned keys (code_ready, ready) and holder.
+		// holder-owned keys (code_ready, ready) and holder; the GitHub cache
+		// reads each entity form's gh and sync, where seats edit (DESIGN 2).
 		req.Children, req.Owned = w.Runtime.Children, p.readOwned(ctx, w)
 	}
 	if err == nil && w.SourceName() == model.SourceScout {

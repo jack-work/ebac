@@ -48,6 +48,13 @@ type Config struct {
 	TTL   struct {
 		Closed string `json:"closed,omitempty"` // a Go duration; "" is DefaultClosedTTL
 	} `json:"ttl,omitzero"`
+	// Maintainer, Scope, WriteFields and ApprovePRs are accepted and never
+	// used: the cache writes and wakes only by ebac's trusted config,
+	// and the core flags these in ebac ls (form config ignored).
+	Maintainer  json.RawMessage `json:"maintainer,omitempty"`
+	Scope       json.RawMessage `json:"scope,omitempty"`
+	WriteFields json.RawMessage `json:"write_fields,omitempty"`
+	ApprovePRs  json.RawMessage `json:"approve_prs,omitempty"`
 }
 
 // Rule tracks a PR when any of its selectors matches: an author, a label, a

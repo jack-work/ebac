@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluck/ebac/sdk/forge"
+	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
@@ -18,6 +19,8 @@ import (
 type GitHub interface {
 	GraphQLPartial(ctx context.Context, query string) (json.RawMessage, []forge.GQLError, error)
 	PullHeads(ctx context.Context, repo string, prs []int) (map[int]string, error)
+	// Mutate is one GraphQL write (slice 3: sync.go).
+	Mutate(ctx context.Context, mutation string, vars map[string]string) (json.RawMessage, error)
 }
 
 // MaxForm caps an entity form's gh + parsed + sync (DESIGN 10: 16 KB).
@@ -55,6 +58,20 @@ type Entity struct {
 	// Redo: read and write it again this round (its last write did not land,
 	// or its deep read failed).
 	Redo bool `json:"redo,omitempty"`
+
+	// The write path (sync.go). Base and RO are what the form showed when
+	// the sync last agreed with GitHub (Pend until its write lands); Alarms
+	// and Conflicts are mirrored to sync.alarm / sync.conflicts until fixed
+	// or acked; Tries counts a push's stale or failed rounds; Sent are the
+	// hashes of replies posted (never posted twice).
+	Base      *Base                      `json:"base,omitempty"`
+	RO        string                     `json:"ro,omitempty"`
+	Pend      *Agreed                    `json:"pend,omitempty"`
+	pushing   *Pushed                    // this round's own GitHub writes (sync.go), into Pend
+	Alarms    map[string]Alarm           `json:"alarms,omitempty"`
+	Conflicts map[string]json.RawMessage `json:"conflicts,omitempty"`
+	Tries     map[string]int             `json:"tries,omitempty"`
+	Sent      []string                   `json:"sent,omitempty"`
 }
 
 // Pass is one round's input.
@@ -67,6 +84,16 @@ type Pass struct {
 	// (runtime.forms_landed).
 	Children map[string]string
 	Landed   int
+	// Owned are the entity forms' gh and sync as the core read them this
+	// round (Request.Owned); nil: the core passed none (no write path).
+	Owned map[string]map[string]json.RawMessage
+	// Auth says why a write may not go out ("" if it may): the trusted
+	// scope (model.AuthorizeGHWrite). nil refuses every write.
+	Auth func(e model.GHEntity, field string) string
+	// Maintainer is the trusted role the alarms wake; Critic names the
+	// forms in the pings.
+	Maintainer string
+	Critic     string
 }
 
 // Result is what a round produces.
@@ -74,6 +101,7 @@ type Result struct {
 	State State
 	Forms []plugin.FormWrite
 	Track map[string]Track
+	Pings []plugin.Ping
 	Log   []string
 }
 
@@ -92,6 +120,10 @@ type SyncKey struct {
 	At      string   `json:"at"`
 	Errors  []string `json:"errors,omitempty"`
 	Trimmed []string `json:"trimmed,omitempty"` // fields cut to fit MaxForm
+	// Alarm is sync.alarm.<kind>.<field> (DESIGN 8) and Conflicts the
+	// form's values GitHub's overrode (sync.conflicts.<field>).
+	Alarm     map[string]map[string]Alarm `json:"alarm,omitempty"`
+	Conflicts map[string]json.RawMessage  `json:"conflicts,omitempty"`
 }
 
 func (e *Entity) ended() bool { return e.State == "MERGED" || e.State == "CLOSED" }
@@ -142,14 +174,34 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// an entity written but not among the core's children was never minted.
 	// Both are read and written again. A child the core holds that the
 	// cache no longer tracks (a retire that did not land) is retired again.
+	unlanded := map[string]bool{}
 	if p.Landed < len(prev.Wrote) {
 		logf("%d of %d form write(s) of the last round did not land: redone", len(prev.Wrote)-p.Landed, len(prev.Wrote))
 		for _, k := range prev.Wrote[p.Landed:] {
+			unlanded[k] = true
 			if e := ents[k]; e != nil {
 				e.Redo = true
 				e.Digest = "" // what was sent never landed: the rewrite must not be skipped as unchanged
 			}
 		}
+	}
+	// A base agreed last round counts once the form shows it: its write
+	// landed (or was not needed). An unlanded one is dropped: the form still
+	// shows the old base, and a diff against the new one would read GitHub's
+	// pulled change as a seat's edit and push it back.
+	for k, e := range ents {
+		switch {
+		case e.Pend != nil && !unlanded[k]:
+			b := e.Pend.Base
+			e.Base, e.RO = &b, e.Pend.RO
+		case e.Pend != nil && e.Pend.Pushed != nil && e.Base != nil:
+			// The form write did not land, but our GitHub writes did: GitHub
+			// and the base agree on those fields (a form still showing the
+			// old value asks to write it back).
+			b := e.Pend.Pushed.onto(*e.Base)
+			e.Base = &b
+		}
+		e.Pend = nil
 	}
 	for k, e := range ents {
 		if _, ok := p.Children[k]; !ok && e.Digest != "" && !e.Redo {
@@ -372,6 +424,41 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 
+	// 4b. The entity forms as the core read them: acked alarms clear; a form
+	// asking for a write, edited outside its write fields or unparseable is
+	// read deep this round (the three-way runs on a fresh GitHub read).
+	sy := &syncer{ctx: ctx, gh: gh, p: p, now: now, logf: logf, children: p.Children}
+	forms := map[string]*formView{}
+	forced := map[string]bool{}
+	for k, e := range ents {
+		owned, ok := p.Owned[k]
+		if !ok {
+			continue
+		}
+		fv := readForm(owned)
+		forms[k] = fv
+		for _, key := range fv.acks {
+			if _, had := e.Alarms[key]; had {
+				delete(e.Alarms, key)
+				_, field, _ := strings.Cut(key, ".")
+				delete(e.Conflicts, field)
+				delete(e.Tries, field)
+				e.Redo, forced[k] = true, true
+				logf("%s: sync.alarm.%s acked: cleared", k, key)
+			}
+		}
+		switch {
+		case fv.bad != nil:
+			e.Redo = true
+		case fv.gh != nil && e.Base == nil:
+			// No base yet (a form written before the write path): read it
+			// deep now, so a base is agreed within one round of the rollout.
+			e.Redo = true
+		case fv.gh != nil && (pending(fv.gh, e.Base) || (e.RO != "" && roHash(fv.gh) != e.RO) || len(fv.unknown) > 0):
+			e.Redo = true
+		}
+	}
+
 	// 5. Deep reads: new entities, moved marks, moved heads, redos, and
 	// unsettled mergeability when its marks were read.
 	var deep []Ref
@@ -432,8 +519,35 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 				}
 				e.Mark, e.DeepAt, e.MarkAt, e.State, e.Redo = pr.Mark(), now, now, pr.State, false
 				e.Unsettled = pr.State == "OPEN" && (pr.Mergeable == "UNKNOWN" || pr.MergeSt == "UNKNOWN")
-				fw, digest := entityWrite(k, pr, per[k], now)
-				if _, held := p.Children[k]; digest != e.Digest || !held {
+				_, held := p.Children[k]
+				fv := forms[k]
+				if p.Owned != nil && held && fv == nil {
+					// The core could not read the form: writing it blind could
+					// clobber a seat's edit. Read and written next round.
+					e.Redo = true
+					logf("%s: form unreadable this round: not written", k)
+					continue
+				}
+				g, notes := sy.entity(k, e, pr, GHOf(pr), fv)
+				fw, digest, final := entityWrite(k, pr, g, append(per[k], notes...), e, now)
+				e.Pend.RO = roHash(&final)
+				if digest != e.Digest || !held || forced[k] || (fv != nil && !sameJSON(fv.ghRaw, fw.Set["gh"])) {
+					if fv != nil {
+						// Every key this write overwrites must still be as the
+						// core read it, including absent (a seat creating it
+						// meanwhile moved the form).
+						fw.Expect = map[string]json.RawMessage{}
+						if len(fv.ghRaw) > 0 {
+							fw.Expect["gh"] = fv.ghRaw
+						} else {
+							fw.ExpectAbsent = append(fw.ExpectAbsent, "gh")
+						}
+						if len(fv.syncRaw) > 0 {
+							fw.Expect["sync"] = fv.syncRaw
+						} else {
+							fw.ExpectAbsent = append(fw.ExpectAbsent, "sync")
+						}
+					}
 					r.Forms = append(r.Forms, fw)
 					e.Digest = digest
 				}
@@ -454,6 +568,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 		r.Track[fmt.Sprintf("%s#%d", e.Repo, e.N)] = Track{Form: k, Rule: e.Rule, Tier: e.Tier, Since: e.Since.Format(time.RFC3339), State: st}
 	}
+	r.Pings = sy.pings(p.Critic)
 	sort.Slice(r.Forms, func(i, j int) bool { return r.Forms[i].Key < r.Forms[j].Key })
 	for _, f := range r.Forms {
 		r.State.Wrote = append(r.State.Wrote, f.Key)
@@ -469,13 +584,17 @@ func tierOr(t string) string {
 	return t
 }
 
-// entityWrite builds one entity form write and the digest of its gh+parsed.
-// errs are the PR's partial-read errors.
-func entityWrite(key string, pr *PR, errs []string, now time.Time) (plugin.FormWrite, string) {
-	g := GHOf(pr)
+// entityWrite builds one entity form write of g (GHOf(pr) after the sync),
+// the digest of its gh, parsed, alarms and conflicts, and the gh as written
+// (after trims). errs are the PR's partial-read errors and the sync's notes.
+func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Time) (plugin.FormWrite, string, GH) {
 	ps := Parse(pr)
 	m := pr.Mark()
-	sy := SyncKey{Version: m.Head + "|" + pr.UpdatedAt + "|" + pr.State + "|" + m.Rollup, At: now.Format(time.RFC3339)}
+	sy := SyncKey{Version: m.Head + "|" + pr.UpdatedAt + "|" + pr.State + "|" + m.Rollup, At: now.Format(time.RFC3339),
+		Alarm: syncKeyAlarms(e), Conflicts: e.Conflicts}
+	if len(sy.Conflicts) == 0 {
+		sy.Conflicts = nil
+	}
 	sy.Errors = append(append([]string{}, errs...), ps.Errors...)
 	for _, c := range []struct {
 		what      string
@@ -519,7 +638,16 @@ func entityWrite(key string, pr *PR, errs []string, now time.Time) (plugin.FormW
 	}
 	gj, pj := mustJSON(g), mustJSON(ps)
 	return plugin.FormWrite{Key: key, Set: map[string]json.RawMessage{"gh": gj, "parsed": pj, "sync": mustJSON(sy)}},
-		hash12(string(gj) + string(pj))
+		hash12(string(gj) + string(pj) + string(mustJSON(sy.Alarm)) + string(mustJSON(sy.Conflicts))), g
+}
+
+// sameJSON: a and b are the same JSON value (key order and spacing aside).
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return string(mustJSON(x)) == string(mustJSON(y))
 }
 
 func checkCount(pr *PR) int {

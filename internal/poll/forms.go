@@ -73,6 +73,16 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 			}
 			continue
 		}
+		for k := range fw.Expect {
+			if k == "" || strings.ContainsAny(k, ".*") {
+				return fmt.Errorf("%s may not expect %q (top-level keys only): reply refused", where, k)
+			}
+		}
+		for _, k := range fw.ExpectAbsent {
+			if k == "" || strings.ContainsAny(k, ".*") {
+				return fmt.Errorf("%s may not expect %q (top-level keys only): reply refused", where, k)
+			}
+		}
 		switch {
 		case fw.Inputs || fw.Key == "":
 			return fmt.Errorf("%s: %s writes only child forms (want a key): reply refused", where, src)
@@ -158,6 +168,13 @@ func (p *Poller) landForms(ctx context.Context, w *model.Critic, rep *plugin.Rep
 		} else {
 			err = p.writeChild(ctx, w, fw)
 		}
+		if errors.Is(err, errMoved) {
+			// Not a failure: this write and the rest are redone next round
+			// (the plugin reads forms_landed), against the seat's edit.
+			fmt.Fprintf(p.Out, "%s: form write %s not landed: %v; it and the %d after it are redone next round\n", w.Name, describe(fw), err, len(rep.Forms)-int(w.Runtime.FormsLanded)-1)
+			err = nil
+			break
+		}
 		if err != nil {
 			err = fmt.Errorf("%s: form write %s: %w", w.Name, describe(fw), err)
 			break
@@ -183,27 +200,59 @@ const childKind = "ebac.child"
 
 func childName(w *model.Critic, key string) string { return "ebac-" + w.Name + "-" + key }
 
+// errMoved: a child write's Expect no longer held (a seat edited the form
+// after the core read it this round): nothing of it was written.
+var errMoved = errors.New("the form moved since this round read it (expect)")
+
 // commitForm writes set and unset on a form through form.Commit, only the keys
-// whose value changed.
-func (p *Poller) commitForm(ctx context.Context, id string, set map[string]json.RawMessage, unset []string) error {
+// whose value changed, and only while every expect key still holds the value
+// it was read with (else nothing, errMoved): the check and the write are one
+// versioned commit.
+func (p *Poller) commitForm(ctx context.Context, id string, set map[string]json.RawMessage, unset []string, expect map[string]json.RawMessage, absent []string) error {
 	if len(set) == 0 && len(unset) == 0 {
 		return nil
 	}
-	return p.Store.Commit(ctx, id, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
-		out := map[string]json.RawMessage{}
-		for k, v := range set {
-			if !jsonEqual(cur[k], v) {
-				out[k] = v
-			}
-		}
+	moved := false
+	err := p.Store.Commit(ctx, id, func(cur map[string]json.RawMessage, _ form.EbacState) (map[string]json.RawMessage, []string) {
+		var out map[string]json.RawMessage
 		var gone []string
-		for _, k := range unset {
-			if _, ok := cur[k]; ok {
-				gone = append(gone, k)
-			}
-		}
+		out, gone, moved = childPatch(cur, set, unset, expect, absent)
 		return out, gone
 	})
+	if err == nil && moved {
+		return errMoved
+	}
+	return err
+}
+
+// childPatch is one commit's patch of a form now holding cur: the set keys
+// whose value changed and the unset keys present, or nothing and moved when
+// an expect key no longer holds its value (an absent key holds no value) or
+// an expected-absent key is present.
+func childPatch(cur, set map[string]json.RawMessage, unset []string, expect map[string]json.RawMessage, absent []string) (map[string]json.RawMessage, []string, bool) {
+	for k, v := range expect {
+		if !jsonEqual(cur[k], v) {
+			return nil, nil, true
+		}
+	}
+	for _, k := range absent {
+		if _, ok := cur[k]; ok {
+			return nil, nil, true
+		}
+	}
+	out := map[string]json.RawMessage{}
+	for k, v := range set {
+		if !jsonEqual(cur[k], v) {
+			out[k] = v
+		}
+	}
+	var gone []string
+	for _, k := range unset {
+		if _, ok := cur[k]; ok {
+			gone = append(gone, k)
+		}
+	}
+	return out, gone, false
 }
 
 // writeChild lands one child write. A child is minted on its first write (name
@@ -227,7 +276,7 @@ func (p *Poller) writeChild(ctx context.Context, w *model.Critic, fw plugin.Form
 			}
 			w.Runtime.Children[fw.Key] = id
 			if err := p.commitForm(ctx, id, map[string]json.RawMessage{"kind": model.MustJSON(childKind),
-				"parent_critic": model.MustJSON(w.Name), "parent_form": model.MustJSON(w.FormID)}, nil); err != nil {
+				"parent_critic": model.MustJSON(w.Name), "parent_form": model.MustJSON(w.FormID)}, nil, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -239,7 +288,11 @@ func (p *Poller) writeChild(ctx context.Context, w *model.Critic, fw plugin.Form
 			}
 			set["name"] = model.MustJSON(model.ArchivedFormPrefix + w.Name + "-" + fw.Key)
 		}
-		err := p.commitForm(ctx, id, set, fw.Unset)
+		expect, absent := fw.Expect, fw.ExpectAbsent
+		if attempt > 0 {
+			expect, absent = nil, nil // a fresh mint: nothing was read from it
+		}
+		err := p.commitForm(ctx, id, set, fw.Unset, expect, absent)
 		if errors.Is(err, figaro.ErrFormGone) && attempt == 0 && !fw.Retire {
 			id = "" // the child lapsed or was removed: mint it again
 			continue
@@ -269,18 +322,23 @@ func (p *Poller) renewChildren(ctx context.Context, w *model.Critic) {
 	}
 }
 
-// readOwned is each child's holder-owned keys (model.ChildOwnerKeys) and its
-// target-aria. An unreadable child is skipped: its owner keys are not news
-// this round.
+// readOwned is each child's holder-owned keys (model.ChildOwnerKeys; for the
+// GitHub cache model.GHCacheChildReadKeys, the keys seats edit) and its
+// target-aria, read fresh each round. An unreadable child is skipped: its
+// owner keys are not news this round.
 func (p *Poller) readOwned(ctx context.Context, w *model.Critic) map[string]map[string]json.RawMessage {
 	out := map[string]map[string]json.RawMessage{}
+	keys := model.ChildOwnerKeys
+	if w.SourceName() == model.SourceGHCache {
+		keys = model.GHCacheChildReadKeys
+	}
 	for key, id := range w.Runtime.Children {
 		f, err := p.Store.ReadForm(ctx, id)
 		if err != nil {
 			continue
 		}
 		m := map[string]json.RawMessage{}
-		for _, k := range append([]string{"target-aria"}, model.ChildOwnerKeys...) {
+		for _, k := range append([]string{"target-aria"}, keys...) {
 			if v, ok := f.Keys[k]; ok {
 				m[k] = v
 			}
@@ -303,8 +361,17 @@ func ValidatePings(w *model.Critic, rep *plugin.Reply) error {
 		return nil
 	}
 	src := w.SourceName()
-	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove && src != model.SourceOrgApprove {
+	if src != model.SourceScout && src != model.SourceKeelBranches && src != model.SourceApprove && src != model.SourceOrgApprove && src != model.SourceGHCache {
 		return fmt.Errorf("source %s may not ping roles: reply refused", w.SourceName())
+	}
+	if src == model.SourceGHCache {
+		// Sync alarms wake only the trusted maintainer (DESIGN 8): never
+		// a role named on a seat-writable form.
+		for i, pg := range rep.Pings {
+			if w.Maintainer == "" || pg.To != w.Maintainer {
+				return fmt.Errorf("ping %d: the GitHub cache pings only its trusted maintainer: reply refused", i)
+			}
+		}
 	}
 	if src == model.SourceApprove {
 		for i, pg := range rep.Pings {

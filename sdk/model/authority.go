@@ -33,6 +33,17 @@ type Authority struct {
 	TeamsChat   string   `json:"teams_chat,omitempty"`
 	Logins      []string `json:"logins,omitempty"`
 	KnownBreaks []string `json:"known_breaks,omitempty"`
+	// Scope and WriteFields are a github-cache critic's write authority
+	// (model.GHWrite); ApprovePRs are the only
+	// "owner/name#n@<head sha>" a reviewer critic may approve, and
+	// AutomatedMarkers the body markers that make a REQUEST_CHANGES or a
+	// blocking thread automated (not a blocker: ApproveBlockers); Maintainer
+	// is the role the critic's alarms wake.
+	Scope            *GHScope `json:"scope,omitempty"`
+	WriteFields      []string `json:"write_fields,omitempty"`
+	Maintainer       string   `json:"maintainer,omitempty"`
+	ApprovePRs       []string `json:"approve_prs,omitempty"`
+	AutomatedMarkers []string `json:"automated_markers,omitempty"`
 }
 
 // AuthorityOf reads a critic's authority fields.
@@ -48,6 +59,12 @@ func AuthorityOf(w *Critic) Authority {
 	if c := w.Chat; c != nil {
 		a.TeamsChat = c.ID
 	}
+	if g := w.GHWrite; g != nil {
+		sc := g.Scope
+		a.Scope, a.WriteFields = &sc, slices.Clone(g.Fields)
+	}
+	a.Maintainer = w.Maintainer
+	a.ApprovePRs, a.AutomatedMarkers = slices.Clone(w.ApprovePRs), slices.Clone(w.AutomatedMarkers)
 	return a
 }
 
@@ -98,6 +115,19 @@ func (a Authority) Apply(w *Critic) []string {
 	if c := w.Chat; c != nil {
 		set("chat.id", c.ID, a.TeamsChat, &c.ID)
 	}
+	g := a.ghWrite()
+	if string(MustJSON(w.GHWrite)) != string(MustJSON(g)) {
+		ignored = append(ignored, "gh_write")
+	}
+	w.GHWrite = g
+	set("maintainer", w.Maintainer, a.Maintainer, &w.Maintainer)
+	if !slices.Equal(w.ApprovePRs, a.ApprovePRs) {
+		ignored = append(ignored, "approve_prs")
+	}
+	if !slices.Equal(w.AutomatedMarkers, a.AutomatedMarkers) {
+		ignored = append(ignored, "automated_markers")
+	}
+	w.ApprovePRs, w.AutomatedMarkers = slices.Clone(a.ApprovePRs), slices.Clone(a.AutomatedMarkers)
 	return ignored
 }
 

@@ -52,7 +52,13 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 			prev = State{}
 		}
 	}
-	r, err := Run(ctx, gh, prev, Pass{Config: cfg, ClosedTTL: ttl, Now: now(), Children: w.Runtime.Children, Landed: w.Runtime.FormsLanded})
+	pass := Pass{Config: cfg, ClosedTTL: ttl, Now: now(), Children: w.Runtime.Children, Landed: w.Runtime.FormsLanded,
+		Owned: req.Owned, Critic: w.Name,
+		// Every write is authorized against the trusted scope the core
+		// applied to this critic (model.GHWrite), never the form's config.
+		Auth:       func(e model.GHEntity, field string) string { return model.AuthorizeGHWrite(w, e, field) },
+		Maintainer: w.Maintainer}
+	r, err := Run(ctx, gh, prev, pass)
 	for _, l := range r.Log {
 		rep.Logf("%s: %s", w.Name, l)
 	}
@@ -67,6 +73,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	w.Runtime.LastSuccess = now().UTC()
 	w.Runtime.GHCache = model.MustJSON(r.State)
 	rep.Forms = r.Forms
+	rep.Pings = r.Pings
 	rep.SetKey("track", r.Track)
 	return rep, nil
 }

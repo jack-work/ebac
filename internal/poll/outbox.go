@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/sdk/disclose"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
@@ -41,6 +43,11 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 	if w.Mode == model.ModeKeel {
 		return authorizeKeel(w, p)
 	}
+	if w.Approve && (w.DiscoverRepo != "" || w.DiscoverAuthor != "") {
+		// discover_* are form-held: on an approve critic they would widen the
+		// PRs it may post on and approve.
+		return "an approve critic may not discover PRs (discover_repo/discover_author on its form): refused; name its PRs and approve_prs in ebac's trusted config"
+	}
 	if p.React != "" {
 		if p.ReplyTo == "" {
 			return "react needs reply_to: the thread whose opening comment gets the reaction"
@@ -57,7 +64,7 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 	if !p.Resolve && p.React == "" && !p.HasBody() {
 		return "empty body"
 	}
-	if why := Disclosure(p.Body); why != "" {
+	if why := disclose.Disclosure(p.Body); why != "" {
 		return why
 	}
 	var pr *model.PRState
@@ -81,6 +88,9 @@ func Authorize(w *model.Critic, snap *model.Snapshot, me string, p *model.Post) 
 		}
 		if strings.EqualFold(pr.Author, me) {
 			return "a seat may not approve its own operator's pull request"
+		}
+		if ref := model.ApproveRef(pr.Owner+"/"+pr.Repo, pr.Number, pr.HeadSHA); pr.HeadSHA == "" || !slices.Contains(w.ApprovePRs, ref) {
+			return fmt.Sprintf("approval of %s is not in ebac's trusted approve_prs (owner/name#n@<head sha>; the head may have moved)", ref)
 		}
 	default:
 		return fmt.Sprintf("event %q is never allowed (only COMMENT or APPROVE)", p.Event)
@@ -152,6 +162,8 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 
 	todo := map[string]*model.Post{}
 	hadError := map[string]bool{}
+	alarms := map[string]json.RawMessage{}
+	var wakes []plugin.Ping
 	var order []string
 	for _, id := range sorted {
 		post := posts[id]
@@ -163,12 +175,19 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 			post.Refused = err.Error()
 		} else if why := Authorize(w, snap, p.Me, post); why != "" {
 			post.Refused = why
+		} else if why, alarm, wake := approveGate(w, snap, id, post, time.Now().UTC()); why != "" {
+			post.Refused, alarms[id] = why, alarm
+			if wake != nil {
+				wakes = append(wakes, *wake)
+			} else {
+				fmt.Fprintf(p.Out, "%s: approval %s blocked, no trusted maintainer to wake\n", w.Name, id)
+			}
 		} else {
 			todo[id] = post
 		}
 		order = append(order, id)
 	}
-	p.post(ctx, w, snap, todo)
+	wakes = append(wakes, p.postJudged(ctx, w, snap, order, todo, alarms, time.Now().UTC())...)
 	for _, id := range order {
 		post := posts[id]
 		r := map[string]json.RawMessage{}
@@ -183,6 +202,9 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 		}
 		if post.Refused != "" {
 			r["refused"] = model.MustJSON(post.Refused)
+		}
+		if a := alarms[id]; a != nil {
+			r["alarm"] = a
 		}
 		if post.Error != "" || hadError[id] {
 			r["error"] = model.MustJSON(post.Error)
@@ -212,7 +234,81 @@ func (p *Poller) FlushOutbox(ctx context.Context, w *model.Critic, snap *model.S
 		}
 	}
 	w.Runtime.OutboxWatermark = since.Version
+	// One wake per blocked approval: a refused post is terminal, never
+	// judged again.
+	p.sendPings(ctx, w, wakes)
 	return acks
+}
+
+// approveGate applies the blocker rule (model.ApproveBlockers) to an APPROVE
+// Authorize allowed, on this round's snapshot (bodies read fresh): it says
+// why the approval may not go out, the alarm for the post's receipt
+// (post.<id>.alarm) and the one wake of the trusted maintainer (nil when the
+// critic has none). Fail closed: no automated marker, no approval.
+func approveGate(w *model.Critic, snap *model.Snapshot, id string, post *model.Post, now time.Time) (string, json.RawMessage, *plugin.Ping) {
+	if post.Event != "APPROVE" || snap == nil {
+		return "", nil, nil
+	}
+	pr := snap.PRs[model.PRKey(post.PR)]
+	if pr == nil {
+		return "", nil, nil // Authorize refused it already
+	}
+	bs := model.ApproveBlockers(pr, w.AutomatedMarkers)
+	if len(bs) == 0 {
+		return "", nil, nil
+	}
+	return approveAlarm(w, id, post, pr.HeadSHA, model.ApproveBlocked+strings.Join(bs, "; "), bs[0], len(bs), now)
+}
+
+// postJudged sends the authorized posts (p.post) and returns the wakes for
+// the approvals the plugin's fresh read blocked (pluginBlocked).
+func (p *Poller) postJudged(ctx context.Context, w *model.Critic, snap *model.Snapshot, order []string, todo map[string]*model.Post, alarms map[string]json.RawMessage, now time.Time) []plugin.Ping {
+	p.post(ctx, w, snap, todo)
+	return pluginBlocked(w, snap, order, todo, alarms, now)
+}
+
+// pluginBlocked turns each approval the plugin's fresh read blocked at send
+// time (post.Refused carries model.ApproveBlocked) into its
+// receipt alarm (into alarms) and its one wake.
+func pluginBlocked(w *model.Critic, snap *model.Snapshot, order []string, todo map[string]*model.Post, alarms map[string]json.RawMessage, now time.Time) []plugin.Ping {
+	var wakes []plugin.Ping
+	for _, id := range order {
+		post := todo[id]
+		if post == nil || post.Event != "APPROVE" || !strings.HasPrefix(post.Refused, model.ApproveBlocked) || alarms[id] != nil {
+			continue
+		}
+		bs := strings.Split(strings.TrimPrefix(post.Refused, model.ApproveBlocked), "; ")
+		head := ""
+		if pr := snap.PRs[model.PRKey(post.PR)]; pr != nil {
+			head = pr.HeadSHA
+		}
+		var wake *plugin.Ping
+		_, alarms[id], wake = approveAlarm(w, id, post, head, post.Refused, bs[0], len(bs), now)
+		if wake != nil {
+			wakes = append(wakes, *wake)
+		}
+	}
+	return wakes
+}
+
+// approveAlarm is a blocked approval's receipt alarm and its one wake of the
+// trusted maintainer (nil when the critic has none): head is the PR head it
+// was judged at, first the first blocker, n how many.
+func approveAlarm(w *model.Critic, id string, post *model.Post, head, why, first string, n int, now time.Time) (string, json.RawMessage, *plugin.Ping) {
+	alarm := model.MustJSON(map[string]string{"kind": "approve-blocked", "at": now.Format(time.RFC3339), "head": head, "detail": why})
+	if w.Maintainer == "" {
+		return why, alarm, nil
+	}
+	sha := head
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	text := strings.Join(strings.Fields(fmt.Sprintf("ebac: approval blocked, %s post %s, %s@%s: %s (%d blocker(s); receipt post.%s.alarm)",
+		w.Name, id, post.PR, sha, first, n, id)), " ")
+	if len(text) > 400 {
+		text = text[:397] + "..."
+	}
+	return why, alarm, &plugin.Ping{To: w.Maintainer, Text: text}
 }
 
 // post hands authorized posts to the source's plugin and merges back what it
@@ -288,7 +384,7 @@ func authorizeKeel(w *model.Critic, p *model.Post) string {
 	// text bound for the github plugin's forges (GHE, github.com). It is skipped only when the post really goes to
 	// keel (source keel-threads): a critic whose mode says keel but whose source is a forge stays scrubbed.
 	if w.SourceName() != "keel-threads" {
-		if why := Disclosure(p.Body); why != "" {
+		if why := disclose.Disclosure(p.Body); why != "" {
 			return why
 		}
 	}

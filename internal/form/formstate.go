@@ -326,6 +326,9 @@ func (f *CriticForm) Critic() (*model.Critic, error) {
 			w.Reads[k] = v
 		}
 	}
+	if w.SourceName() == model.SourceGHCache {
+		w.FormIgnored = append(w.FormIgnored, ghConfigIgnored(f.Keys[model.GHCacheConfigKey], w.Maintainer)...)
+	}
 	var legacy struct {
 		Chat *struct {
 			Quiet []string `json:"quiet"`
@@ -923,6 +926,31 @@ func deepCopyCritic(w *model.Critic) *model.Critic {
 // RegisterAuthority); NewStore sets it. "" = none (tests).
 var authorityDir string
 
+// ghConfigIgnored names the write-authority keys a github-cache register's
+// seat-writable config key sets that the trusted config does not give it
+// config.maintainer differing from the trusted maintainer, and any
+// scope, write_fields or approve_prs. Neither ever widens what the cache
+// writes or whom it wakes; ebac ls flags them like any ignored form value.
+func ghConfigIgnored(raw json.RawMessage, trusted string) []string {
+	var c map[string]json.RawMessage
+	if json.Unmarshal(raw, &c) != nil {
+		return nil
+	}
+	var out []string
+	if m, ok := c["maintainer"]; ok {
+		var s string
+		if json.Unmarshal(m, &s) != nil || s != trusted {
+			out = append(out, "config.maintainer")
+		}
+	}
+	for _, k := range []string{"scope", "write_fields", "approve_prs"} {
+		if _, ok := c[k]; ok {
+			out = append(out, "config."+k)
+		}
+	}
+	return out
+}
+
 // applyAuthority overlays w's authority from the trusted config, else from
 // ebac's creation record; with neither, w is marked NoAuthority (not run)
 // and its write/approve and approval settings are cleared (fail closed).
@@ -940,6 +968,7 @@ func applyAuthority(w *model.Critic) []string {
 	least.InputsForm, least.BoardForm = "", ""
 	least.Source, least.Mode = "", "" // a critic with no authority runs nothing (review f0f3a1d9 B2)
 	least.TeamsChat, least.Logins, least.KnownBreaks = "", nil, nil
+	least.Scope, least.WriteFields, least.Maintainer, least.ApprovePRs, least.AutomatedMarkers = nil, nil, "", nil, nil
 	_ = least.Apply(w)
 	return nil
 }

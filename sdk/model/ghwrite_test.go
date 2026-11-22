@@ -1,0 +1,117 @@
+package model
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func scopedCritic() *Critic {
+	return &Critic{Source: SourceGHCache, Write: true, GHWrite: &GHWrite{
+		Scope:  GHScope{Repos: []string{"acme/widget"}, Authors: []string{"Our-Author"}, PRs: []string{"acme/widget#40"}, ReadOnlyAuthors: []string{"their-author"}, IssuesFixedByScope: true},
+		Fields: []string{FieldThreadReply, FieldThreadResolve, FieldLabels, FieldDraft}}, Maintainer: "@0000000a"}
+}
+
+// Every clause of the github-cache write gate, each row a different refusal (the exact text), with the controls
+// that pass (our author any case, an explicitly named PR, an issue fixed by our PR). RED if any clause goes: its
+// row is allowed instead of refused.
+func TestAuthorizeGHWriteEveryClause(t *testing.T) {
+	pr := func(repo string, n int, author string) GHEntity {
+		return GHEntity{Repo: repo, Kind: "pr", N: n, Author: author}
+	}
+	readOnly := scopedCritic()
+	readOnly.Write = false
+	noScope := scopedCritic()
+	noScope.GHWrite = nil
+	fewer := scopedCritic()
+	fewer.GHWrite.Fields = []string{FieldThreadReply}
+	noIssues := scopedCritic()
+	noIssues.GHWrite.Scope.IssuesFixedByScope = false
+	for _, tc := range []struct {
+		name  string
+		w     *Critic
+		e     GHEntity
+		field string
+		want  string
+	}{
+		{"our PR", scopedCritic(), pr("acme/widget", 7, "our-author"), FieldLabels, ""},
+		{"our PR, author in another case", scopedCritic(), pr("acme/widget", 7, "OUR-AUTHOR"), FieldDraft, ""},
+		{"a PR named in prs", scopedCritic(), pr("acme/widget", 40, "someone"), FieldLabels, ""},
+		{"an issue our PR fixes", scopedCritic(), GHEntity{Repo: "acme/widget", Kind: "issue", N: 9, FixedBy: map[string]string{"acme/widget#7": "our-author"}}, FieldLabels, ""},
+		{"read-only critic", readOnly, pr("acme/widget", 7, "our-author"), FieldLabels, "this critic is read-only: write comes from ebac's trusted config (authority.write), not from its form"},
+		{"no trusted scope", noScope, pr("acme/widget", 7, "our-author"), FieldLabels, "no trusted write scope (authority.scope): nothing is written"},
+		{"unknown field", scopedCritic(), pr("acme/widget", 7, "our-author"), "title", `field "title" is not a write field (thread_reply, thread_resolve, labels, draft)`},
+		{"field not in write_fields", fewer, pr("acme/widget", 7, "our-author"), FieldLabels, "field labels is not in the trusted write_fields"},
+		{"another repo", scopedCritic(), pr("acme/other", 7, "our-author"), FieldLabels, "repo acme/other is outside the trusted scope"},
+		{"another author", scopedCritic(), pr("acme/widget", 8, "stranger"), FieldLabels, "acme/widget#8 (author stranger) is outside the trusted scope"},
+		{"read-only author wins over prs", scopedCritic(), pr("acme/widget", 40, "Their-Author"), FieldLabels, "acme/widget#40: author Their-Author is read-only in the trusted scope"},
+		{"author unknown", scopedCritic(), pr("acme/widget", 40, ""), FieldLabels, "acme/widget#40: author unknown: refused"},
+		{"issue, issues off", noIssues, GHEntity{Repo: "acme/widget", Kind: "issue", N: 9, FixedBy: map[string]string{"acme/widget#7": "our-author"}}, FieldLabels, "issue acme/widget#9: issues are outside the trusted scope (issues_fixed_by_scope is off)"},
+		{"issue fixed only by their PR", scopedCritic(), GHEntity{Repo: "acme/widget", Kind: "issue", N: 9, FixedBy: map[string]string{"acme/widget#8": "their-author"}}, FieldLabels, "issue acme/widget#9 is fixed by no PR in the trusted scope"},
+		{"issue fixed by nothing", scopedCritic(), GHEntity{Repo: "acme/widget", Kind: "issue", N: 9}, FieldLabels, "issue acme/widget#9 is fixed by no PR in the trusted scope"},
+		{"issue in another repo", scopedCritic(), GHEntity{Repo: "acme/other", Kind: "issue", N: 9, FixedBy: map[string]string{"acme/widget#7": "our-author"}}, FieldLabels, "repo acme/other is outside the trusted scope"},
+		{"unknown kind", scopedCritic(), GHEntity{Repo: "acme/widget", Kind: "run", N: 1}, FieldLabels, `entity kind "run" is not pr or issue`},
+	} {
+		if got := AuthorizeGHWrite(tc.w, tc.e, tc.field); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A form-held gh_write or approve_prs is replaced by the trusted one and named; the trusted values round-trip.
+// RED if either is read from the form again.
+func TestAuthorityGHWriteAndApprovePRsComeFromTrustedOnly(t *testing.T) {
+	trusted := Authority{Source: SourceGHCache, Mode: ModeReview, Write: true,
+		Scope:       &GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}},
+		WriteFields: []string{FieldLabels}, Maintainer: "@0000000a", ApprovePRs: []string{"acme/widget#1@abc"}, AutomatedMarkers: []string{"[synthetic bot verdict]"}}
+	form := &Critic{Source: SourceGHCache, Mode: ModeReview, Write: true, ApprovePRs: []string{"acme/widget#2@evil"},
+		Maintainer: "@evil", AutomatedMarkers: []string{"LGTM"},
+		GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author", "stranger"}}, Fields: GHWriteFields}}
+	if got := strings.Join(trusted.Apply(form), ","); got != "gh_write,maintainer,approve_prs,automated_markers" {
+		t.Fatalf("ignored %q, want gh_write,maintainer,approve_prs,automated_markers", got)
+	}
+	want := &GHWrite{Scope: GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}}, Fields: []string{FieldLabels}}
+	if !reflect.DeepEqual(form.GHWrite, want) || !reflect.DeepEqual(form.ApprovePRs, []string{"acme/widget#1@abc"}) || form.Maintainer != "@0000000a" ||
+		!reflect.DeepEqual(form.AutomatedMarkers, []string{"[synthetic bot verdict]"}) {
+		t.Fatalf("after apply %+v %v %q %v", form.GHWrite, form.ApprovePRs, form.Maintainer, form.AutomatedMarkers)
+	}
+	if !reflect.DeepEqual(AuthorityOf(form), trusted) {
+		t.Fatalf("round trip %+v, want %+v", AuthorityOf(form), trusted)
+	}
+	if again := trusted.Apply(form); len(again) != 0 {
+		t.Fatalf("equal values flagged: %v", again)
+	}
+	// A trusted entry with no write authority clears a form-held one (nil, not an empty scope).
+	bare := &Critic{GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"acme/widget"}}}}
+	if got := strings.Join((Authority{}).Apply(bare), ","); got != "gh_write" || bare.GHWrite != nil {
+		t.Fatalf("bare: %q %+v", got, bare.GHWrite)
+	}
+	if c := CreationAuthority(form); c.Scope != nil || c.WriteFields != nil || c.Maintainer != "" || c.ApprovePRs != nil || c.AutomatedMarkers != nil {
+		t.Fatalf("creation records write authority: %+v", c)
+	}
+}
+
+// The ref grammar: owner/name#n with a positive decimal n and nothing else. Adversarial rows.
+func TestSplitRef(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		repo string
+		n    int
+		ok   bool
+	}{
+		{"acme/widget#7", "acme/widget", 7, true},
+		{"acme/widget#07", "", 0, false},
+		{"acme/widget#0", "", 0, false},
+		{"acme/widget#-1", "", 0, false},
+		{"acme/widget#7x", "", 0, false},
+		{"acme/widget#", "", 0, false},
+		{"widget#7", "", 0, false},
+		{"", "", 0, false},
+		{"acme/widget#7#8", "", 0, false},
+	} {
+		repo, n, ok := SplitRef(tc.in)
+		if repo != tc.repo || n != tc.n || ok != tc.ok {
+			t.Errorf("%q: got %q %d %v", tc.in, repo, n, ok)
+		}
+	}
+}

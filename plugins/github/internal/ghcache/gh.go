@@ -52,12 +52,20 @@ type RevAt struct {
 	At    string `json:"at"`
 }
 
-// Thread is one review thread.
+// Thread is one review thread. Resolved is a write field (a seat sets it
+// true to resolve); Replies are the seat's replies not yet posted (a seat
+// appends {body}; the sync posts each once and drops it).
 type Thread struct {
-	Path     string `json:"path"`
-	Resolved bool   `json:"resolved"`
-	LastBy   string `json:"last_by"`
-	N        int    `json:"n"`
+	Path     string  `json:"path"`
+	Resolved bool    `json:"resolved"`
+	LastBy   string  `json:"last_by"`
+	N        int     `json:"n"`
+	Replies  []Reply `json:"replies,omitempty"`
+}
+
+// Reply is one reply a seat wants posted on a thread.
+type Reply struct {
+	Body string `json:"body"`
 }
 
 // Body is the PR body as sections (split at H2; the preamble first, h ""):

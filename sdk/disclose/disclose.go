@@ -1,4 +1,4 @@
-package poll
+package disclose
 
 import (
 	_ "embed"

@@ -109,8 +109,9 @@ type Request struct {
 	// read by the core each round (the scout's merge checklist).
 	Board map[string]json.RawMessage `json:"board,omitempty"`
 	// Children are the critic's child forms, key -> @id, and Owned each
-	// child's holder-owned keys (model.ChildOwnerKeys) and its target-aria,
-	// read by the core each round (keel branches).
+	// child's holder-owned keys (model.ChildOwnerKeys; the GitHub cache:
+	// model.GHCacheChildReadKeys) and its target-aria, read by the core each
+	// round (keel branches, the GitHub cache).
 	Children map[string]string `json:"children,omitempty"`
 	// OwnKeys are the role-form keys the source's own patterns name (the
 	// scout's pr:* and issue:*), as on the form this round: what the plugin
@@ -152,6 +153,15 @@ type FormWrite struct {
 	Set    map[string]json.RawMessage `json:"set,omitempty"`
 	Unset  []string                   `json:"unset,omitempty"`
 	Retire bool                       `json:"retire,omitempty"`
+	// Expect (child only) are keys as this round's Request.Owned carried
+	// them: the write lands only if each still holds that value, checked and
+	// written in one versioned commit. Else nothing of it lands (a seat
+	// edited the form meanwhile), nor do the writes after it; forms_landed
+	// says so and the plugin redoes them next round against the edit.
+	Expect map[string]json.RawMessage `json:"expect,omitempty"`
+	// ExpectAbsent (child only) are keys absent when this round read the
+	// form: the write lands only if each is still absent.
+	ExpectAbsent []string `json:"expect_absent,omitempty"`
 }
 
 // Gone is one resource the plugin has given up on (form key gone.<Key>).

@@ -192,6 +192,17 @@ type Critic struct {
 	// Approve lets a reviewer seat approve PRs it did not author. Never
 	// request-changes, merge or close.
 	Approve bool `json:"approve,omitempty"`
+	// ApprovePRs are the only "owner/name#n@<head sha>" this critic may
+	// approve, from the trusted config only (Authority.Apply).
+	ApprovePRs []string `json:"approve_prs,omitempty"`
+	// GHWrite is a github-cache critic's write scope and fields, from the
+	// trusted config only (Authority.Apply).
+	GHWrite *GHWrite `json:"gh_write,omitempty"`
+	// Maintainer is the role this critic's alarms wake (a sync alarm, a
+	// blocked approval); AutomatedMarkers make a REQUEST_CHANGES or blocking
+	// thread automated (ApproveBlockers). Both from the trusted config only.
+	Maintainer       string   `json:"maintainer,omitempty"`
+	AutomatedMarkers []string `json:"automated_markers,omitempty"`
 
 	// Worktree, when set, is where a reviewer checks out each PR head:
 	// <Root>/<critic>-pr<N>, fetched through Clone.
@@ -926,6 +937,11 @@ const MaxChildren = 100
 // ChildOwnerKeys are the keys a child form's holder owns: the core passes
 // them to the plugin each round and refuses any plugin write of them.
 var ChildOwnerKeys = []string{"code_ready", "ready"}
+
+// GHCacheChildReadKeys are the entity-form keys the core reads for the
+// GitHub cache each round: gh (seats edit its write fields) and sync (seats
+// ack its alarms). The plugin writes both, guarded by FormWrite.Expect.
+var GHCacheChildReadKeys = []string{"gh", "sync"}
 
 // ChildWriteRefused are the child-form keys no plugin may write: the owner's
 // keys and the form's own (runtime: figaro 0.75's daemon-written keys).

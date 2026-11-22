@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -371,4 +372,41 @@ func (g *GH) GraphQL(ctx context.Context, query string) (json.RawMessage, error)
 		return nil, fmt.Errorf("graphql: %s", errs[0].Message)
 	}
 	return data, nil
+}
+
+// Mutate runs one GraphQL mutation with string variables (-f name=value: a
+// body never needs escaping) and returns its data object. Any error GitHub
+// returns beside the data is an error naming the first (type and message): a
+// write is all or nothing. A mutation cannot ask rateLimit, so it is counted
+// as one call of one point.
+func (g *GH) Mutate(ctx context.Context, mutation string, vars map[string]string) (json.RawMessage, error) {
+	g.pace()
+	args := []string{"api", "graphql", "-f", "query=" + mutation}
+	names := make([]string, 0, len(vars))
+	for k := range vars {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		args = append(args, "-f", k+"="+vars[k])
+	}
+	out, err := g.run(ctx, args, nil)
+	g.spendMu.Lock()
+	g.spend.Calls++
+	g.spend.Points++
+	g.spendMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []gqlError      `json:"errors"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return nil, fmt.Errorf("decode mutation answer: %w", err)
+	}
+	if len(r.Errors) > 0 {
+		return nil, fmt.Errorf("mutation: %s %s", r.Errors[0].Type, r.Errors[0].Message)
+	}
+	return r.Data, nil
 }

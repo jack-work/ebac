@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gluck/ebac/sdk/forge"
@@ -29,6 +30,8 @@ func sendPost(ctx context.Context, gh *forge.GH, w *model.Critic, snap *model.Sn
 		marker := model.PostMarker(w.Name, id)
 		if url, ok := model.FindMarker(pr, me, marker); ok {
 			post.Sent, post.Error = &model.PostReceipt{URL: url, At: now, Recovered: true}, ""
+		} else if post.Event == "APPROVE" && !approveFresh(ctx, gh.FetchPR, w, pr, post) {
+			return
 		} else {
 			tried = true
 			url, err := gh.Post(ctx, pr, post, post.Body+"\n\n"+marker)
@@ -82,4 +85,32 @@ func sendPost(ctx context.Context, gh *forge.GH, w *model.Critic, snap *model.Sn
 		}
 		post.Resolved, post.Error = now, ""
 	}
+}
+
+// approveFresh re-reads the PR in full right before an APPROVE goes out and
+// judges the blocker rule on that read: the round's snapshot
+// may carry a PR reused from the stored form, which keeps digests, not
+// bodies, so a person's "blocking" thread would read as empty. It says
+// whether the approval may go out; when not, it sets post.Error (the read
+// failed or was partial: retried next round) or post.Refused (the head moved
+// since it was authorized, or a blocker stands: model.ApproveBlocked).
+func approveFresh(ctx context.Context, fetch func(ctx context.Context, owner, repo string, n int) (*model.PRState, error),
+	w *model.Critic, authorized *model.PRState, post *model.Post) bool {
+	fresh, err := fetch(ctx, authorized.Owner, authorized.Repo, authorized.Number)
+	switch {
+	case err != nil:
+		post.Error = "fresh read before the approval failed: " + err.Error()
+		return false
+	case fresh == nil || !fresh.Complete:
+		post.Error = "fresh read before the approval was partial: not approved this round"
+		return false
+	case fresh.HeadSHA != authorized.HeadSHA:
+		post.Refused = fmt.Sprintf("the head moved to %s since the approval was authorized at %s: not approved", fresh.HeadSHA, authorized.HeadSHA)
+		return false
+	}
+	if bs := model.ApproveBlockers(fresh, w.AutomatedMarkers); len(bs) > 0 {
+		post.Refused = model.ApproveBlocked + strings.Join(bs, "; ")
+		return false
+	}
+	return true
 }

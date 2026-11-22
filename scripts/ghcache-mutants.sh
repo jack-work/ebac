@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ghcache-mutants.sh: run the ghcache slice 1 mutants (testing standard 4.3). For a build node, never gluk.
+# ghcache-mutants.sh: run the ghcache mutants (slice 1, and slice 3: S*) (testing standard 4.3). For a build node, never a seat's own machine.
 # Each mutant: a file, a literal old line fragment, its replacement, the package to test.
 # Outcomes, one line each: KILLED <test> | NOT-CAUGHT | DIDNT-APPLY | DIDNT-COMPILE. Restores each file byte for byte
 # from a copy (cmp checked after each mutant; no git needed: it runs in a nix build); exits 2 on a tool failure or an
@@ -37,10 +37,63 @@ MUTANTS=(
   "N7|sdk/forge/gh.go|return data, out, nil|return data, nil, nil|./sdk/forge/"
   "N8|$G/ghcache.go|e.Digest = \"\" // what was sent never landed|_ = e.Digest // what was sent never landed|./$G/"
   "R9|$G/config.go|if !termRe.MatchString(t) {|if false {|./$G/"
+  # Slice 3 (write path, trusted write scope).
+  "S1|$G/sync.go|return s.p.Auth(ent, field)|return s.p.Auth(ent, field)[:0]|./$G/"
+  "S2|$G/sync.go|case fr.labelsTotal > len(fr.labels) \|\| !slices.Equal(sortedSet(have), gl):|case false:|./$G/"
+  "S3|$G/sync.go|case fr.draft != G.Draft:|case false:|./$G/"
+  "S4|$G/ghcache.go|case e.Pend != nil && !unlanded[k]:|case e.Pend != nil \|\| unlanded[k]:|./$G/"
+  "S5|$G/sync.go|return // one wake per alarm|_ = 0 // one wake per alarm|./$G/"
+  "S6|$G/sync.go|if len(s.raised) > MaxAlarmPings {|if false {|./$G/"
+  "S7|$G/sync.go|case slices.Contains(t.mine, r.body):|case false:|./$G/"
+  "S8|$G/sync.go|case slices.Contains(e.Sent, h):|case false:|./$G/"
+  "S9|$G/sync.go|} else if why := disclose.Disclosure(r.Body); why != \"\" {|} else if why := disclose.Disclosure(r.Body)[:0]; why != \"\" {|./$G/"
+  "S10|$G/sync.go|if e.RO != \"\" && roHash(F) != e.RO {|if false {|./$G/"
+  "S11|$G/ghcache.go|fw.Expect[\"gh\"] = fv.ghRaw|_ = fv.ghRaw|./$G/"
+  "S12|$G/ghcache.go|fw.Expect[\"sync\"] = fv.syncRaw|_ = fv.syncRaw|./$G/"
+  "S13|$G/sync.go|const MaxTries = 2|const MaxTries = 3|./$G/"
+  "S14|$G/ghcache.go|case fv.gh != nil && e.Base == nil:|case false:|./$G/"
+  "S15|$G/sync.go|case pr.Labels.TotalCount > len(pr.Labels.Nodes):|case false:|./$G/"
+  "S16|$G/sync.go|if s.writes+nWrites > MaxWrites \|\| !nodeIDRe.MatchString(pr.ID) {|if !nodeIDRe.MatchString(pr.ID) {|./$G/"
+  "S17|$G/sync.go|case gt.Resolved && !bt:|case false:|./$G/"
+  "S18|$G/ghcache.go|delete(e.Alarms, key)|_ = key|./$G/"
+  "S19|$G/sync.go|delete(e.Alarms, AlarmWriteRefused+\".\"+field)|_ = field|./$G/"
+  "S20|$G/sync.go|if (len(e.Path) >= 2 && e.Path[0] == \"repo\") \|\||if false \|\||./$G/"
+  "S21|internal/poll/forms.go|	for k, v := range expect {|	for k, v := range map[string]json.RawMessage{} {|./internal/poll/"
+  "S22|internal/poll/forms.go|if w.Maintainer == \"\" \|\| pg.To != w.Maintainer {|if false && pg.To != w.Maintainer {|./internal/poll/"
+  "S23|internal/poll/outbox.go|pr.HeadSHA == \"\" \|\| !slices.Contains(w.ApprovePRs, ref)|pr.HeadSHA == \"\" \|\| !slices.Contains(w.ApprovePRs, ref) && false|./internal/poll/"
+  "S24|internal/poll/outbox.go|if w.Approve && (w.DiscoverRepo != \"\" \|\| w.DiscoverAuthor != \"\") {|if false {|./internal/poll/"
+  "S25|internal/form/formstate.go|ghConfigIgnored(f.Keys[model.GHCacheConfigKey], w.Maintainer)...)|[]string{}...)|./internal/form/"
+  "S26|internal/form/formstate.go|least.Scope, least.WriteFields, least.Maintainer, least.ApprovePRs, least.AutomatedMarkers = nil, nil, \"\", nil, nil|_ = least.Scope|./internal/form/"
+  "S27|sdk/model/ghwrite.go|if slices.ContainsFunc(s.ReadOnlyAuthors, func(a string) bool { return strings.EqualFold(a, author) }) {|if false {|./sdk/model/"
+  "S28|sdk/model/ghwrite.go|if !slices.Contains(g.Fields, field) {|if false {|./sdk/model/"
+  "S29|sdk/model/ghwrite.go|if !g.Scope.IssuesFixedByScope {|if false {|./sdk/model/"
+  "S30|sdk/model/authority.go|	w.GHWrite = g|	_ = g|./sdk/model/"
+  "S31|sdk/forge/gh.go|		return nil, fmt.Errorf(\"mutation: %s %s\", r.Errors[0].Type, r.Errors[0].Message)|		_ = r.Errors|./sdk/forge/"
+  "S32|internal/poll/outbox.go|	if len(bs) == 0 {|	if true {|./internal/poll/"
+  "S33|sdk/model/approveblock.go|if r.State == \"CHANGES_REQUESTED\" && !automated(r.Body, markers) {|if r.State == \"CHANGES_REQUESTED\" {|./internal/poll/"
+  "S34|sdk/model/approveblock.go|if m != \"\" && strings.Contains(body, m) {|if strings.Contains(body, m) {|./internal/poll/"
+  "S35|sdk/model/approveblock.go|if MarksBlocking(c.Body) && !automated(c.Body, markers) {|if false {|./internal/poll/"
+  "S36|sdk/model/approveblock.go|return blockingRe.MatchString(notBlockingRe.ReplaceAllString(body, \"\"))|return blockingRe.MatchString(body)|./internal/poll/"
+  "S37|sdk/model/approveblock.go|if !pr.Complete {|if false {|./internal/poll/"
+  "S38|sdk/model/approveblock.go|r.SubmittedAt > p.SubmittedAt|r.SubmittedAt < p.SubmittedAt|./internal/poll/"
+  "S39|sdk/model/approveblock.go|if t.IsResolved {|if false {|./internal/poll/"
+  "S40|sdk/model/authority.go|w.ApprovePRs, w.AutomatedMarkers = slices.Clone(a.ApprovePRs), slices.Clone(a.AutomatedMarkers)|w.ApprovePRs = slices.Clone(a.ApprovePRs)|./sdk/model/"
+  "S41|sdk/model/authority.go|	set(\"maintainer\", w.Maintainer, a.Maintainer, &w.Maintainer)|	_ = a.Maintainer|./sdk/model/"
+  "S42|plugins/github/internal/github/post.go|	if bs := model.ApproveBlockers(fresh, w.AutomatedMarkers); len(bs) > 0 {|	if bs := model.ApproveBlockers(authorized, w.AutomatedMarkers); len(bs) > 0 {|./plugins/github/internal/github/"
+  "S43|plugins/github/internal/github/post.go|	case fresh.HeadSHA != authorized.HeadSHA:|	case false:|./plugins/github/internal/github/"
+  "S44|plugins/github/internal/github/post.go|	case fresh == nil \|\| !fresh.Complete:|	case fresh == nil:|./plugins/github/internal/github/"
+  "S45|internal/poll/outbox.go|	return pluginBlocked(w, snap, order, todo, alarms, now)|	return nil|./internal/poll/"
+  "S46|internal/poll/outbox.go|!strings.HasPrefix(post.Refused, model.ApproveBlocked) \|\| alarms[id] != nil {|alarms[id] != nil {|./internal/poll/"
+  "S47|$G/ghcache.go|			b := e.Pend.Pushed.onto(*e.Base)|			b := *e.Base|./$G/"
+  "S48|$G/ghcache.go|							fw.ExpectAbsent = append(fw.ExpectAbsent, \"gh\")|							_ = fw|./$G/"
+  "S49|$G/ghcache.go|							fw.ExpectAbsent = append(fw.ExpectAbsent, \"sync\")|							_ = fw|./$G/"
+  "S50|internal/poll/forms.go|	for _, k := range absent {|	for _, k := range absent[:0] {|./internal/poll/"
+  "S51|$G/sync.go|				e.pushed().Added, e.pushed().Removed = slices.Clone(addL), slices.Clone(rmL)|				_, _ = addL, rmL|./$G/"
+  "S52|$G/sync.go|		b.Labels = sortedSet(append(minus(b.Labels, p.Removed), p.Added...))|		b.Labels = sortedSet(append(slices.Clone(b.Labels), p.Added...))|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
-for pk in ./internal/poll/ ./internal/pluginrun/ ./$G/ ./sdk/forge/; do
+for pk in ./internal/poll/ ./internal/pluginrun/ ./internal/form/ ./$G/ ./plugins/github/internal/github/ ./sdk/forge/ ./sdk/model/; do
   mod=.; p=$pk
   case $pk in ./plugins/github/*) mod=plugins/github; p=./${pk#./plugins/github/};; ./sdk/*) mod=sdk; p=./${pk#./sdk/};; esac
   if ! out=$(cd "$mod" && go test -count=1 "$p" 2>&1); then
@@ -69,5 +122,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 26 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 78 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad

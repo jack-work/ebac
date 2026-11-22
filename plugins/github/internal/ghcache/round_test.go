@@ -30,6 +30,8 @@ type fakeGH struct {
 	failLand int
 	// searchTotal, when set, is every search's issueCount (a search past SearchFirst).
 	searchTotal int
+	// wr answers the write path's pre-write reads and mutations (sync_test.go); nil: none expected.
+	wr *fakeWrites
 }
 
 var (
@@ -46,6 +48,9 @@ func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, [
 		if err := f.failGQL(q); err != nil {
 			return nil, nil, err
 		}
+	}
+	if strings.HasPrefix(q, "{ pre: node(") {
+		return f.preWrite(q)
 	}
 	var errs []forge.GQLError
 	out := map[string]any{}
@@ -81,6 +86,9 @@ func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, [
 			}
 			if m[3] == "...D" {
 				prs["p"+m[1]] = pr
+				if f.wr != nil && f.wr.staleDeep[n] != nil {
+					prs["p"+m[1]] = f.wr.staleDeep[n] // the cache's answer lags GitHub (sync_test.go)
+				}
 			} else {
 				prs["p"+m[1]] = markOf(pr)
 			}
