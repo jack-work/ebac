@@ -3,6 +3,7 @@ package disclose
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -20,7 +21,36 @@ type discloseTerm struct {
 	re  *regexp.Regexp
 }
 
-var discloseTerms = parseDisclose(discloseNames)
+// EnvList names a file that REPLACES the embedded list: the deployment's one
+// list for every GHE text (the package wrapper sets it, so the daemon, the CLI
+// and every plugin read the same file). Set but unreadable, empty or invalid:
+// the process does not start (fail closed). Unset: the embedded list.
+const EnvList = "EBAC_DISCLOSE_NAMES"
+
+var discloseTerms = mustTerms(loadTerms(os.Getenv, os.ReadFile))
+
+func loadTerms(getenv func(string) string, read func(string) ([]byte, error)) ([]discloseTerm, error) {
+	p := getenv(EnvList)
+	if p == "" {
+		return parseDisclose(discloseNames), nil
+	}
+	b, err := read(p)
+	if err != nil {
+		return nil, fmt.Errorf("%s=%s: %v", EnvList, p, err)
+	}
+	ts := parseDisclose(string(b))
+	if len(ts) == 0 {
+		return nil, fmt.Errorf("%s=%s: no terms", EnvList, p)
+	}
+	return ts, nil
+}
+
+func mustTerms(ts []discloseTerm, err error) []discloseTerm {
+	if err != nil {
+		panic("disclose: " + err.Error())
+	}
+	return ts
+}
 
 // parseDisclose compiles the list. RE2 has no lookahead, so (?= becomes (?:,
 // which matches the same bodies (only the span differs).
