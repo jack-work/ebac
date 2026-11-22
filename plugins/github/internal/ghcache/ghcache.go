@@ -52,8 +52,10 @@ type Entity struct {
 	DeepAt  time.Time `json:"deep_at,omitzero"`  // the last deep read whose form was written
 	Digest  string    `json:"digest,omitempty"`  // hash of the gh + parsed last written
 	EndedAt time.Time `json:"ended_at,omitzero"` // first seen closed, merged or untracked
-	// Unsettled: GitHub had not computed mergeability at the last deep
-	// read (UNKNOWN right after a push); the next due marks read re-reads it.
+	// Unsettled: GitHub answered UNKNOWN mergeability at the last deep read.
+	// The marks carry mergeability, so its settling moves the mark; a PR
+	// GitHub keeps at UNKNOWN is still read deep every UnknownEvery, so a
+	// stuck answer cannot freeze its form.
 	Unsettled bool `json:"unsettled,omitempty"`
 	// Redo: read and write it again this round (its last write did not land,
 	// or its deep read failed).
@@ -459,12 +461,13 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 
-	// 5. Deep reads: new entities, moved marks, moved heads, redos, and
-	// unsettled mergeability when its marks were read.
+	// 5. Deep reads: new entities, moved marks (mergeability and the checks
+	// digest included), moved heads and redos (a pending write among them).
 	var deep []Ref
 	for k, e := range ents {
 		m, ok := marks[k]
-		if moved[k] || e.Redo || (ok && (e.DeepAt.IsZero() || m != e.Mark || e.Unsettled)) {
+		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))
+		if moved[k] || e.Redo || (ok && (e.DeepAt.IsZero() || m != e.Mark || stuck)) {
 			deep = append(deep, Ref{e.Repo, e.N})
 		}
 	}

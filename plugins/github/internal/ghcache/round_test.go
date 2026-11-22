@@ -101,8 +101,13 @@ func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, [
 
 func markOf(pr *PR) map[string]any {
 	m := pr.Mark()
+	var counts any = map[string]any{}
+	if len(pr.Commits.Nodes) > 0 && pr.Commits.Nodes[0].Commit.Rollup != nil {
+		counts = pr.Commits.Nodes[0].Commit.Rollup.Contexts.Counts
+	}
 	return map[string]any{"number": pr.Number, "updatedAt": m.UpdatedAt, "headRefOid": m.Head, "state": m.State, "isDraft": m.Draft,
-		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{"state": m.Rollup}}}}}}
+		"mergeable": pr.Mergeable, "mergeStateStatus": pr.MergeSt,
+		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{"state": m.Rollup, "contexts": counts}}}}}}
 }
 
 func (f *fakeGH) PullHeads(_ context.Context, repo string, prs []int) (map[int]string, error) {
@@ -356,20 +361,104 @@ func TestExplicitPRsAreTracked(t *testing.T) {
 	}
 }
 
-// Mergeability GitHub has not computed (UNKNOWN after a push) is read again at the next due marks read, though no
-// mark moved. RED if Unsettled goes (the form keeps UNKNOWN until something else moves).
-func TestUnknownMergeabilityIsReadAgain(t *testing.T) {
+// The marks carry mergeability: a PR at UNKNOWN costs no deep read while GitHub keeps answering
+// UNKNOWN, and is read deep in the round GitHub settles it (the mark moves). RED if the marks lose mergeable (the
+// settling is never read: 1 call) or UNKNOWN re-reads every round (the unchanged round costs 2 calls).
+func TestASettlingMergeabilityMovesTheMark(t *testing.T) {
 	gh := world(t)
-	gh.prs["bic/aether"][116018].Mergeable, gh.prs["bic/aether"][116018].MergeSt = "UNKNOWN", "UNKNOWN"
+	c, ttl := cfg(t, hotAuthor)
+	pr := gh.prs[c.Repos[0]][116018]
+	pr.Mergeable, pr.MergeSt = "UNKNOWN", "UNKNOWN"
+	r, _ := round(t, gh, State{}, c, ttl, t0)
+	r, calls := round(t, gh, r.State, c, ttl, t0.Add(HotEvery))
+	if calls != 1 || len(r.Forms) != 0 {
+		t.Fatalf("still UNKNOWN: %d calls, writes %q; want 1 (marks only), none", calls, keys(r))
+	}
+	pr.Mergeable, pr.MergeSt = "MERGEABLE", "BLOCKED"
+	r, calls = round(t, gh, r.State, c, ttl, t0.Add(2*HotEvery))
+	if calls != 2 || keys(r) != ChildKey(c.Repos[0], 116018) {
+		t.Fatalf("settled: %d calls, writes %q; want 2, the PR", calls, keys(r))
+	}
+	var g GH
+	_ = json.Unmarshal(r.Forms[0].Set["gh"], &g)
+	if g.Mergeable != "MERGEABLE" || g.MergeState != "BLOCKED" {
+		t.Fatalf("form %q %q", g.Mergeable, g.MergeState)
+	}
+}
+
+// A base move: the base moves and GitHub's mergeability turns CONFLICTING/DIRTY with no head move and
+// no updatedAt move; the next due marks read sees it and reads the PR deep. RED if mergeability leaves the mark.
+func TestAMergeabilityMoveWithNoHeadMoveIsRead(t *testing.T) {
+	gh := world(t)
 	c, ttl := cfg(t, hotAuthor)
 	r, _ := round(t, gh, State{}, c, ttl, t0)
-	gh.prs["bic/aether"][116018].Mergeable, gh.prs["bic/aether"][116018].MergeSt = "MERGEABLE", "BLOCKED"
+	pr := gh.prs[c.Repos[0]][127740]
+	pr.Mergeable, pr.MergeSt = "CONFLICTING", "DIRTY"
 	r, calls := round(t, gh, r.State, c, ttl, t0.Add(HotEvery))
-	if calls != 2 || keys(r) != "aether-pr-116018" {
-		t.Fatalf("unsettled: %d calls, writes %q", calls, keys(r))
+	if calls != 2 || keys(r) != ChildKey(c.Repos[0], 127740) {
+		t.Fatalf("%d calls, writes %q; want 2, the PR", calls, keys(r))
 	}
-	if _, calls := round(t, gh, r.State, c, ttl, t0.Add(2*HotEvery)); calls != 1 {
-		t.Fatalf("settled: %d calls, want 1 (marks only)", calls)
+}
+
+// A pipeline flips (one check run QUEUED -> SUCCESS) while the rollup stays PENDING: the counts digest in the mark
+// moves and the PR is read deep (the shadow run saw such checks stale for hours). RED if the counts leave the mark.
+func TestACheckFlipUnderTheSameRollupIsRead(t *testing.T) {
+	gh := world(t)
+	c, ttl := cfg(t, hotAuthor)
+	pr := gh.prs[c.Repos[0]][127740]
+	roll := pr.Commits.Nodes[0].Commit.Rollup
+	if roll == nil {
+		t.Fatal("fixture: no rollup")
+	}
+	roll.Contexts.Counts = Counts{Runs: []StateCount{{"QUEUED", 1}, {"SUCCESS", 4}}, Statuses: []StateCount{{"SUCCESS", 2}}}
+	r, _ := round(t, gh, State{}, c, ttl, t0)
+	r, calls := round(t, gh, r.State, c, ttl, t0.Add(HotEvery))
+	if calls != 1 {
+		t.Fatalf("unchanged: %d calls", calls)
+	}
+	roll.Contexts.Counts = Counts{Runs: []StateCount{{"QUEUED", 0}, {"SUCCESS", 5}}, Statuses: []StateCount{{"SUCCESS", 2}}}
+	_, calls = round(t, gh, r.State, c, ttl, t0.Add(2*HotEvery))
+	if last := gh.calls[len(gh.calls)-1]; calls != 2 || !strings.Contains(last, "p127740: pullRequest(number:127740){...D}") || strings.Contains(last, "p116018") {
+		t.Fatalf("flipped: %d calls, want 2: the marks and a deep read of the PR alone", calls)
+	}
+}
+
+// The digest is the non-zero states, kind-prefixed and sorted; zero counts and order do not move it. Literal oracle.
+func TestCountsDigest(t *testing.T) {
+	c := Counts{Runs: []StateCount{{"SUCCESS", 4}, {"FAILURE", 0}, {"QUEUED", 1}}, Statuses: []StateCount{{"PENDING", 2}}}
+	if got := c.Digest(); got != "run:QUEUED=1,run:SUCCESS=4,status:PENDING=2" {
+		t.Fatalf("%q", got)
+	}
+	if got := (Counts{}).Digest(); got != "" {
+		t.Fatalf("empty: %q", got)
+	}
+}
+
+// The backoff: a PR GitHub keeps at UNKNOWN is read deep at most every UnknownEvery (1 h), never every round
+// and never not at all. Rounds every HotEvery for 70 min: deep reads at 0 and 60 min only. RED if the backoff goes
+// (never re-read: 0 deep after the first) or re-reads every round (deep at 5 min), or UnknownEvery changes.
+func TestAStuckUnknownIsReadHourly(t *testing.T) {
+	if UnknownEvery != time.Hour {
+		t.Fatalf("UnknownEvery %v", UnknownEvery)
+	}
+	gh := world(t)
+	c, ttl := cfg(t, hotAuthor)
+	pr := gh.prs[c.Repos[0]][116018]
+	pr.Mergeable, pr.MergeSt = "UNKNOWN", "UNKNOWN"
+	st := State{}
+	var deepAt []time.Duration
+	for at := time.Duration(0); at <= 70*time.Minute; at += HotEvery {
+		before := len(gh.calls)
+		r, _ := round(t, gh, st, c, ttl, t0.Add(at))
+		st = r.State
+		for _, q := range gh.calls[before:] {
+			if strings.Contains(q, "p116018: pullRequest(number:116018){...D}") {
+				deepAt = append(deepAt, at)
+			}
+		}
+	}
+	if fmt.Sprint(deepAt) != "[0s 1h0m0s]" {
+		t.Fatalf("deep reads of the stuck PR at %v, want [0s 1h0m0s]", deepAt)
 	}
 }
 

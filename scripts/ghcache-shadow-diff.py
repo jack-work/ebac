@@ -87,6 +87,12 @@ def theirs(r):
 def compare(board_row, cache_row):
     """[(field, board value, cache value)] of every disagreement, and [(pipeline, side)] of the checks gap."""
     b, c = theirs(board_row), ours(cache_row)
+    if b["arch"]:
+        # Like with like: the board keeps a narrower window of architect verdicts than the cache (shadow 11-20/21:
+        # 251 of 254 arch rows were the cache holding older verdicts the board had dropped). Verdicts older than the
+        # board's oldest are outside its window, not a disagreement; a board with none compares whole.
+        oldest = b["arch"][0]["at"] or ""
+        c["arch"] = [a for a in c["arch"] if (a["at"] or "") >= oldest]
     diffs = [(f, b[f], c[f]) for f in FIELDS + ["arch", "praxis"] if b[f] != c[f]]
     gap = []
     for name in sorted(set(b["checks"]) | set(c["checks"])):

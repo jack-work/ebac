@@ -17,15 +17,22 @@ const DeepBatch = 10
 // SearchFirst is how many PRs one search alias returns.
 const SearchFirst = 100
 
+// countsSel is the checks' cheap digest: how many check runs and status
+// contexts are in each state (one pipeline flipping moves it while the
+// rollup can stay the same).
+const countsSel = `checkRunCountsByState{state count} statusContextCountsByState{state count}`
+
 // markSel is a PR's change marker: head, updatedAt (moves on body, title,
-// label, comment and review edits), state and the check rollup.
-const markSel = `number updatedAt headRefOid state isDraft commits(last:1){nodes{commit{statusCheckRollup{state}}}}`
+// label, comment and review edits), state, draft, mergeability (moves on a
+// base move with no head move, and when GitHub settles UNKNOWN) and the
+// checks (rollup and counts by state).
+const markSel = `number updatedAt headRefOid state isDraft mergeable mergeStateStatus commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:1){` + countsSel + `}}}}}`
 
 // deepSel is everything gh and parsed are built from.
 const deepSel = `id number url title body state isDraft mergeable mergeStateStatus headRefOid headRefName baseRefName additions deletions updatedAt createdAt
  author{login} labels(first:20){totalCount nodes{name}}
  ready: timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{... on ReadyForReviewEvent{createdAt}}}
- commits(last:1){nodes{commit{tree{oid} statusCheckRollup{state contexts(first:60){totalCount nodes{__typename ... on CheckRun{name conclusion status detailsUrl completedAt} ... on StatusContext{context state targetUrl}}}}}}}
+ commits(last:1){nodes{commit{tree{oid} statusCheckRollup{state contexts(first:60){totalCount ` + countsSel + ` nodes{__typename ... on CheckRun{name conclusion status detailsUrl completedAt} ... on StatusContext{context state targetUrl}}}}}}}
  closingIssuesReferences(first:10){nodes{number}}
  reviews(last:30){totalCount nodes{author{login} state submittedAt body commit{oid tree{oid}}}}
  comments(last:30){totalCount nodes{author{login} body createdAt url}}
@@ -165,33 +172,73 @@ type MarkNode struct {
 	Head      string `json:"headRefOid"`
 	State     string `json:"state"`
 	Draft     bool   `json:"isDraft"`
+	Mergeable string `json:"mergeable"`
+	MergeSt   string `json:"mergeStateStatus"`
 	Commits   struct {
 		Nodes []struct {
 			Commit struct {
 				Rollup *struct {
-					State string `json:"state"`
+					State    string `json:"state"`
+					Contexts Counts `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
 }
 
-// Mark is a PR's change marker: head, updatedAt, state, draft and rollup.
+// Counts are the checks' counts by state (countsSel).
+type Counts struct {
+	Runs     []StateCount `json:"checkRunCountsByState"`
+	Statuses []StateCount `json:"statusContextCountsByState"`
+}
+
+// StateCount is one state's count.
+type StateCount struct {
+	State string `json:"state"`
+	Count int    `json:"count"`
+}
+
+// Digest is the counts as one stable string of the non-zero states
+// ("run:SUCCESS=4,status:PENDING=1"); "" when there are none.
+func (c Counts) Digest() string {
+	var parts []string
+	for _, x := range []struct {
+		kind string
+		cs   []StateCount
+	}{{"run", c.Runs}, {"status", c.Statuses}} {
+		for _, s := range x.cs {
+			if s.Count > 0 {
+				parts = append(parts, fmt.Sprintf("%s:%s=%d", x.kind, s.State, s.Count))
+			}
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+// Mark is a PR's change marker: head, updatedAt, state, draft, rollup,
+// mergeability and the checks digest. A deep read happens only when it moves
+// (or a head moves, or a write is pending): GitHub may answer UNKNOWN
+// mergeability for hours, and that costs nothing until it changes.
 type Mark struct {
-	Head      string `json:"head"`
-	UpdatedAt string `json:"updated_at"`
-	State     string `json:"state"`
-	Draft     bool   `json:"draft,omitempty"`
-	Rollup    string `json:"rollup,omitempty"`
+	Head       string `json:"head"`
+	UpdatedAt  string `json:"updated_at"`
+	State      string `json:"state"`
+	Draft      bool   `json:"draft,omitempty"`
+	Rollup     string `json:"rollup,omitempty"`
+	Mergeable  string `json:"mergeable,omitempty"`
+	MergeState string `json:"merge_state,omitempty"`
+	Checks     string `json:"checks,omitempty"`
 }
 
 // Mark flattens the node.
 func (m MarkNode) Mark() Mark {
-	r := ""
+	r, d := "", ""
 	if len(m.Commits.Nodes) > 0 && m.Commits.Nodes[0].Commit.Rollup != nil {
 		r = m.Commits.Nodes[0].Commit.Rollup.State
+		d = m.Commits.Nodes[0].Commit.Rollup.Contexts.Digest()
 	}
-	return Mark{Head: m.Head, UpdatedAt: m.UpdatedAt, State: m.State, Draft: m.Draft, Rollup: r}
+	return Mark{Head: m.Head, UpdatedAt: m.UpdatedAt, State: m.State, Draft: m.Draft, Rollup: r, Mergeable: m.Mergeable, MergeState: m.MergeSt, Checks: d}
 }
 
 // Comment is an issue comment.
@@ -270,6 +317,7 @@ type PR struct {
 					Contexts struct {
 						TotalCount int       `json:"totalCount"`
 						Nodes      []Context `json:"nodes"`
+						Counts
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
@@ -313,9 +361,10 @@ func login(l *Login) string {
 
 // Mark is the deep read's own marker (what the next marks read compares).
 func (p *PR) Mark() Mark {
-	r := ""
+	r, d := "", ""
 	if len(p.Commits.Nodes) > 0 && p.Commits.Nodes[0].Commit.Rollup != nil {
 		r = p.Commits.Nodes[0].Commit.Rollup.State
+		d = p.Commits.Nodes[0].Commit.Rollup.Contexts.Counts.Digest()
 	}
-	return Mark{Head: p.Head, UpdatedAt: p.UpdatedAt, State: p.State, Draft: p.Draft, Rollup: r}
+	return Mark{Head: p.Head, UpdatedAt: p.UpdatedAt, State: p.State, Draft: p.Draft, Rollup: r, Mergeable: p.Mergeable, MergeState: p.MergeSt, Checks: d}
 }

@@ -21,6 +21,9 @@ const (
 	HotEvery  = 5 * time.Minute
 	WarmEvery = 30 * time.Minute
 	ColdEvery = 6 * time.Hour
+	// UnknownEvery: a PR GitHub keeps at UNKNOWN mergeability is read deep
+	// at most this often (its marks do not move while it stays UNKNOWN).
+	UnknownEvery = time.Hour
 )
 
 // DefaultClosedTTL is how long a closed, merged or no longer tracked PR keeps

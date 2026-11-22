@@ -63,6 +63,20 @@ b4["arch"][0]["sha"] = None
 del c4["parsed"]["bots"]["architect"][0]["sha"]
 check("sha None vs omitted", sd.compare(b4, c4)[0], [])
 
+# The board's architect window is narrower: a cache verdict older than the board's oldest is no disagreement
+# (the shadow's 251/254 arch rows); a cache missing the board's newest is one; so is a differing verdict inside
+# the window. RED if the window cut goes (first row) or cuts inside the window (the last two rows).
+OLD = {"verdict": "approve", "at": "a", "at_head": False, "sha": "11", "via": "comment", "by": "architect-review"}
+c5 = copy.deepcopy(CACHE)
+c5["parsed"]["bots"]["architect"].insert(0, OLD)
+check("arch: older cache verdict outside the board window", sd.compare(BOARD, c5)[0], [])
+b6 = copy.deepcopy(BOARD)
+b6["arch"].append({"verdict": "request_changes", "at": "z", "at_head": True, "sha": "bb"})
+check("arch: cache misses the board's newest", [x[0] for x in sd.compare(b6, c5)[0]], ["arch"])
+c7 = copy.deepcopy(c5)
+c7["parsed"]["bots"]["architect"][1]["verdict"] = "request_changes"
+check("arch: a differing verdict inside the window", [x[0] for x in sd.compare(BOARD, c7)[0]], ["arch"])
+
 # A board PR the cache lacks is a "tracked" disagreement (stale past the grace: the proof fails); the cache's extra
 # PRs are only listed.
 seen = {}
@@ -76,5 +90,5 @@ check("only_board stale", [(x["pr"], x["field"]) for x in r["stale"]], [(2, "tra
 check("repo key", sd.repo_key("bic/aether"), "aether")
 check("repo key odd", sd.repo_key("bic/My.Repo"), "my-repo")
 
-print("\n".join(fails) or "ok: 16 checks")
+print("\n".join(fails) or "ok: 19 checks")
 sys.exit(1 if fails else 0)

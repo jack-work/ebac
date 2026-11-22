@@ -22,7 +22,7 @@ MUTANTS=(
   "P6|$G/parse.go|m := ms[len(ms)-1]|m := ms[0]|./$G/"
   "R1|$G/ghcache.go|if !moved[k] && (e.MarkAt.IsZero() \|\| !now.Before(e.MarkAt.Add(every))) {|if !moved[k] && (true \|\| e.MarkAt.IsZero() \|\| !now.Before(e.MarkAt.Add(every))) {|./$G/"
   "R2|$G/ghcache.go|if h, ok := heads[n]; ok && h != e.Mark.Head {|if h, ok := heads[n]; ok && h != e.Mark.Head && false {|./$G/"
-  "R3|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| e.Unsettled))|(ok && (true \|\| m != e.Mark))|./$G/"
+  "R3|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| stuck))|(ok && (true \|\| m != e.Mark \|\| stuck))|./$G/"
   "R4|$G/ghcache.go|case !now.Before(e.EndedAt.Add(p.ClosedTTL)):|case false:|./$G/"
   "R5|$G/ghcache.go|e.Unsettled = pr.State == \"OPEN\" && (pr.Mergeable == \"UNKNOWN\" \|\| pr.MergeSt == \"UNKNOWN\")|e.Unsettled = false|./$G/"
   "R6|$G/ghcache.go|if size() <= MaxForm {|if size() >= 0 {|./$G/"
@@ -90,6 +90,12 @@ MUTANTS=(
   "S50|internal/poll/forms.go|	for _, k := range absent {|	for _, k := range absent[:0] {|./internal/poll/"
   "S51|$G/sync.go|				e.pushed().Added, e.pushed().Removed = slices.Clone(addL), slices.Clone(rmL)|				_, _ = addL, rmL|./$G/"
   "S52|$G/sync.go|		b.Labels = sortedSet(append(minus(b.Labels, p.Removed), p.Added...))|		b.Labels = sortedSet(append(slices.Clone(b.Labels), p.Added...))|./$G/"
+  "S53|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| stuck))|(ok && (e.DeepAt.IsZero() \|\| m.Head+m.UpdatedAt+m.State+m.Rollup+m.Checks != e.Mark.Head+e.Mark.UpdatedAt+e.Mark.State+e.Mark.Rollup+e.Mark.Checks \|\| m.Draft != e.Mark.Draft \|\| stuck))|./$G/"
+  "S55|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| stuck))|(ok && (e.DeepAt.IsZero() \|\| m.Head+m.UpdatedAt+m.State+m.Rollup+m.Mergeable+m.MergeState != e.Mark.Head+e.Mark.UpdatedAt+e.Mark.State+e.Mark.Rollup+e.Mark.Mergeable+e.Mark.MergeState \|\| m.Draft != e.Mark.Draft \|\| stuck))|./$G/"
+  "S56|$G/ghcache.go|		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))|		stuck := e.Unsettled && false|./$G/"
+  "S57|$G/ghcache.go|		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))|		stuck := e.Unsettled|./$G/"
+  "S58|$G/config.go|	UnknownEvery = time.Hour|	UnknownEvery = 2 * time.Hour|./$G/"
+  "S59|$G/query.go|			if s.Count > 0 {|			if true {|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
@@ -122,5 +128,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 78 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 84 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad
