@@ -151,12 +151,15 @@ func (s *syncer) commentEdits(k string, e *Entity, G GH, F *GH, B Base, out *GH,
 	if len(wants) == 0 {
 		return
 	}
-	if s.writes+len(wants) > MaxWrites {
-		s.logf("%s: %d comment edit(s) wait for the next round (cap %d per round)", k, len(wants), MaxWrites)
-		for _, w := range wants {
+	if room := MaxWrites - s.writes; len(wants) > room {
+		room = max(room, 0)
+		s.logf("%s: %d comment edit(s) wait for the next round (cap %d per round)", k, len(wants)-room, MaxWrites)
+		for _, w := range wants[room:] {
 			keepForm(w.id, w.body)
 		}
-		return
+		if wants = wants[:room]; len(wants) == 0 {
+			return
+		}
 	}
 	fresh, err := s.readComments(wants)
 	if err != nil {
