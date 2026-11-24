@@ -55,8 +55,12 @@ type Runner struct {
 	Found   map[string]Found
 	Refused map[string]error
 
-	mu    sync.Mutex
-	hello map[string]error
+	hello *handshakes // per plugin, once (NewRunner sets it)
+}
+
+type handshakes struct {
+	mu   sync.Mutex
+	done map[string]error
 }
 
 // DefaultTimeout bounds one plugin exec: a keel feed round long-polls 30 s.
@@ -83,7 +87,8 @@ func NewRunner(grants Grants) (*Runner, error) {
 	for name, why := range refused {
 		fmt.Fprintf(os.Stderr, "ebac: plugin %s refused: %v\n", name, why)
 	}
-	return &Runner{Dir: dir, Timeout: DefaultTimeout, Stderr: os.Stderr, Sandbox: sb, Found: found, Refused: refused}, nil
+	return &Runner{Dir: dir, Timeout: DefaultTimeout, Stderr: os.Stderr, Sandbox: sb, Found: found, Refused: refused,
+		hello: &handshakes{done: map[string]error{}}}, nil
 }
 
 // exe is the path a plugin runs from, or why it may not run.
@@ -103,15 +108,12 @@ func (r *Runner) exe(plugin string) (string, error) {
 // handshake runs op hello once per plugin: the plugin must say the name and
 // sources its manifest pins, in this core's protocol major.
 func (r *Runner) handshake(ctx context.Context, name string) error {
-	if r.Found == nil {
+	if r.Found == nil || r.hello == nil {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.hello == nil {
-		r.hello = map[string]error{}
-	}
-	if err, done := r.hello[name]; done {
+	r.hello.mu.Lock()
+	defer r.hello.mu.Unlock()
+	if err, done := r.hello.done[name]; done {
 		return err
 	}
 	rep, err := r.run(ctx, name, plugin.Request{Op: plugin.OpHello})
@@ -124,7 +126,7 @@ func (r *Runner) handshake(ctx context.Context, name string) error {
 			err = fmt.Errorf("plugin %s: hello says %s serving %v, its manifest pins %s serving %v", name, rep.Name, got, want.Name, pin)
 		}
 	}
-	r.hello[name] = err
+	r.hello.done[name] = err
 	return err
 }
 

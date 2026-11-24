@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -48,7 +50,7 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 			t.Fatalf("build plugins %v: %v\n%s", b, err, out)
 		}
 	}
-	t.Setenv("EBAC_PLUGIN_DIR", dir)
+	t.Setenv("EBAC_PLUGIN_DIR", pinned(t, dir))
 	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)
 	r, err := pluginrun.NewRunner(nil)
 	if err != nil {
@@ -92,7 +94,7 @@ func TestBandHubPluginBinaryRound(t *testing.T) {
 	dir := buildBandHub(t)
 	sock := fakeBandHub(t)
 
-	t.Setenv("EBAC_PLUGIN_DIR", dir)
+	t.Setenv("EBAC_PLUGIN_DIR", pinned(t, dir))
 	t.Setenv(pluginrun.SandboxOffEnv, "off") // the protocol, not the sandbox (internal/pluginrun tests that)
 	r, err := pluginrun.NewRunner(nil)
 	if err != nil {
@@ -342,4 +344,46 @@ func sameJSON(a, b []byte) bool {
 		return false
 	}
 	return reflect.DeepEqual(va, vb)
+}
+
+// pluginSources are what each built plugin says in its hello (its main's Info).
+var pluginSources = map[string][]string{
+	"gh":      {"github-pr", "github-author", model.SourceReleases, model.SourceScout, model.SourceGHCache},
+	"tomb":    {"teams-chat"},
+	"keel":    {"keel-threads", model.SourceKeelBranches},
+	"bandhub": {model.SourceBandHub},
+}
+
+// pinned lays the plugins built into dir out as the fleet ships them: bin/ebac-<name>
+// plus a manifest pinning its sha256, in a dir the test treats as the store.
+func pinned(t *testing.T, dir string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := pluginrun.StoreRoot
+	pluginrun.StoreRoot = filepath.Dir(real) + "/"
+	t.Cleanup(func() { pluginrun.StoreRoot = old })
+	if err := os.MkdirAll(filepath.Join(real, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exes, _ := filepath.Glob(filepath.Join(real, "ebac-*"))
+	for _, exe := range exes {
+		name := strings.TrimPrefix(filepath.Base(exe), "ebac-")
+		if err := os.Rename(exe, filepath.Join(real, "bin", filepath.Base(exe))); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(real, "bin", filepath.Base(exe)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256(body)
+		m, _ := json.Marshal(map[string]any{"name": name, "exe": "bin/ebac-" + name, "sha256": hex.EncodeToString(h[:]),
+			"protocol": map[string]int{"major": plugin.Version, "minor": plugin.Minor}, "sources": pluginSources[name]})
+		if err := os.WriteFile(filepath.Join(real, name+".plugin.json"), m, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return real
 }

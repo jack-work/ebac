@@ -119,7 +119,7 @@ func TestRunnerFailures(t *testing.T) {
 		{"fail", "plugin fake round: exit status 1"},
 		{"garbage", "bad reply"},
 		{"unknown-field", `unknown field "surprise"`},
-		{"version", "protocol 99, want 1"},
+		{"version", "speaks protocol 99.0, this ebac speaks 1.1"},
 		{"huge", "reply over"},
 	} {
 		t.Run(c.mode, func(t *testing.T) {

@@ -88,9 +88,9 @@ func TestDiscoverRefusesEachBadPluginAndKeepsTheOthers(t *testing.T) {
 		t.Fatal("the good plugin was not kept")
 	}
 	for k, c := range cases {
-		key := c.name
-		if k == "unknown" {
-			key = c.name + ".plugin.json"
+		key := c.name + ".plugin.json" // a manifest that fails to load is refused by its file
+		if k == "route" {
+			key = c.name
 		}
 		why, ok := refused[key]
 		if !ok || !strings.Contains(why.Error(), c.why) {
