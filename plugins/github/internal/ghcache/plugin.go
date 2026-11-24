@@ -18,6 +18,17 @@ type Plugin struct {
 	Now func() time.Time
 }
 
+// praxisNew reads ours.praxis_new from the register's ours key.
+func praxisNew(ours json.RawMessage) map[string]json.RawMessage {
+	var o struct {
+		PraxisNew map[string]json.RawMessage `json:"praxis_new"`
+	}
+	if len(ours) > 0 {
+		_ = json.Unmarshal(ours, &o)
+	}
+	return o.PraxisNew
+}
+
 func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 	if req.Op != plugin.OpRound {
 		return nil, fmt.Errorf("op %q not supported: the GitHub cache has no brief and no outbox", req.Op)
@@ -57,7 +68,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		// Every write is authorized against the trusted scope the core
 		// applied to this critic (model.GHWrite), never the form's config.
 		Auth:       func(e model.GHEntity, field string) string { return model.AuthorizeGHWrite(w, e, field) },
-		Maintainer: w.Maintainer}
+		Maintainer: w.Maintainer, PraxisNew: praxisNew(req.Keys[model.GHCacheOursKey])}
 	if w.GHWrite != nil {
 		pass.Ours = w.GHWrite.Ours
 	}
@@ -89,5 +100,6 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	rep.Forms = r.Forms
 	rep.Pings = r.Pings
 	rep.SetKey("track", r.Track)
+	rep.SetKey(model.GHCacheSyncKey, r.Register)
 	return rep, nil
 }

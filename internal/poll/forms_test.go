@@ -144,13 +144,42 @@ func TestGHCacheSourceKeys(t *testing.T) {
 	if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{"track": raw(`{}`)}, Unset: []string{"track"}}); err != nil {
 		t.Fatalf("track refused: %v", err)
 	}
+	if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{"sync": raw(`{}`)}}); err != nil {
+		t.Fatalf("the register's sync refused: %v", err)
+	}
+	if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{"ours": raw(`{}`)}}); err == nil {
+		t.Errorf("github-cache may set the register's ours key (the issue CLI's)")
+	}
 	for _, k := range []string{"config", "track.aether#1", "pr:1", "branches", "target-aria", "critic"} {
 		if err := SourceKeysOnly(model.SourceGHCache, &plugin.Reply{Set: map[string]json.RawMessage{k: raw(`1`)}}); err == nil {
 			t.Errorf("github-cache may set %q", k)
 		}
 	}
-	if got := model.SourceReads[model.SourceGHCache]; len(got) != 1 || got[0] != "config" {
-		t.Errorf("SourceReads[github-cache] = %v, want [config]", got)
+	if got := model.SourceReads[model.SourceGHCache]; len(got) != 2 || got[0] != "config" || got[1] != "ours" {
+		t.Errorf("SourceReads[github-cache] = %v, want [config ours]", got)
+	}
+}
+
+// praxis keys are the issue CLI's: the cache sets them once, in the write that
+// mints an issue's form, and never on a form it already holds, nor unsets them.
+func TestPraxisIsSetOnlyByTheWriteThatMintsTheForm(t *testing.T) {
+	held := &model.Critic{Name: "gh-cache", Source: model.SourceGHCache, Runtime: model.Runtime{Children: map[string]string{"repo-issue-5": "@000000f5"}}}
+	mint := plugin.FormWrite{Key: "repo-issue-6", Set: map[string]json.RawMessage{"gh": raw(`{}`), "praxis": raw(`{"number":6}`)}}
+	if err := ValidateForms(held, &plugin.Reply{Forms: []plugin.FormWrite{mint}}); err != nil {
+		t.Fatalf("minting an issue form with its praxis keys refused: %v", err)
+	}
+	for name, fw := range map[string]plugin.FormWrite{
+		"set on a held form": {Key: "repo-issue-5", Set: map[string]json.RawMessage{"praxis": raw(`{"status":"done"}`)}},
+		"unset":              {Key: "repo-issue-6", Unset: []string{"praxis"}},
+	} {
+		err := ValidateForms(held, &plugin.Reply{Forms: []plugin.FormWrite{fw}})
+		if err == nil || !strings.Contains(err.Error(), `"praxis"`) || !strings.Contains(err.Error(), "only the write that mints the form sets it") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	second := plugin.FormWrite{Key: "repo-issue-6", Set: map[string]json.RawMessage{"praxis": raw(`{}`)}}
+	if err := ValidateForms(held, &plugin.Reply{Forms: []plugin.FormWrite{mint, second}}); err == nil {
+		t.Errorf("a second write in the same reply set praxis on the form the first minted")
 	}
 }
 

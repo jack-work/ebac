@@ -473,7 +473,7 @@ const (
 // on every round (Request.Keys): configuration the role holder edits.
 var SourceReads = map[string][]string{
 	"github-author": {AuthorPathsKey, AuthorTitleKey},
-	SourceGHCache:   {GHCacheConfigKey},
+	SourceGHCache:   {GHCacheConfigKey, GHCacheOursKey},
 	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey, "review", "verdict", "review_state"},
 }
 
@@ -909,6 +909,15 @@ const SourceGHCache = "github-cache"
 // {repos[], rules[{author[], label[], tier}], ttl}.
 const GHCacheConfigKey = "config"
 
+// GHCacheOursKey is the register's requests (ours.praxis_new.<id>: a new
+// issue, written by the issue CLI only); GHCacheSyncKey is the sync's answer
+// on the register (sync.praxis_new.<id>, sync.alarm.*), written by the
+// plugin only.
+const (
+	GHCacheOursKey = "ours"
+	GHCacheSyncKey = "sync"
+)
+
 // KeelBranches is a keel-branches critic's configuration.
 type KeelBranches struct {
 	Repo   string `json:"repo"`             // keel owner/name, e.g. aether/aether
@@ -941,7 +950,11 @@ var ChildOwnerKeys = []string{"code_ready", "ready"}
 // GHCacheChildReadKeys are the entity-form keys the core reads for the
 // GitHub cache each round: gh (seats edit its write fields) and sync (seats
 // ack its alarms). The plugin writes both, guarded by FormWrite.Expect.
-var GHCacheChildReadKeys = []string{"gh", "sync"}
+var GHCacheChildReadKeys = []string{"gh", "sync", "want", "praxis"}
+
+// ChildMintOnly are child-form keys a plugin may set only in the write that
+// mints the form (praxis: an issue's praxis keys, the issue CLI's afterwards).
+var ChildMintOnly = map[string]bool{"praxis": true}
 
 // ChildWriteRefused are the child-form keys no plugin may write: the owner's
 // keys and the form's own (runtime: figaro 0.75's daemon-written keys).

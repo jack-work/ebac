@@ -270,7 +270,7 @@ var SourceKeys = map[string][]string{
 	model.SourceKeelBranches: {"branches", "overflow"},
 	// The GitHub cache writes its index (one object: figaro#43) on its own
 	// role form; config is the holder's, read only.
-	model.SourceGHCache: {"track"},
+	model.SourceGHCache: {"track", model.GHCacheSyncKey},
 }
 
 func keyAllowed(pattern, k string) bool {

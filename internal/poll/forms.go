@@ -89,12 +89,15 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 		case !childKey.MatchString(fw.Key):
 			return fmt.Errorf("%s: child key %q is not [a-z0-9-], 1-100: reply refused", where, fw.Key)
 		}
+		mints := !minted[fw.Key] && !fw.Retire
 		check := func(verb, k string) error {
 			switch {
 			case k == "" || strings.ContainsAny(k, ".*"):
 				return fmt.Errorf("%s may not %s %q (top-level keys only): reply refused", where, verb, k)
 			case model.ChildWriteRefused[k]:
 				return fmt.Errorf("%s may not %s %q on child %s (owner or core key): reply refused", where, verb, k, fw.Key)
+			case model.ChildMintOnly[k] && (verb != "set" || !mints):
+				return fmt.Errorf("%s may not %s %q on child %s: only the write that mints the form sets it: reply refused", where, verb, k, fw.Key)
 			}
 			return nil
 		}

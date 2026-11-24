@@ -129,6 +129,7 @@ type Alarm struct {
 
 // formView is one entity form as the core read it this round.
 type formView struct {
+	want           *wantView // want.* (create.go); never nil
 	ghRaw, syncRaw json.RawMessage
 	gh             *GH   // nil when absent or unparseable
 	bad            error // gh did not parse
@@ -147,7 +148,7 @@ var ghKnown = func() map[string]bool {
 }()
 
 func readForm(owned map[string]json.RawMessage) *formView {
-	fv := &formView{ghRaw: owned["gh"], syncRaw: owned["sync"]}
+	fv := &formView{ghRaw: owned["gh"], syncRaw: owned["sync"], want: readWant(owned["want"])}
 	if len(fv.ghRaw) > 0 {
 		var g GH
 		var keys map[string]json.RawMessage

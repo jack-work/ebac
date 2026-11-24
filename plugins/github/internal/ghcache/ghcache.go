@@ -36,6 +36,8 @@ type State struct {
 	// Wrote are the child keys of the last reply's form writes, in order: the
 	// core's runtime.forms_landed says how many landed; the rest are redone.
 	Wrote []string `json:"wrote,omitempty"`
+	// Creates are the issues asked on the register (create.go), by praxis id.
+	Creates map[string]*Create `json:"creates,omitempty"`
 }
 
 // Entity is one tracked PR's or issue's bookkeeping.
@@ -78,6 +80,9 @@ type Entity struct {
 	// OursThreads are, per review thread longer than ThreadLast, our comments
 	// in it as of a full read at its count N (#45): read again only when N moves.
 	OursThreads map[string]OursThread `json:"ours_threads,omitempty"`
+	// CommentNew are the comment creates asked on the form (create.go), by
+	// client key.
+	CommentNew map[string]*CommentNew `json:"comment_new,omitempty"`
 }
 
 // OursThread is our comments in one long review thread, read whole at N.
@@ -111,8 +116,11 @@ type Pass struct {
 	Maintainer string
 	Critic     string
 	// Ours is the trusted account login whose texts are ours (lower case
-	// compare): their bodies are trimmed last.
+	// compare): their bodies are trimmed last; the issues and comments the
+	// cache creates are made as it.
 	Ours string
+	// PraxisNew are the register's ours.praxis_new requests (create.go).
+	PraxisNew map[string]json.RawMessage
 }
 
 // Result is what a round produces.
@@ -124,6 +132,8 @@ type Result struct {
 	Log   []string
 	// Telemetry is the round's record (telemetry.go).
 	Telemetry Telemetry
+	// Register is the register's sync key (create.go): written whole.
+	Register map[string]any
 }
 
 // Track is one line of the register's index (role form key track).
@@ -145,6 +155,8 @@ type SyncKey struct {
 	// form's values GitHub's overrode (sync.conflicts.<field>).
 	Alarm     map[string]map[string]Alarm `json:"alarm,omitempty"`
 	Conflicts map[string]json.RawMessage  `json:"conflicts,omitempty"`
+	// CommentNew is sync.comment_new.<client key> (create.go).
+	CommentNew map[string]any `json:"comment_new,omitempty"`
 }
 
 func (e *Entity) ended() bool { return e.State == "MERGED" || e.State == "CLOSED" }
@@ -519,7 +531,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			// No base yet (a form written before the write path): read it
 			// deep now, so a base is agreed within one round of the rollout.
 			redoBecause(k, e, "no-base")
-		case fv.gh != nil && pending(fv.gh, e.Base):
+		case fv.gh != nil && pending(fv.gh, e.Base), len(fv.want.New) > 0:
 			redoBecause(k, e, "pending-write")
 		case fv.gh != nil && ((e.RO != "" && roHash(fv.gh) != e.RO) || len(fv.unknown) > 0):
 			redoBecause(k, e, "form-edit")
@@ -630,7 +642,24 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 				continue
 			}
 			g, notes := sy.entity(k, e, pr, g, fv)
-			fw, digest, final := entityWrite(k, pr, g, append(per[k], notes...), e, now, p.Ours)
+			var wantSet json.RawMessage
+			var shown map[string]any
+			if fv != nil && (len(fv.want.New) > 0 || len(e.CommentNew) > 0) {
+				author := ""
+				if pr.Author != nil {
+					author = pr.Author.Login
+				}
+				kind := "pr"
+				if e.Kind == KindIssue {
+					kind = "issue"
+				}
+				wantSet, shown = sy.comments(k, e, model.GHEntity{Repo: e.Repo, Kind: kind, N: e.N, Author: author}, pr.ID, fv.want)
+			}
+			fw, digest, final := entityWrite(k, pr, g, append(per[k], notes...), e, now, p.Ours, shown)
+			if wantSet != nil {
+				fw.Set["want"] = wantSet
+				digest += "+want"
+			}
 			e.Pend.RO = roHash(&final)
 			if digest != e.Digest || !held || forced[k] || (fv != nil && !sameJSON(fv.ghRaw, fw.Set["gh"])) {
 				if fv != nil {
@@ -648,12 +677,19 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 					} else {
 						fw.ExpectAbsent = append(fw.ExpectAbsent, "sync")
 					}
+					if _, ok := fw.Set["want"]; ok {
+						fw.Expect["want"] = fv.want.raw
+					}
 				}
 				r.Forms = append(r.Forms, fw)
 				e.Digest = digest
 			}
 		}
 	}
+	// 6. Creations asked on the register (create.go).
+	cr := &creator{s: sy, st: &r.State, p: p, reg: map[string]any{}}
+	r.Forms = append(r.Forms, cr.issues(p.PraxisNew)...)
+	r.Register = cr.reg
 	for k := range retire {
 		if _, held := p.Children[k]; held { // never minted: nothing to retire
 			r.Forms = append(r.Forms, plugin.FormWrite{Key: k, Retire: true})
@@ -688,11 +724,14 @@ func tierOr(t string) string {
 // entityWrite builds one entity form write of g (GHOf(pr) after the sync),
 // the digest of its gh, parsed, alarms and conflicts, and the gh as written
 // (after trims). errs are the PR's partial-read errors and the sync's notes.
-func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Time, ours string) (plugin.FormWrite, string, GH) {
+func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Time, ours string, commentNew map[string]any) (plugin.FormWrite, string, GH) {
 	ps := Parse(pr)
 	m := pr.Mark()
 	sy := SyncKey{Version: m.Head + "|" + pr.UpdatedAt + "|" + pr.State + "|" + m.Rollup, At: now.Format(time.RFC3339),
-		Alarm: syncKeyAlarms(e), Conflicts: e.Conflicts}
+		Alarm: syncKeyAlarms(e), Conflicts: e.Conflicts, CommentNew: commentNew}
+	if len(sy.CommentNew) == 0 {
+		sy.CommentNew = nil
+	}
 	if len(sy.Conflicts) == 0 {
 		sy.Conflicts = nil
 	}
@@ -763,7 +802,7 @@ func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Ti
 	}
 	gj, pj := mustJSON(g.wire()), mustJSON(ps)
 	return plugin.FormWrite{Key: key, Set: map[string]json.RawMessage{"gh": gj, "parsed": pj, "sync": mustJSON(sy)}},
-		hash12(string(gj) + string(pj) + string(mustJSON(sy.Alarm)) + string(mustJSON(sy.Conflicts))), g
+		hash12(string(gj) + string(pj) + string(mustJSON(sy.Alarm)) + string(mustJSON(sy.Conflicts)) + string(mustJSON(sy.CommentNew))), g
 }
 
 // sameJSON: a and b are the same JSON value (key order and spacing aside).

@@ -37,10 +37,18 @@ const (
 	FieldThreadResolve = "thread_resolve"
 	FieldLabels        = "labels"
 	FieldDraft         = "draft"
+	// Creation (A2): a new issue in a scope repo, a new comment on an
+	// entity in scope.
+	FieldIssueCreate   = "issue_create"
+	FieldCommentCreate = "comment_create"
 )
 
+// KindNewIssue is the GHEntity kind of an issue not created yet: its repo
+// must be in scope and the trusted config must name the ours login.
+const KindNewIssue = "new-issue"
+
 // GHWriteFields is the closed set of write fields.
-var GHWriteFields = []string{FieldThreadReply, FieldThreadResolve, FieldLabels, FieldDraft}
+var GHWriteFields = []string{FieldThreadReply, FieldThreadResolve, FieldLabels, FieldDraft, FieldIssueCreate, FieldCommentCreate}
 
 // GHEntity is what a write's authorization looks at: the entity's repo,
 // kind (pr | issue), number and author, and for an issue the PRs that fix it
@@ -72,6 +80,17 @@ func AuthorizeGHWrite(w *Critic, e GHEntity, field string) string {
 		return fmt.Sprintf("field %s is not in the trusted write_fields", field)
 	}
 	switch e.Kind {
+	case KindNewIssue:
+		if field != FieldIssueCreate {
+			return fmt.Sprintf("field %s does not apply to an issue not created yet", field)
+		}
+		if !slices.Contains(g.Scope.Repos, e.Repo) {
+			return fmt.Sprintf("repo %s is outside the trusted scope", e.Repo)
+		}
+		if g.Ours == "" {
+			return "the trusted scope names no ours login: no issue is created"
+		}
+		return ""
 	case "pr":
 		return g.Scope.prOut(e.Repo, e.N, e.Author)
 	case "issue":
