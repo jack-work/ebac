@@ -14,6 +14,7 @@ import (
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/identity"
 	"github.com/gluck/ebac/internal/otel"
+	"github.com/gluck/ebac/internal/wake"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
@@ -168,8 +169,16 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 	}
 
 	w.Runtime.Round++
-	w.Runtime.LastPolled = time.Now().UTC()
-	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: p.withReviewCheck(ctx, w)}
+	woken := wake.Keys(ctx)
+	if w.SourceName() != model.SourceGHCache {
+		woken = nil // only the GitHub cache has write-only rounds
+	}
+	if woken == nil {
+		// A write-only round is not a poll: the cadence a restart keeps
+		// (sched.firstDue) counts from the last full round.
+		w.Runtime.LastPolled = time.Now().UTC()
+	}
+	req := plugin.Request{Op: plugin.OpRound, Snapshot: prev, Seat: p.seat(ctx, w.AlertTarget()), Keys: p.withReviewCheck(ctx, w), Wake: woken}
 	if CommitSources[w.SourceName()] {
 		req.CommitToken = newCommitToken()
 	}

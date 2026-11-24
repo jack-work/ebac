@@ -128,6 +128,12 @@ type Request struct {
 	OwnKeys []string                              `json:"own_keys,omitempty"`
 	Owned   map[string]map[string]json.RawMessage `json:"owned,omitempty"`
 
+	// Wake are the child keys whose forms a seat changed since the last
+	// round (the GitHub cache, A3 write-on-change). A round with Wake set is
+	// a WRITE-ONLY round: it writes those entities' pending changes and reads
+	// nothing else; reads keep their cadence. Empty: an ordinary round.
+	Wake []string `json:"wake,omitempty"`
+
 	// Arias is the aria store, read by the core (roster plugin only).
 	Arias []model.Aria `json:"arias,omitempty"`
 

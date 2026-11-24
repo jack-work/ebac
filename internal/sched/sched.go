@@ -10,11 +10,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gluck/ebac/internal/budget"
+	"github.com/gluck/ebac/internal/wake"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -46,7 +49,13 @@ type Entry struct {
 	Est      map[string]float64 `json:"est,omitempty"`
 	Cred     string             `json:"cred,omitempty"`
 	Class    budget.Class       `json:"class,omitempty"`
+	// Wake are the entity keys a seat changed (wake.Watcher), written by a
+	// write-only round at WakeAt; the cadence (Next) does not move for it.
+	Wake     []string  `json:"wake,omitempty"`
+	WakeAt   time.Time `json:"wake_at,omitzero"`
+	LastWake time.Time `json:"last_wake,omitzero"`
 	interval time.Duration
+	waking   bool // the running round is a write-only one
 }
 
 // Scheduler runs the rounds. Fields are set before Run; zero values take
@@ -77,6 +86,9 @@ type Scheduler struct {
 	// role on that critic to the absorbing role (fleet.Repoint, Only).
 	Follow  func(ctx context.Context, id string) (current string, retired bool, why string, err error)
 	Repoint func(ctx context.Context, w *model.Critic, from, to string) error
+	// Watch is told every critic listing (wake.Watcher.Sync: the entity
+	// forms it follows for write-on-change). nil: no write-on-change.
+	Watch func(ctx context.Context, ws []*model.Critic)
 
 	mu       sync.Mutex
 	entries  map[string]*Entry
@@ -121,6 +133,9 @@ func (s *Scheduler) Tick(ctx context.Context) {
 		} else {
 			s.ends(ctx, ws, now)
 			s.sync(ws, now)
+			if s.Watch != nil {
+				s.Watch(ctx, ws)
+			}
 		}
 	}
 
@@ -131,18 +146,36 @@ func (s *Scheduler) Tick(ctx context.Context) {
 			return
 		}
 		e := s.entries[name]
-		g, until, ok := s.Ledger.Reserve(e.Cred, e.Class, e.Est)
+		// A due cadence round is a full round: it writes every pending
+		// change too, so it takes the wake keys with it. Otherwise only the
+		// wake is due: a write-only round of the woken entities.
+		cadence := !e.Next.After(now)
+		est := e.Est
+		if !cadence {
+			est = wakeEst(e)
+		}
+		g, until, ok := s.Ledger.Reserve(e.Cred, e.Class, est)
 		if !ok {
-			e.Next = until
+			if cadence {
+				e.Next = until
+			} else {
+				e.WakeAt = until
+			}
 			e.Deferred = fmt.Sprintf("budget %s short at %s, retry %s", e.Cred, now.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
-			fmt.Fprintf(s.Out, "%s: reserve %s %v (%s) deferred until %s\n", name, e.Cred, e.Est, e.Class, until.UTC().Format(time.RFC3339))
+			fmt.Fprintf(s.Out, "%s: reserve %s %v (%s) deferred until %s\n", name, e.Cred, est, e.Class, until.UTC().Format(time.RFC3339))
 			continue
 		}
+		rctx := ctx
+		if !cadence {
+			rctx = wake.With(ctx, e.Wake)
+			fmt.Fprintf(s.Out, "%s: write-only round for %s\n", name, strings.Join(e.Wake, ","))
+		}
+		e.Wake, e.WakeAt, e.waking = nil, time.Time{}, !cadence
 		e.Deferred = ""
 		e.Running = true
 		s.slots++
 		s.inflight.Add(1)
-		go s.round(ctx, name, g)
+		go s.round(rctx, name, g)
 	}
 }
 
@@ -258,21 +291,60 @@ func firstDue(w *model.Critic, now time.Time, jitter func(time.Duration) time.Du
 	return now.Add(jitter(w.Interval()))
 }
 
-// dueNames is the critics due now and not running, most overdue first.
+// dueNames is the critics due now and not running (a cadence round or a
+// wake), most overdue first.
 func (s *Scheduler) dueNames(now time.Time) []string {
 	var out []string
 	for name, e := range s.entries {
-		if !e.Running && !e.Next.After(now) {
+		if !e.Running && !e.dueAt().After(now) {
 			out = append(out, name)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		a, b := s.entries[out[i]], s.entries[out[j]]
-		if !a.Next.Equal(b.Next) {
-			return a.Next.Before(b.Next)
+		a, b := s.entries[out[i]].dueAt(), s.entries[out[j]].dueAt()
+		if !a.Equal(b) {
+			return a.Before(b)
 		}
 		return out[i] < out[j]
 	})
+	return out
+}
+
+// dueAt is the earlier of the cadence round and a pending wake.
+func (e *Entry) dueAt() time.Time {
+	if !e.WakeAt.IsZero() && e.WakeAt.Before(e.Next) {
+		return e.WakeAt
+	}
+	return e.Next
+}
+
+// Wake asks for a write-only round of critic for the entity key at at (the
+// earliest asked wins; keys accumulate). A critic unknown to the schedule is
+// ignored; one running now is woken after its round.
+func (s *Scheduler) Wake(critic, key string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[critic]
+	if e == nil {
+		return
+	}
+	if !slices.Contains(e.Wake, key) {
+		e.Wake = append(e.Wake, key)
+		sort.Strings(e.Wake)
+	}
+	if e.WakeAt.IsZero() || at.Before(e.WakeAt) {
+		e.WakeAt = at
+	}
+}
+
+// wakeEst is a write-only round's reservation: one unit per limit (a
+// fresh read before the write and the write itself), never the cadence
+// round's estimate.
+func wakeEst(e *Entry) map[string]float64 {
+	out := map[string]float64{}
+	for lim := range e.Est {
+		out[lim] = defaultEst
+	}
 	return out
 }
 
@@ -337,9 +409,20 @@ func (s *Scheduler) finish(name string, g budget.Grant, spent []model.Spend, mu 
 		return
 	}
 	now := s.Now()
-	e.Running, e.Hung, e.Last = false, false, now
-	e.Next = now.Add(e.interval)
+	waking := e.waking
+	e.Running, e.Hung, e.waking = false, false, false
 	e.Err = ""
+	if waking {
+		// A write-only round leaves the cadence and the estimate alone.
+		e.LastWake = now
+		if err != nil {
+			e.Err = model.FirstLine(err.Error())
+			fmt.Fprintf(s.Out, "%s: write-only round: %v\n", name, err)
+		}
+		return
+	}
+	e.Last = now
+	e.Next = now.Add(e.interval)
 	if err != nil {
 		e.Err = model.FirstLine(err.Error())
 		fmt.Fprintf(s.Out, "%s: %v\n", name, err)

@@ -242,9 +242,10 @@ type writeWorld struct {
 	critic  *model.Critic
 	now     time.Time
 	r       Result
-	moveAt  string // a child key whose form a seat edits between the core's read and its write (Expect fails)
-	moveKey string // which key that edit touches: gh (a read-only field) or sync
-	moveFn  func() // when set, the seat's edit at moveAt (instead of moveKey's)
+	moveAt  string          // a child key whose form a seat edits between the core's read and its write (Expect fails)
+	moveKey string          // which key that edit touches: gh (a read-only field) or sync
+	moveFn  func()          // when set, the seat's edit at moveAt (instead of moveKey's)
+	wake    map[string]bool // the next round is write-only for these (A3); cleared after it
 }
 
 func newWriteWorld(t *testing.T, config string) *writeWorld {
@@ -282,11 +283,12 @@ func (w *writeWorld) round() Result {
 		kids[k] = v
 	}
 	r, err := Run(context.Background(), w.gh, w.st, Pass{Config: w.c, ClosedTTL: w.ttl, Now: w.now, Children: kids, Landed: w.gh.landed,
-		Owned: owned, Critic: w.critic.Name, Maintainer: w.critic.Maintainer,
+		Owned: owned, Critic: w.critic.Name, Maintainer: w.critic.Maintainer, Wake: w.wake,
 		Auth: func(e model.GHEntity, field string) string { return model.AuthorizeGHWrite(w.critic, e, field) }})
 	if err != nil {
 		w.t.Fatalf("round at %s: %v", w.now, err)
 	}
+	w.wake = nil
 	w.gh.landed = 0
 	for _, f := range r.Forms {
 		if f.Key == w.moveAt {

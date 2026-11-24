@@ -132,6 +132,11 @@ type Pass struct {
 	PraxisNew map[string]json.RawMessage
 	// Disclose replaces the disclose list's verdict (tests); nil is the list.
 	Disclose func(string) string
+	// Wake are the entities a seat changed (Request.Wake): a non-empty Wake
+	// makes the round WRITE-ONLY (A3): no ls-refs, no searches, no marks;
+	// only these entities, and only if their form asks for a write, are read
+	// fresh and written. Every other entity is left as it was.
+	Wake map[string]bool
 }
 
 // Result is what a round produces.
@@ -222,6 +227,8 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	maps.Copy(r.State.OurIssues, prev.OurIssues)
 	ents := r.State.Entities
 	now := p.Now.UTC()
+	wakeOnly := len(p.Wake) > 0
+	inScope := func(k string) bool { return !wakeOnly || p.Wake[k] }
 	logf := func(f string, a ...any) { r.Log = append(r.Log, fmt.Sprintf(f, a...)) }
 	retire := map[string]bool{}
 
@@ -288,7 +295,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	moved := map[string]bool{}
 	var open []Ref
 	for _, e := range ents {
-		if !e.ended() && e.Kind != KindIssue { // ls-refs knows pull heads only
+		if !e.ended() && e.Kind != KindIssue && !wakeOnly { // ls-refs knows pull heads only
 			open = append(open, refOf(e))
 		}
 	}
@@ -317,7 +324,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 	searches := Searches(p.Config)
-	doSearch := len(searches) > 0 && !now.Before(r.State.SearchAt.Add(fastest))
+	doSearch := !wakeOnly && len(searches) > 0 && !now.Before(r.State.SearchAt.Add(fastest))
 	inSearch := map[string]bool{}
 	matched := map[string]int{} // the first rule that matched each PR this round
 	explicit := map[string]int{}
@@ -354,7 +361,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 		// A searched PR is asked by its alias too (the same call): one that
 		// left the search shows why (merged, closed) in this very round.
-		if !moved[k] && (e.MarkAt.IsZero() || !now.Before(e.MarkAt.Add(every))) {
+		if !wakeOnly && !moved[k] && (e.MarkAt.IsZero() || !now.Before(e.MarkAt.Add(every))) {
 			due = append(due, refOf(e))
 		}
 	}
@@ -441,6 +448,9 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 	for k, rule := range explicit {
+		if wakeOnly {
+			break // nothing was read: no rule matched anything new
+		}
 		if r0, ok := matched[k]; !ok || rule < r0 {
 			matched[k] = rule
 		}
@@ -470,6 +480,9 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		delete(ents, k)
 	}
 	for k, e := range ents {
+		if wakeOnly {
+			break // lifetimes move on reads, and a write-only round reads nothing
+		}
 		isExplicit := trackedExplicitly(k, explicit, r.State.OurIssues)
 		gone := e.ended() || (doSearch && complete && !inSearch[k] && !isExplicit)
 		switch {
@@ -499,7 +512,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			fresh = append(fresh, k)
 		}
 	}
-	if over := len(withForm) + len(fresh) - p.Config.Max; over > 0 {
+	if over := len(withForm) + len(fresh) - p.Config.Max; over > 0 && !wakeOnly {
 		sort.Slice(ended, func(i, j int) bool {
 			a, b := ents[ended[i]], ents[ended[j]]
 			if !a.EndedAt.Equal(b.EndedAt) {
@@ -537,7 +550,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	forced := map[string]bool{}
 	for k, e := range ents {
 		owned, ok := p.Owned[k]
-		if !ok {
+		if !ok || !inScope(k) {
 			continue
 		}
 		fv := readForm(owned)
@@ -571,6 +584,9 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// digest included), moved heads and redos (a pending write among them).
 	var deep []Ref
 	for k, e := range ents {
+		if wakeOnly && !(p.Wake[k] && seatAsked[why[k]]) {
+			continue // a write-only round reads only what a seat asked to write
+		}
 		m, ok := marks[k]
 		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))
 		if moved[k] || e.Redo || (ok && (e.DeepAt.IsZero() || m != e.Mark || stuck)) {
@@ -794,6 +810,11 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	logf("%d tracked, %d head move(s), %d due, search %v, %d deep, %d form write(s)", len(ents), len(moved), len(due), doSearch, len(deep), len(r.Forms))
 	return r, nil
 }
+
+// seatAsked are the deep-read reasons a seat's form change gives: the ones a
+// write-only round acts on (a stale redo or a missing base waits for the
+// cadence round).
+var seatAsked = map[string]bool{"pending-write": true, "ack": true, "form-edit": true, "unparseable": true}
 
 func tierOr(t string) string {
 	if t == "" {

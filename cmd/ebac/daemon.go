@@ -21,6 +21,7 @@ import (
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/sched"
 	"github.com/gluck/ebac/internal/systemd"
+	"github.com/gluck/ebac/internal/wake"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -167,6 +168,11 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 		RoundTimeout: *timeout,
 		Out:          os.Stdout,
 	}
+	// A3 write-on-change: every github-cache entity form is followed; a
+	// seat's change to a write field runs that entity's write within 2 s.
+	watch := &wake.Watcher{Follow: st.Fig.FollowForm, Wake: s.Wake, Out: os.Stdout}
+	defer watch.Close()
+	s.Watch = watch.Sync
 	fmt.Printf("ebacd: scheduling (pool %d, round deadline %s, budget %s)\n", *pool, *timeout, *cfgPath)
 
 	beatID := ""

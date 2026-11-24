@@ -1,0 +1,14 @@
+# A3 write-on-change mutants (#71 L4): id file line old new package test-regex
+W1-wake-mode-off	plugins/github/internal/ghcache/ghcache.go	179	wakeOnly := len(p.Wake) > 0	wakeOnly := false	./plugins/github/internal/ghcache	TestAWakeRound
+W2-wake-reads-all	plugins/github/internal/ghcache/ghcache.go	247	if !e.ended() && !wakeOnly {	if !e.ended() {	./plugins/github/internal/ghcache	TestAWakeRoundWritesTheWokenEntityAndReadsNothingElse
+W3-wake-moves-cadence	internal/sched/sched.go	415	\tif waking {	\tif waking && false {	./internal/sched	TestAWakeRunsAWriteOnlyRoundAndLeavesTheCadence
+W4-wake-is-full-round	internal/sched/sched.go	152	cadence := !e.Next.After(now)	cadence := true	./internal/sched	TestAWakeRunsAWriteOnlyRoundAndLeavesTheCadence
+W5-wake-waits-for-cadence	internal/sched/sched.go	315	if !e.WakeAt.IsZero() && e.WakeAt.Before(e.Next) {	if false {	./internal/sched	TestAWakeRunsAWriteOnlyRoundAndLeavesTheCadence
+W6-no-burst-debounce	internal/wake/wake.go	197	if last.After(now) {	if false {	./internal/wake	TestABurstRidesOneWakeAndAWriteIsSpacedByTheGap
+W7-no-gap	internal/wake/wake.go	202	if g := last.Add(w.Gap); g.After(at) {	if g := last; g.After(at) {	./internal/wake	TestABurstRidesOneWakeAndAWriteIsSpacedByTheGap
+W8-any-path-wakes	internal/wake/wake.go	184	if model.GHCacheWakes(p) {	if true {	./internal/wake	TestAReadOnlyChangeDoesNotWake
+W9-dropped-follow-kept	internal/wake/wake.go	119	if t, ok := want[id]; !ok || dropped || t.critic != f.critic	if t, ok := want[id]; !ok || t.critic != f.critic	./internal/wake	TestADroppedOrRefusedFollowIsFollowedAgain
+W10-watch-not-told	internal/sched/sched.go	136	\t\t\tif s.Watch != nil {	\t\t\tif false {	./internal/sched	TestWatchIsToldEveryListing
+W11-path-wildcard-any	sdk/model/ghwake.go	34	if want[i] != "*" && want[i] != got[i] {	if false {	./sdk/model	TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly
+W12-cadence-keeps-wake	internal/sched/sched.go	173	e.Wake, e.WakeAt, e.waking = nil, time.Time{}, !cadence	e.waking = !cadence	./internal/sched	TestADueCadenceRoundTakesThePendingWake
+W13-other-ghcache-sources-followed	internal/wake/wake.go	102	if c.SourceName() != model.SourceGHCache || c.Runtime.Stopped	if c.Runtime.Stopped	./internal/wake	TestSyncFollowsOnlyGitHubCacheEntityForms

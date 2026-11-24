@@ -68,7 +68,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		// Every write is authorized against the trusted scope the core
 		// applied to this critic (model.GHWrite), never the form's config.
 		Auth:       func(e model.GHEntity, field string) string { return model.AuthorizeGHWrite(w, e, field) },
-		Maintainer: w.Maintainer, PraxisNew: praxisNew(req.Keys[model.GHCacheOursKey])}
+		Maintainer: w.Maintainer, PraxisNew: praxisNew(req.Keys[model.GHCacheOursKey]), Wake: wakeSet(req.Wake)}
 	if w.GHWrite != nil {
 		pass.Ours = w.GHWrite.Ours
 	}
@@ -104,4 +104,15 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		rep.SetKey(model.GHCacheSyncKey, r.Register) // only when it changed (State.RegHash)
 	}
 	return rep, nil
+}
+
+func wakeSet(keys []string) map[string]bool {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out
 }

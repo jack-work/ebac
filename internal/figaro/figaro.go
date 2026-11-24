@@ -562,3 +562,22 @@ func (f *Figaro) ListArias(ctx context.Context) ([]model.Aria, error) {
 	}
 	return out, nil
 }
+
+// FollowForm follows one form's hub (figaro.follow): on receives every
+// committed patch of it, as figaro pushes it (form.delta). done closes when
+// the connection drops; stop closes it. Its own connection, never the cached
+// one the calls share.
+func (f *Figaro) FollowForm(ctx context.Context, id string, on func(json.RawMessage)) (stop func(), done <-chan struct{}, err error) {
+	if f.epErr != nil {
+		return nil, nil, f.epErr
+	}
+	a, err := sdk.DialAria(f.Addr(id), func(method string, params json.RawMessage) {
+		if method == rpc.MethodFormDelta {
+			on(params)
+		}
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("follow %s: %w", id, err)
+	}
+	return func() { _ = a.Close() }, a.Done(), nil
+}
