@@ -14,6 +14,8 @@ import (
 type GHWrite struct {
 	Scope  GHScope  `json:"scope"`
 	Fields []string `json:"fields,omitempty"`
+	// Ours is the account login whose texts are ours (trusted ours_login).
+	Ours string `json:"ours_login,omitempty"`
 }
 
 // GHScope is the trusted write scope: a PR is in it when its repo is one of
@@ -121,10 +123,10 @@ func SplitRef(ref string) (repo string, n int, ok bool) {
 
 // ghWrite is the trusted write authority a carries, nil when it has none.
 func (a Authority) ghWrite() *GHWrite {
-	if a.Scope == nil && len(a.WriteFields) == 0 {
+	if a.Scope == nil && len(a.WriteFields) == 0 && a.OursLogin == "" {
 		return nil
 	}
-	g := &GHWrite{Fields: slices.Clone(a.WriteFields)}
+	g := &GHWrite{Fields: slices.Clone(a.WriteFields), Ours: a.OursLogin}
 	if a.Scope != nil {
 		g.Scope = GHScope{Repos: slices.Clone(a.Scope.Repos), Authors: slices.Clone(a.Scope.Authors), PRs: slices.Clone(a.Scope.PRs),
 			ReadOnlyAuthors: slices.Clone(a.Scope.ReadOnlyAuthors), IssuesFixedByScope: a.Scope.IssuesFixedByScope}

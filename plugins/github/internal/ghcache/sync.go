@@ -473,8 +473,13 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 	}
 	F, B := fv.gh, *e.Base
 	next := baseOf(&G)
-	ent := model.GHEntity{Repo: e.Repo, Kind: "pr", N: e.N, Author: g.Author}
+	ent := model.GHEntity{Repo: e.Repo, Kind: KindPR, N: e.N, Author: g.Author}
 	auth := func(field string) string {
+		if e.Kind == KindIssue {
+			// #45 reads issues; their writes (title, body, comments,
+			// labels) come with the issue write path (#71 A2/#64).
+			return "issue writes are not built yet: the form's edit is not written"
+		}
 		if s.p.Auth == nil {
 			return "no write authority"
 		}

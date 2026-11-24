@@ -192,9 +192,7 @@ func (f *fakeGH) Mutate(_ context.Context, q string, vars map[string]string) (js
 		f.wr.mine[vars["t"]] = append(f.wr.mine[vars["t"]], vars["b"])
 		th := &pr.Threads.Nodes[i]
 		th.Comments.TotalCount++
-		th.Comments.Nodes = []struct {
-			Author *Login `json:"author"`
-		}{{Author: &Login{Login: "operator"}}}
+		th.Comments.Nodes = []Comment{{ID: fmt.Sprintf("C%d", th.Comments.TotalCount), Author: &Login{Login: "operator"}, Body: vars["b"]}}
 		bump(pr)
 		state := model.FirstNonEmpty(f.wr.replyState, "SUBMITTED")
 		return json.RawMessage(`{"addPullRequestReviewThreadReply":{"comment":{"state":"` + state + `","url":"https://example.invalid/pull/1#r1"}}}`), nil

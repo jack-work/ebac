@@ -16,10 +16,13 @@ import (
 // fakeGH answers the queries this package sends from a world of PRs (production-shaped: the captured deep reads),
 // counts calls, and fails on demand. Searches answer by their query string.
 type fakeGH struct {
-	t        *testing.T
-	prs      map[string]map[int]*PR // repo -> n -> PR
-	search   map[string][]int       // search query -> numbers (looked up in the search's repo)
-	calls    []string               // every GraphQL query
+	t      *testing.T
+	prs    map[string]map[int]*PR    // repo -> n -> PR
+	issues map[string]map[int]*Issue // repo -> n -> issue (#45)
+	// whole are long review threads' every comment (#45 ours read), by thread id.
+	whole    map[string][]Comment
+	search   map[string][]int // search query -> numbers (looked up in the search's repo)
+	calls    []string         // every GraphQL query
 	lsrefs   int
 	failGQL  func(q string) error
 	failRefs error
@@ -38,6 +41,8 @@ var (
 	searchAliasRe = regexp.MustCompile(`(s\d+): search\(query:"((?:[^"\\]|\\.)*)"`)
 	repoAliasRe   = regexp.MustCompile(`(r\d+): repository\(owner:"([^"]+)",name:"([^"]+)"\)\{`)
 	prAliasRe     = regexp.MustCompile(`p(\d+): pullRequest\(number:(\d+)\)\{(\.\.\.D|number updatedAt)`)
+	wholeAliasRe  = regexp.MustCompile(`(t\d+): node\(id:"([^"]+)"\)`)
+	issueAliasRe  = regexp.MustCompile(`i(\d+): issue\(number:(\d+)\)\{(\.\.\.I|number updatedAt)`)
 )
 
 // GraphQLPartial answers as GHE does: a missing PR is null data plus a NOT_FOUND error on [rN, pN] (measured on
@@ -51,6 +56,19 @@ func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, [
 	}
 	if strings.HasPrefix(q, "{ pre: node(") {
 		return f.preWrite(q)
+	}
+	if strings.HasPrefix(q, "{ t0: node(") {
+		out := map[string]any{}
+		for _, m := range wholeAliasRe.FindAllStringSubmatch(q, -1) {
+			cs, ok := f.whole[m[2]]
+			if !ok {
+				out[m[1]] = nil
+				continue
+			}
+			out[m[1]] = map[string]any{"comments": map[string]any{"totalCount": len(cs), "nodes": cs}}
+		}
+		data, err := json.Marshal(out)
+		return data, nil, err
 	}
 	var errs []forge.GQLError
 	out := map[string]any{}
@@ -91,6 +109,22 @@ func (f *fakeGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage, [
 				}
 			} else {
 				prs["p"+m[1]] = markOf(pr)
+			}
+		}
+		for _, m := range issueAliasRe.FindAllStringSubmatch(q[loc[1]:end], -1) {
+			n, _ := strconv.Atoi(m[2])
+			is := f.issues[repo][n]
+			if is == nil {
+				prs["i"+m[1]] = nil
+				errs = append(errs, forge.GQLError{Type: "NOT_FOUND", Path: []string{alias, "i" + m[1]},
+					Message: "Could not resolve to an Issue with the number of " + m[2] + "."})
+				continue
+			}
+			if m[3] == "...I" {
+				prs["i"+m[1]] = is
+			} else {
+				prs["i"+m[1]] = map[string]any{"number": is.Number, "updatedAt": is.UpdatedAt, "state": is.State,
+					"comments": map[string]any{"totalCount": is.Comments.TotalCount}}
 			}
 		}
 		out[alias] = prs
@@ -539,7 +573,8 @@ func TestFormSizeCap(t *testing.T) {
 		if n > MaxForm {
 			t.Errorf("%s: %d bytes", f.Key, n)
 		}
-		if f.Key == "aether-pr-127740" && !strings.Contains(string(f.Set["sync"]), `"trimmed":["threads"]`) {
+		// #45: the texts go first (the body's text is cut before the threads go), each trim named only when it cut.
+		if strings.HasSuffix(f.Key, fmt.Sprintf("-pr-%d", pr.Number)) && !strings.Contains(string(f.Set["sync"]), `"trimmed":["body.text","threads"]`) {
 			t.Errorf("trim not named: %s", f.Set["sync"])
 		}
 	}

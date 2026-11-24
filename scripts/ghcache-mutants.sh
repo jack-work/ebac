@@ -24,8 +24,8 @@ MUTANTS=(
   "R2|$G/ghcache.go|if h, ok := heads[n]; ok && h != e.Mark.Head {|if h, ok := heads[n]; ok && h != e.Mark.Head && false {|./$G/"
   "R3|$G/ghcache.go|(ok && (e.DeepAt.IsZero() \|\| m != e.Mark \|\| stuck))|(ok && (true \|\| m != e.Mark \|\| stuck))|./$G/"
   "R4|$G/ghcache.go|case !now.Before(e.EndedAt.Add(p.ClosedTTL)):|case false:|./$G/"
-  "R5|$G/ghcache.go|e.Unsettled = pr.State == \"OPEN\" && (pr.Mergeable == \"UNKNOWN\" \|\| pr.MergeSt == \"UNKNOWN\")|e.Unsettled = false|./$G/"
-  "R6|$G/ghcache.go|if size() <= MaxForm {|if size() >= 0 {|./$G/"
+  "R5|$G/ghcache.go|e.Unsettled = e.Kind != KindIssue && pr.State == \"OPEN\" && (pr.Mergeable == \"UNKNOWN\" \|\| pr.MergeSt == \"UNKNOWN\")|e.Unsettled = false|./$G/"
+  "R6|$G/ghcache.go|if before <= MaxForm {|if before >= 0 {|./$G/"
   "R7|$G/query.go|const DeepBatch = 10|const DeepBatch = 11|./$G/"
   "R8|$G/config.go|HotEvery  = 5 * time.Minute|HotEvery  = 4 * time.Minute|./$G/"
   "N1|$G/ghcache.go|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" {|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" && false {|./$G/"
@@ -85,8 +85,8 @@ MUTANTS=(
   "S45|internal/poll/outbox.go|	return pluginBlocked(w, snap, order, todo, alarms, now)|	return nil|./internal/poll/"
   "S46|internal/poll/outbox.go|!strings.HasPrefix(post.Refused, model.ApproveBlocked) \|\| alarms[id] != nil {|alarms[id] != nil {|./internal/poll/"
   "S47|$G/ghcache.go|			b := e.Pend.Pushed.onto(*e.Base)|			b := *e.Base|./$G/"
-  "S48|$G/ghcache.go|							fw.ExpectAbsent = append(fw.ExpectAbsent, \"gh\")|							_ = fw|./$G/"
-  "S49|$G/ghcache.go|							fw.ExpectAbsent = append(fw.ExpectAbsent, \"sync\")|							_ = fw|./$G/"
+  "S48|$G/ghcache.go|						fw.ExpectAbsent = append(fw.ExpectAbsent, \"gh\")|						_ = fw|./$G/"
+  "S49|$G/ghcache.go|						fw.ExpectAbsent = append(fw.ExpectAbsent, \"sync\")|						_ = fw|./$G/"
   "S50|internal/poll/forms.go|	for _, k := range absent {|	for _, k := range absent[:0] {|./internal/poll/"
   "S51|$G/sync.go|				e.pushed().Added, e.pushed().Removed = slices.Clone(addL), slices.Clone(rmL)|				_, _ = addL, rmL|./$G/"
   "S52|$G/sync.go|		b.Labels = sortedSet(append(minus(b.Labels, p.Removed), p.Added...))|		b.Labels = sortedSet(append(slices.Clone(b.Labels), p.Added...))|./$G/"
@@ -105,6 +105,23 @@ MUTANTS=(
   "T8|$G/telemetry.go|		if inSearch[ChildKey(ref.Repo, ref.N)] {|		if inSearch[ChildKey(ref.Repo, ref.N)] && false {|./$G/"
   "T9|$G/ghcache.go|			redoBecause(k, e, \"pending-write\")|			redoBecause(k, e, \"form-edit\")|./$G/"
   "T10|$G/sync.go|	s.log = append(s.log, w)|	_ = w|./$G/"
+  # #45 issue entities, comment and thread-comment bodies, ours read whole, text-first trims.
+  "I1|$G/ghcache.go|for _, n := range rl.Issues {|for _, n := range []int{} {|./$G/"
+  "I2|$G/gh.go|if g.Kind != KindIssue {|if true {|./$G/"
+  "I3|$G/query.go|return Mark{UpdatedAt: m.UpdatedAt, State: m.State, Comments: m.Comments.TotalCount}|return Mark{UpdatedAt: m.UpdatedAt, State: m.State}|./$G/"
+  "I4|$G/sync.go|if e.Kind == KindIssue {|if false {|./$G/"
+  "I5|$G/ghcache.go|if !e.ended() && e.Kind != KindIssue {|if !e.ended() {|./$G/"
+  "I6|$G/ghcache.go|g.Comments = cutAll(g.Comments, func(c CachedComment) bool { return !isOurs(c) })|g.Comments = cutAll(g.Comments, func(CachedComment) bool { return true })|./$G/"
+  "I7|$G/ghcache.go|if size() < before {|if true {|./$G/"
+  "I8|$G/ghcache.go|if p.Ours != \"\" {|if false {|./$G/"
+  "I9|$G/ghcache.go|if c, ok := it.e.OursThreads[id]; ok && c.N == t.N {|if false {|./$G/"
+  "I10|$G/gh.go|N: t.Comments.TotalCount, Comments: cached(t.Comments.Nodes)}|N: t.Comments.TotalCount}|./$G/"
+  "I11|$G/query.go|pr.Comments.TotalCount, pr.Comments.Nodes = is.Comments.TotalCount, is.Comments.Nodes|pr.Comments.Nodes = is.Comments.Nodes|./$G/"
+  "I12|$G/gh.go|b := Body{Bytes: len(body), Hash: hash12(body), Text: body}|b := Body{Bytes: len(body), Hash: hash12(body)}|./$G/"
+  "I13|$G/ghcache.go|if strings.EqualFold(c.Author, s.p.Ours) {|if true {|./$G/"
+  "I14|sdk/model/ghwrite.go|g := &GHWrite{Fields: slices.Clone(a.WriteFields), Ours: a.OursLogin}|g := &GHWrite{Fields: slices.Clone(a.WriteFields)}|./sdk/model/"
+  "I15|$G/config.go|if len(r.Issues) > 0 && r.Repo == \"\" {|if false {|./$G/"
+  "I16|$G/ghcache.go|merged[cid] = cc // the newest read is fresher|_ = cc // the newest read is fresher|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
@@ -137,5 +154,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 93 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 109 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad

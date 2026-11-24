@@ -61,3 +61,23 @@ func TestAuthorityReadTargets(t *testing.T) {
 		t.Fatalf("creation: %+v", c)
 	}
 }
+
+// #45: the ours login comes from the trusted config only (a form's gh_write is replaced), alone or beside a write
+// scope, and reads back through AuthorityOf. RED if Apply drops it or reads it from the form.
+func TestOursLoginIsTrustedOnly(t *testing.T) {
+	form := &Critic{Source: SourceGHCache, GHWrite: &GHWrite{Ours: "intruder"}}
+	ignored := Authority{Source: SourceGHCache, OursLogin: "ours"}.Apply(form)
+	if form.GHWrite == nil || form.GHWrite.Ours != "ours" || !strings.Contains(strings.Join(ignored, ","), "gh_write") {
+		t.Fatalf("ours alone: %+v, ignored %v", form.GHWrite, ignored)
+	}
+	scoped := &Critic{Source: SourceGHCache}
+	Authority{Source: SourceGHCache, Scope: &GHScope{Repos: []string{"example/repo"}}, WriteFields: []string{FieldLabels}, OursLogin: "ours"}.Apply(scoped)
+	if scoped.GHWrite == nil || scoped.GHWrite.Ours != "ours" || AuthorityOf(scoped).OursLogin != "ours" {
+		t.Fatalf("ours beside a scope: %+v", scoped.GHWrite)
+	}
+	none := &Critic{Source: SourceGHCache, GHWrite: &GHWrite{Ours: "intruder"}}
+	Authority{Source: SourceGHCache}.Apply(none)
+	if none.GHWrite != nil {
+		t.Fatalf("no trusted ours: %+v", none.GHWrite)
+	}
+}
