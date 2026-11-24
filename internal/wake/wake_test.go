@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -24,9 +26,9 @@ func TestPathsOfLiveDeltas(t *testing.T) {
 	for raw, want := range map[string][]string{
 		deltaTitle: {"gh.title"},
 		deltaNew:   {"want.comments.new.k1.body"},
-		`{"object":{"Set":{"gh":{"title":"x"}},"Delete":{"sync":1}}}`:                         {"gh", "sync"},
+		`{"object":{"Set":{"gh":{"title":"x"}},"Delete":{"sync":1}}}`:                                        {"gh", "sync"},
 		`{"object":{"Update":{"gh":{"object":{"Update":{"title":{"scalar":{"Before":"a","After":"b"}}}}}}}}`: {"gh.title"},
-		`{"object":{"Update":{"sync":{"object":{"Set":{"ack":true}}}}}}`:                       {"sync.ack"},
+		`{"object":{"Update":{"sync":{"object":{"Set":{"ack":true}}}}}}`:                                     {"sync.ack"},
 	} {
 		got, err := Paths(json.RawMessage(raw))
 		if err != nil || !slices.Equal(got, want) {
@@ -39,29 +41,41 @@ func TestPathsOfLiveDeltas(t *testing.T) {
 }
 
 type fakeFollow struct {
-	mu   sync.Mutex
-	on   map[string]func(json.RawMessage)
-	done map[string]chan struct{}
-	fail map[string]bool
-	n    int
+	mu    sync.Mutex
+	on    map[string]func(json.RawMessage)
+	done  map[string]chan struct{}
+	fail  map[string]bool
+	hang  map[string]bool // a dial that never answers until ctx ends
+	stops map[string]int
+	n     int
 }
+
+func (f *fakeFollow) setFail(id string, v bool) { f.mu.Lock(); f.fail[id] = v; f.mu.Unlock() }
+func (f *fakeFollow) tries() int                { f.mu.Lock(); defer f.mu.Unlock(); return f.n }
+func (f *fakeFollow) stopped(id string) int     { f.mu.Lock(); defer f.mu.Unlock(); return f.stops[id] }
 
 func newFakeFollow() *fakeFollow {
-	return &fakeFollow{on: map[string]func(json.RawMessage){}, done: map[string]chan struct{}{}, fail: map[string]bool{}}
+	return &fakeFollow{on: map[string]func(json.RawMessage){}, done: map[string]chan struct{}{}, fail: map[string]bool{}, stops: map[string]int{}}
 }
 
-func (f *fakeFollow) follow(_ context.Context, id string, on func(json.RawMessage)) (func(), <-chan struct{}, error) {
+func (f *fakeFollow) follow(ctx context.Context, id string, on func(json.RawMessage)) (func(), <-chan struct{}, error) {
 	f.mu.Lock()
+	f.n++
+	if f.hang[id] {
+		f.mu.Unlock()
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
 	defer f.mu.Unlock()
 	if f.fail[id] {
 		return nil, nil, errors.New("dial refused")
 	}
-	f.n++
 	d := make(chan struct{})
 	f.on[id], f.done[id] = on, d
 	return func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		f.stops[id]++
 		delete(f.on, id)
 	}, d, nil
 }
@@ -82,18 +96,37 @@ func (f *fakeFollow) drop(id string) {
 	delete(f.on, id)
 }
 
-type woke struct {
-	critic, key string
-	at          time.Time
+type woke struct{ critic, key string }
+
+// rig: a watcher on the fake follow; Wake records each report.
+func rig() (*Watcher, *fakeFollow, *wokeLog) {
+	ff := newFakeFollow()
+	got := &wokeLog{}
+	w := &Watcher{Follow: ff.follow, Wake: got.add}
+	return w, ff, got
 }
 
-func rig() (*Watcher, *fakeFollow, *[]woke, *time.Time) {
-	ff := newFakeFollow()
-	now := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
-	var got []woke
-	w := &Watcher{Follow: ff.follow, Now: func() time.Time { return now }, Wake: func(c, k string, at time.Time) { got = append(got, woke{c, k, at}) }}
-	return w, ff, &got, &now
+type wokeLog struct {
+	mu  sync.Mutex
+	all []woke
 }
+
+func (l *wokeLog) add(c, k string) { l.mu.Lock(); l.all = append(l.all, woke{c, k}); l.mu.Unlock() }
+func (l *wokeLog) n() int          { l.mu.Lock(); defer l.mu.Unlock(); return len(l.all) }
+
+// waitFor spins (no sleep) until cond holds: follows are dialled off the caller.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		runtime.Gosched()
+	}
+}
+
+func (f *fakeFollow) has(id string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.on[id] != nil }
 
 func cacheCritic(name string, children map[string]string) *model.Critic {
 	c := &model.Critic{Name: name, Source: model.SourceGHCache}
@@ -101,35 +134,47 @@ func cacheCritic(name string, children map[string]string) *model.Critic {
 	return c
 }
 
+const (
+	formA = "@0000000000000000000000000000000a"
+	formB = "@0000000000000000000000000000000b"
+)
+
 func TestSyncFollowsOnlyGitHubCacheEntityForms(t *testing.T) {
-	w, ff, _, _ := rig()
+	w, ff, _ := rig()
+	defer w.Close()
 	other := &model.Critic{Name: "scout", Source: model.SourceScout}
 	other.Runtime.Children = map[string]string{"x": "@00000000000000000000000000000009"}
 	stopped := cacheCritic("old", map[string]string{"y": "@00000000000000000000000000000008"})
 	stopped.Runtime.Stopped = true
-	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": "@0000000000000000000000000000000a", "b": "@0000000000000000000000000000000b"}), other, stopped})
-	if w.Following() != 2 || ff.on["@0000000000000000000000000000000a"] == nil || ff.on["@0000000000000000000000000000000b"] == nil {
-		t.Fatalf("following %d: %v", w.Following(), ff.on)
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB}), other, stopped})
+	waitFor(t, "two follows up", func() bool { return w.Following() == 2 })
+	if !ff.has(formA) || !ff.has(formB) || ff.has("@00000000000000000000000000000009") || ff.has("@00000000000000000000000000000008") {
+		t.Fatalf("followed %v", ff.on)
 	}
-	// a retired child is dropped
-	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": "@0000000000000000000000000000000a"})})
-	if w.Following() != 1 || ff.on["@0000000000000000000000000000000b"] != nil {
+	// a retired child is dropped and its follow stopped
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA})})
+	if w.Following() != 1 || ff.has(formB) {
 		t.Fatalf("after retire: following %d: %v", w.Following(), ff.on)
 	}
 }
 
-func TestAWriteFieldChangeWakesWithinTheDelay(t *testing.T) {
-	w, ff, got, now := rig()
-	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"example-repo-00000001": "@0000000000000000000000000000000a"})})
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	if len(*got) != 1 || (*got)[0] != (woke{"cache", "example-repo-00000001", now.Add(time.Second)}) {
-		t.Fatalf("woke %+v, want one wake at now+1s", *got)
+func TestAWriteFieldChangeIsReported(t *testing.T) {
+	w, ff, got := rig()
+	defer w.Close()
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"example-repo-00000001": formA})})
+	waitFor(t, "the follow", func() bool { return w.Following() == 1 })
+	ff.push(formA, deltaTitle)
+	ff.push(formA, deltaNew)
+	if got.n() != 2 || got.all[0] != (woke{"cache", "example-repo-00000001"}) {
+		t.Fatalf("reported %+v, want two reports of the entity", got.all)
 	}
 }
 
-func TestAReadOnlyChangeDoesNotWake(t *testing.T) {
-	w, ff, got, _ := rig()
-	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"k": "@0000000000000000000000000000000a"})})
+func TestAReadOnlyChangeIsNotReported(t *testing.T) {
+	w, ff, got := rig()
+	defer w.Close()
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"k": formA})})
+	waitFor(t, "the follow", func() bool { return w.Following() == 1 })
 	for _, raw := range []string{
 		`{"patch":{"object":{"Update":{"gh":{"object":{"Set":{"state":"MERGED"}}}}}}}`,
 		`{"patch":{"object":{"Update":{"sync":{"object":{"Set":{"at":"x"}}}}}}}`,
@@ -137,59 +182,73 @@ func TestAReadOnlyChangeDoesNotWake(t *testing.T) {
 		`{"patch":{"object":{"Set":{"track":1}}}}`,
 		`not json`,
 	} {
-		ff.push("@0000000000000000000000000000000a", raw)
+		ff.push(formA, raw)
 	}
-	if len(*got) != 0 {
-		t.Fatalf("woke on read-only changes: %+v", *got)
-	}
-}
-
-// A burst rides one wake; a change soon after a wake waits out the 5 s gap.
-func TestABurstRidesOneWakeAndAWriteIsSpacedByTheGap(t *testing.T) {
-	w, ff, got, now := rig()
-	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"k": "@0000000000000000000000000000000a"})})
-	t0 := *now
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	*now = t0.Add(300 * time.Millisecond)
-	ff.push("@0000000000000000000000000000000a", deltaNew)
-	*now = t0.Add(900 * time.Millisecond)
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	if len(*got) != 1 {
-		t.Fatalf("a burst within the delay woke %d times: %+v", len(*got), *got)
-	}
-	*now = t0.Add(2 * time.Second) // the first wake ran at t0+1s
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	if len(*got) != 2 || !(*got)[1].at.Equal(t0.Add(time.Second+DefaultGap)) {
-		t.Fatalf("wakes %+v, want the second at t0+1s+gap", *got)
-	}
-	*now = t0.Add(20 * time.Second)
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	if len(*got) != 3 || !(*got)[2].at.Equal(t0.Add(21*time.Second)) {
-		t.Fatalf("wakes %+v, want the third at now+delay", *got)
+	if got.n() != 0 {
+		t.Fatalf("reported read-only changes: %+v", got.all)
 	}
 }
 
 // A dropped follow (daemon restart) or a refused one is followed again at the
-// next listing.
+// next listing, and the dropped connection is closed first.
 func TestADroppedOrRefusedFollowIsFollowedAgain(t *testing.T) {
-	w, ff, got, _ := rig()
-	ws := []*model.Critic{cacheCritic("cache", map[string]string{"k": "@0000000000000000000000000000000a", "j": "@0000000000000000000000000000000b"})}
-	ff.fail["@0000000000000000000000000000000b"] = true
+	w, ff, got := rig()
+	defer w.Close()
+	ws := []*model.Critic{cacheCritic("cache", map[string]string{"k": formA, "j": formB})}
+	ff.setFail(formB, true)
 	w.Sync(context.Background(), ws)
-	if w.Following() != 1 {
-		t.Fatalf("following %d, want 1 (one refused)", w.Following())
-	}
-	ff.drop("@0000000000000000000000000000000a")
-	ff.fail["@0000000000000000000000000000000b"] = false
+	waitFor(t, "one follow up, one refused", func() bool { return w.Following() == 1 && ff.tries() == 2 })
+	ff.drop(formA)
+	ff.setFail(formB, false)
 	w.Sync(context.Background(), ws)
-	if w.Following() != 2 || ff.n != 3 {
-		t.Fatalf("following %d after %d follows, want 2 after 3", w.Following(), ff.n)
+	waitFor(t, "both followed", func() bool { return w.Following() == 2 })
+	if ff.stopped(formA) != 1 {
+		t.Fatalf("the dropped follow of A was stopped %d times, want 1", ff.stopped(formA))
 	}
-	ff.push("@0000000000000000000000000000000a", deltaTitle)
-	ff.push("@0000000000000000000000000000000b", deltaTitle)
-	if len(*got) != 2 {
-		t.Fatalf("re-followed forms woke %d times, want 2", len(*got))
+	ff.push(formA, deltaTitle)
+	ff.push(formB, deltaTitle)
+	if got.n() != 2 {
+		t.Fatalf("re-followed forms reported %d changes, want 2", got.n())
 	}
+}
+
+// Review B2: a follow that never answers blocks neither Sync nor the other
+// follows, at most Parallel dial at once, and Close cancels the stuck ones.
+func TestAStuckFollowBlocksNeitherSyncNorOthers(t *testing.T) {
+	ff := newFakeFollow()
+	ff.hang = map[string]bool{formA: true}
+	w := &Watcher{Follow: ff.follow, Wake: func(string, string) {}, Parallel: 2}
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB})})
+	waitFor(t, "B up beside the stuck A", func() bool { return w.Following() == 1 && ff.has(formB) })
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB})}) // returns: A is still dialling, not dialled twice
+	if n := ff.tries(); n != 2 {
+		t.Fatalf("%d dial(s), want 2 (A not dialled twice while stuck)", n)
+	}
+	w.Close() // cancels A's dial and returns
+	if w.Following() != 0 {
+		t.Fatalf("following %d after Close", w.Following())
+	}
+}
+
+func TestDialsAreBounded(t *testing.T) {
+	ff := newFakeFollow()
+	ff.hang = map[string]bool{}
+	kids := map[string]string{}
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("@00000000000000000000000000000%03d", i)
+		ff.hang[id] = true
+		kids[fmt.Sprint(i)] = id
+	}
+	w := &Watcher{Follow: ff.follow, Wake: func(string, string) {}, Parallel: 2}
+	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", kids)})
+	waitFor(t, "two dials in flight", func() bool { return ff.tries() == 2 })
+	for i := 0; i < 1000; i++ {
+		runtime.Gosched()
+	}
+	if n := ff.tries(); n != 2 {
+		t.Fatalf("%d dials in flight, want at most 2", n)
+	}
+	w.Close()
 }
 
 func TestKeysTravelInTheContext(t *testing.T) {

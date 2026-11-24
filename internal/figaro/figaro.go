@@ -566,18 +566,38 @@ func (f *Figaro) ListArias(ctx context.Context) ([]model.Aria, error) {
 // FollowForm follows one form's hub (figaro.follow): on receives every
 // committed patch of it, as figaro pushes it (form.delta). done closes when
 // the connection drops; stop closes it. Its own connection, never the cached
-// one the calls share.
+// one the calls share. It returns when ctx ends even if the dial has not
+// (the SDK's dial waits up to its own timeout): a dial that lands after
+// that is closed at once (review B2, N3).
 func (f *Figaro) FollowForm(ctx context.Context, id string, on func(json.RawMessage)) (stop func(), done <-chan struct{}, err error) {
 	if f.epErr != nil {
 		return nil, nil, f.epErr
 	}
-	a, err := sdk.DialAria(f.Addr(id), func(method string, params json.RawMessage) {
-		if method == rpc.MethodFormDelta {
-			on(params)
-		}
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("follow %s: %w", id, err)
+	type dialed struct {
+		a   *sdk.Aria
+		err error
 	}
-	return func() { _ = a.Close() }, a.Done(), nil
+	ch := make(chan dialed, 1)
+	go func() {
+		a, err := sdk.DialAria(f.Addr(id), func(method string, params json.RawMessage) {
+			if method == rpc.MethodFormDelta {
+				on(params)
+			}
+		})
+		ch <- dialed{a, err}
+	}()
+	select {
+	case d := <-ch:
+		if d.err != nil {
+			return nil, nil, fmt.Errorf("follow %s: %w", id, d.err)
+		}
+		return func() { _ = d.a.Close() }, d.a.Done(), nil
+	case <-ctx.Done():
+		go func() {
+			if d := <-ch; d.err == nil {
+				_ = d.a.Close()
+			}
+		}()
+		return nil, nil, fmt.Errorf("follow %s: %w", id, ctx.Err())
+	}
 }

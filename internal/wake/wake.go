@@ -3,9 +3,8 @@
 // entity form of each github-cache critic (figaro.follow on the form's hub:
 // every committed patch arrives as a form.delta push). A delta touching a
 // write field (model.GHCacheWakes) wakes the critic's scheduler for that
-// entity, debounced: the first change of a burst is written Delay after it,
-// and one entity is written at most once per Gap. Reads keep their cadence:
-// the woken round is write-only (plugin.Request.Wake).
+// entity; the scheduler debounces (sched.Scheduler.Wake). Reads keep their
+// cadence: the woken round is write-only (plugin.Request.Wake).
 package wake
 
 import (
@@ -16,17 +15,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gluck/ebac/sdk/model"
 )
 
-// Defaults (contract 5: written within 2 s, one write per entity per 5 s).
-// The scheduler ticks every second, so Delay 1 s writes within 2 s.
-const (
-	DefaultDelay = time.Second
-	DefaultGap   = 5 * time.Second
-)
+// DefaultParallel bounds the follows dialled at once (review B2).
+const DefaultParallel = 8
 
 type ctxKey struct{}
 
@@ -46,24 +40,28 @@ func Keys(ctx context.Context) []string {
 }
 
 // Follow follows one form: on receives each committed patch as JSON (a
-// figaro form patch tree). It returns when the follow is up; done closes when
-// it drops (the next Sync follows again); stop ends it.
+// figaro form patch tree). It returns when the follow is up or ctx ends;
+// done closes when it drops (the next Sync follows again); stop ends it.
 type Follow func(ctx context.Context, formID string, on func(patch json.RawMessage)) (stop func(), done <-chan struct{}, err error)
 
-// Watcher keeps one follow per entity form of every github-cache critic.
+// Watcher keeps one follow per entity form of every github-cache critic and
+// reports each change of a write field to Wake. It keeps no deadlines: the
+// scheduler alone decides when a reported entity is written (review B1).
 type Watcher struct {
 	Follow Follow
-	// Wake schedules critic's write-only round for the entity key at at
+	// Wake reports that a seat changed critic's entity key
 	// (sched.Scheduler.Wake).
-	Wake  func(critic, key string, at time.Time)
-	Now   func() time.Time
-	Delay time.Duration
-	Gap   time.Duration
-	Out   io.Writer
+	Wake func(critic, key string)
+	// Parallel bounds the follows dialled at once.
+	Parallel int
+	Out      io.Writer
 
 	mu      sync.Mutex
-	follows map[string]*followed // by form id
-	next    map[string]time.Time // critic/key -> the wake last scheduled
+	follows map[string]*followed // by form id: up, or being dialled (stop nil)
+	sem     chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 type followed struct {
@@ -73,29 +71,28 @@ type followed struct {
 }
 
 func (w *Watcher) defaults() {
-	if w.Delay <= 0 {
-		w.Delay = DefaultDelay
-	}
-	if w.Gap <= 0 {
-		w.Gap = DefaultGap
+	if w.Parallel <= 0 {
+		w.Parallel = DefaultParallel
 	}
 	if w.Out == nil {
 		w.Out = io.Discard
 	}
-	if w.Now == nil {
-		w.Now = time.Now
-	}
 	if w.follows == nil {
-		w.follows, w.next = map[string]*followed{}, map[string]time.Time{}
+		w.follows = map[string]*followed{}
+		w.sem = make(chan struct{}, w.Parallel)
+		w.ctx, w.cancel = context.WithCancel(context.Background())
 	}
 }
 
 // Sync makes the follows match the critics' entity forms: a new child is
-// followed, a retired one or a stopped critic's dropped, a follow that
-// dropped followed again. It is called on every critic listing; a failed
-// follow is retried at the next.
+// followed, a retired one or a stopped critic's dropped (its connection
+// closed), a follow that dropped followed again. It never blocks on a dial:
+// follows are dialled in the background, at most Parallel at once, and a
+// refused one is retried at the next listing. It is called on every critic
+// listing.
 func (w *Watcher) Sync(ctx context.Context, ws []*model.Critic) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.defaults()
 	want := map[string]followed{}
 	for _, c := range ws {
@@ -108,8 +105,10 @@ func (w *Watcher) Sync(ctx context.Context, ws []*model.Critic) {
 			}
 		}
 	}
-	var start []string
 	for id, f := range w.follows {
+		if f.stop == nil {
+			continue // still dialling: its goroutine settles it
+		}
 		dropped := false
 		select {
 		case <-f.done:
@@ -124,51 +123,83 @@ func (w *Watcher) Sync(ctx context.Context, ws []*model.Critic) {
 			}
 		}
 	}
+	var start []string
 	for id := range want {
 		if w.follows[id] == nil {
 			start = append(start, id)
 		}
 	}
-	live := map[string]bool{}
-	for _, t := range want {
-		live[t.critic+"/"+t.key] = true
-	}
-	for k := range w.next {
-		if !live[k] {
-			delete(w.next, k)
-		}
-	}
-	w.mu.Unlock()
 	sort.Strings(start)
 	for _, id := range start {
 		t := want[id]
-		stop, done, err := w.Follow(ctx, id, func(patch json.RawMessage) { w.delta(t.critic, t.key, patch) })
-		if err != nil {
-			fmt.Fprintf(w.Out, "wake: follow %s (%s/%s): %v (retried at the next listing)\n", id, t.critic, t.key, err)
-			continue
-		}
-		w.mu.Lock()
-		if old := w.follows[id]; old != nil {
-			old.stop()
-		}
-		w.follows[id] = &followed{critic: t.critic, key: t.key, stop: stop, done: done}
-		w.mu.Unlock()
+		w.follows[id] = &followed{critic: t.critic, key: t.key}
+		w.wg.Add(1)
+		go w.dial(id, t)
 	}
 }
 
-// Following is how many forms are followed (the heartbeat; tests).
+// dial follows one form in the background, holding one of Parallel slots.
+func (w *Watcher) dial(id string, t followed) {
+	defer w.wg.Done()
+	select {
+	case w.sem <- struct{}{}:
+	case <-w.ctx.Done():
+		w.settle(id, nil, nil)
+		return
+	}
+	stop, done, err := w.Follow(w.ctx, id, func(patch json.RawMessage) { w.delta(t.critic, t.key, patch) })
+	<-w.sem
+	if err != nil {
+		fmt.Fprintf(w.Out, "wake: follow %s (%s/%s): %v (retried at the next listing)\n", id, t.critic, t.key, err)
+		w.settle(id, nil, nil)
+		return
+	}
+	w.settle(id, stop, done)
+}
+
+// settle records a dial's outcome: up (stop set), or gone (retried next Sync).
+func (w *Watcher) settle(id string, stop func(), done <-chan struct{}) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	f := w.follows[id]
+	if stop == nil || f == nil || w.ctx.Err() != nil {
+		if f != nil && f.stop == nil {
+			delete(w.follows, id)
+		}
+		if stop != nil {
+			stop()
+		}
+		return
+	}
+	f.stop, f.done = stop, done
+}
+
+// Following is how many forms are followed and up (the heartbeat; tests).
 func (w *Watcher) Following() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return len(w.follows)
+	n := 0
+	for _, f := range w.follows {
+		if f.stop != nil {
+			n++
+		}
+	}
+	return n
 }
 
-// Close stops every follow.
+// Close cancels the dials in flight, waits for them, and stops every follow.
 func (w *Watcher) Close() {
+	w.mu.Lock()
+	w.defaults()
+	w.cancel()
+	w.mu.Unlock()
+	w.wg.Wait()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for id, f := range w.follows {
-		f.stop()
+		if f.stop != nil {
+			f.stop()
+		}
 		delete(w.follows, id)
 	}
 }
@@ -179,33 +210,12 @@ func (w *Watcher) delta(critic, key string, patch json.RawMessage) {
 		fmt.Fprintf(w.Out, "wake: %s/%s: unreadable form delta: %v\n", critic, key, err)
 		return
 	}
-	hit := ""
 	for _, p := range paths {
 		if model.GHCacheWakes(p) {
-			hit = p
-			break
+			w.Wake(critic, key)
+			return
 		}
 	}
-	if hit == "" {
-		return
-	}
-	w.mu.Lock()
-	w.defaults()
-	now := w.Now()
-	id := critic + "/" + key
-	last := w.next[id]
-	if last.After(now) {
-		w.mu.Unlock()
-		return // a wake is already scheduled: this change rides it
-	}
-	at := now.Add(w.Delay)
-	if g := last.Add(w.Gap); g.After(at) {
-		at = g
-	}
-	w.next[id] = at
-	w.mu.Unlock()
-	fmt.Fprintf(w.Out, "wake: %s/%s: %s changed: write at %s\n", critic, key, hit, at.UTC().Format("15:04:05.000"))
-	w.Wake(critic, key, at)
 }
 
 // patch is figaro's form patch tree (api/form.Patch), read structurally so
