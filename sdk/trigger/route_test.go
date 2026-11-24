@@ -167,3 +167,47 @@ func TestStampRoleRoutesFindingsToTheKnightAndAnswersToThePool(t *testing.T) {
 		t.Errorf("digit role not read")
 	}
 }
+
+// A critic skips figaro posts by author, not by a body stamp the door may
+// stop writing.
+func TestStampRoleStarMatchesAnyFigaroAuthorAndNoOneElse(t *testing.T) {
+	rs := mustParse(t, `[{"stamp_role":"*","action":"drop"},
+ {"stamp_role":"checker","to":"@first","action":"wake"},
+ {"default":true,"to":"@owner","action":"wake"}]`)
+	cases := []struct{ author, text, want string }{
+		{"Figaro 1a2b3c4d (checker) ⟩ jack", "a finding, no body stamp", "dropped"},
+		{"Figaro 5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b (ops-lead)", "no stamp", "dropped"},
+		{"Figaro 0f1e2d3c (builder) ⟩ jack", "jack via Figaro 0f1e2d3c (builder): old stamp", "dropped"},
+		{"jack ⟩ jack", "the Boss writes", "@owner"},
+		{"Someone (checker) ⟩ jack", "not a figaro", "@owner"},
+		{"Figaro zzzzzzzz (checker) ⟩ jack", "bad aria id", "@owner"},
+		{"Figaro 1a2b3c4d (*) ⟩ jack", "a literal star is no role", "@owner"},
+		{"", "no author", "@owner"},
+	}
+	for _, c := range cases {
+		kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Author: c.author, Text: c.text}}, nil)
+		got := "dropped"
+		if len(kept) == 1 {
+			got = kept[0].Route
+		}
+		if got != c.want {
+			t.Errorf("%q: %q, want %q", c.author, got, c.want)
+		}
+	}
+}
+
+func TestAListedStampRoleIsUnchangedBesideAStar(t *testing.T) {
+	rs := mustParse(t, `[{"stamp_role":"checker","to":"@first","action":"wake"},
+ {"stamp_role":"*","to":"@pool","action":"wake"},
+ {"default":true,"action":"keep"}]`)
+	for author, want := range map[string]string{
+		"Figaro 1a2b3c4d (checker) ⟩ jack": "@first",
+		"Figaro 0f1e2d3c (builder) ⟩ jack":   "@pool",
+		"jack ⟩ jack":                       "",
+	} {
+		kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Author: author}}, nil)
+		if kept[0].Route != want {
+			t.Errorf("%q: route %q, want %q", author, kept[0].Route, want)
+		}
+	}
+}

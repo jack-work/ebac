@@ -21,7 +21,7 @@
 //	contains  case-insensitive substrings of the full message text.
 //	regex     a Go regular expression over the full text (add (?i) for case).
 //	kind      the event kind, e.g. teams_new, thread_new, comment_new, author_new.
-//	stamp_role  the role in a figaro seat's keel stamp ("Figaro <aria8> (<role>)").
+//	stamp_role  the role in a figaro seat's keel stamp ("Figaro <aria8> (<role>)"); "*" = any figaro.
 //	path      a glob over the event's path (keel: the file a thread is on);
 //	          '*' is one segment, '**' any number of segments, anywhere.
 //
@@ -100,7 +100,8 @@ type Rule struct {
 	Path     list   `json:"path,omitempty"`
 	// StampRole matches a comment stamped by a figaro seat of one of these
 	// roles: keel's write door writes "jack via Figaro <aria8> (<role>)" and
-	// names the author "Figaro <aria8> (<role>) ⟩ <account>".
+	// names the author "Figaro <aria8> (<role>) ⟩ <account>". "*" matches
+	// any figaro-stamped author (any role), and never anyone else.
 	StampRole list `json:"stamp_role,omitempty"`
 	// RoleInPath matches an event whose path names a role: a directory
 	// segment, or the file name without ".md", equal to a role name the
@@ -276,7 +277,7 @@ func (r Rule) matchFields(e model.Event) bool {
 	if len(r.StampRole) > 0 {
 		role, hit := StampRole(e.Author), false
 		for _, want := range r.StampRole {
-			if role != "" && role == want {
+			if role != "" && (want == "*" || role == want) {
 				hit = true
 				break
 			}
