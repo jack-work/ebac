@@ -38,8 +38,9 @@ type State struct {
 	Wrote []string `json:"wrote,omitempty"`
 }
 
-// Entity is one tracked PR's bookkeeping.
+// Entity is one tracked PR's or issue's bookkeeping.
 type Entity struct {
+	Kind    string    `json:"kind,omitempty"` // KindIssue, or "" for a PR
 	Repo    string    `json:"repo"`
 	N       int       `json:"n"`
 	Rule    int       `json:"rule"`
@@ -74,7 +75,22 @@ type Entity struct {
 	Conflicts map[string]json.RawMessage `json:"conflicts,omitempty"`
 	Tries     map[string]int             `json:"tries,omitempty"`
 	Sent      []string                   `json:"sent,omitempty"`
+	// OursThreads are, per review thread longer than ThreadLast, our comments
+	// in it as of a full read at its count N (#45): read again only when N moves.
+	OursThreads map[string]OursThread `json:"ours_threads,omitempty"`
 }
+
+// OursThread is our comments in one long review thread, read whole at N.
+type OursThread struct {
+	N        int                      `json:"n"`
+	Comments map[string]CachedComment `json:"comments,omitempty"`
+	Partial  bool                     `json:"partial,omitempty"` // more than the first 100 comments: ours past them unread
+}
+
+// MaxFullThreads bounds the long threads read whole in one round, over every
+// deep batch (one point each at most; the rest, and their entities, are read
+// again next round).
+const MaxFullThreads = 20
 
 // Pass is one round's input.
 type Pass struct {
@@ -96,6 +112,9 @@ type Pass struct {
 	// forms in the pings.
 	Maintainer string
 	Critic     string
+	// Ours is the trusted account login whose texts are ours (lower case
+	// compare): their bodies are trimmed last.
+	Ours string
 }
 
 // Result is what a round produces.
@@ -141,11 +160,14 @@ func hasForm(p Pass, k string, e *Entity) bool { _, ok := p.Children[k]; return 
 func aliasErrs(errs []forge.GQLError, aliases map[string]string) (missing map[string]bool, per map[string][]string, other error) {
 	missing, per = map[string]bool{}, map[string][]string{}
 	for _, e := range errs {
-		if len(e.Path) >= 2 && strings.HasPrefix(e.Path[1], "p") {
+		if len(e.Path) >= 2 && (strings.HasPrefix(e.Path[1], "p") || strings.HasPrefix(e.Path[1], "i")) {
 			if repo, ok := aliases[e.Path[0]]; ok {
 				var n int
-				if _, err := fmt.Sscanf(e.Path[1], "p%d", &n); err == nil {
+				if _, err := fmt.Sscanf(e.Path[1][1:], "%d", &n); err == nil {
 					k := ChildKey(repo, n)
+					if e.Path[1][0] == 'i' {
+						k = IssueKey(repo, n)
+					}
 					if len(e.Path) == 2 && e.Type == "NOT_FOUND" {
 						missing[k] = true
 					} else {
@@ -237,8 +259,8 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	moved := map[string]bool{}
 	var open []Ref
 	for _, e := range ents {
-		if !e.ended() {
-			open = append(open, Ref{e.Repo, e.N})
+		if !e.ended() && e.Kind != KindIssue { // ls-refs knows pull heads only
+			open = append(open, refOf(e))
 		}
 	}
 	repos, byR := byRepo(open)
@@ -280,6 +302,15 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 				ents[k] = &Entity{Repo: rl.Repo, N: n, Rule: i, Tier: tierOr(rl.Tier), Since: now}
 			}
 		}
+		for _, n := range rl.Issues {
+			k := IssueKey(rl.Repo, n)
+			if _, ok := explicit[k]; !ok {
+				explicit[k] = i
+			}
+			if ents[k] == nil {
+				ents[k] = &Entity{Kind: KindIssue, Repo: rl.Repo, N: n, Rule: i, Tier: tierOr(rl.Tier), Since: now}
+			}
+		}
 	}
 	var due []Ref
 	for k, e := range ents {
@@ -290,7 +321,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		// A searched PR is asked by its alias too (the same call): one that
 		// left the search shows why (merged, closed) in this very round.
 		if !moved[k] && (e.MarkAt.IsZero() || !now.Before(e.MarkAt.Add(every))) {
-			due = append(due, Ref{e.Repo, e.N})
+			due = append(due, refOf(e))
 		}
 	}
 	marks := map[string]Mark{}
@@ -346,14 +377,27 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			r.State.SearchAt = now
 		}
 		for alias, repo := range aliases {
-			var prs map[string]*MarkNode
-			if err := json.Unmarshal(raw[alias], &prs); err != nil {
+			var nodes map[string]json.RawMessage
+			if err := json.Unmarshal(raw[alias], &nodes); err != nil {
 				return r, fmt.Errorf("marks read: %s: %w", alias, err)
 			}
-			for _, n := range prs {
-				if n != nil {
-					marks[ChildKey(repo, n.Number)] = n.Mark()
+			for name, node := range nodes {
+				if len(node) == 0 || string(node) == "null" {
+					continue
 				}
+				if strings.HasPrefix(name, "i") {
+					var n IssueMarkNode
+					if err := json.Unmarshal(node, &n); err != nil {
+						return r, fmt.Errorf("marks read: %s.%s: %w", alias, name, err)
+					}
+					marks[IssueKey(repo, n.Number)] = n.Mark()
+					continue
+				}
+				var n MarkNode
+				if err := json.Unmarshal(node, &n); err != nil {
+					return r, fmt.Errorf("marks read: %s.%s: %w", alias, name, err)
+				}
+				marks[ChildKey(repo, n.Number)] = n.Mark()
 			}
 		}
 		for k, m := range marks {
@@ -376,7 +420,11 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// dropped now; an ended or no longer matching one keeps its form for
 	// ClosedTTL, then retires (renamed; its lease lapses).
 	for k := range missing {
-		logf("%s: not found (deleted, transferred or not a PR): dropped", k)
+		what := "a PR"
+		if e := ents[k]; e != nil && e.Kind == KindIssue {
+			what = "an issue"
+		}
+		logf("%s: not found (deleted, transferred or not %s): dropped", k, what)
 		if e := ents[k]; e != nil && hasForm(p, k, e) {
 			retire[k] = true
 		}
@@ -487,7 +535,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		m, ok := marks[k]
 		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))
 		if moved[k] || e.Redo || (ok && (e.DeepAt.IsZero() || m != e.Mark || stuck)) {
-			deep = append(deep, Ref{e.Repo, e.N})
+			deep = append(deep, refOf(e))
 			r.Telemetry.Deep = append(r.Telemetry.Deep, deepWhy(k, e, moved[k], why[k], ok, m, stuck))
 		}
 	}
@@ -503,7 +551,11 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		redo := func(why string) {
 			logf("deep read of %d PR(s): %s (read again next round)", len(part), why)
 			for _, ref := range part {
-				if e := ents[ChildKey(ref.Repo, ref.N)]; e != nil {
+				kind := KindPR
+				if ref.Issue {
+					kind = KindIssue
+				}
+				if e := ents[keyOf(kind, ref.Repo, ref.N)]; e != nil {
 					e.Redo = true
 				}
 			}
@@ -518,7 +570,8 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			redo(other.Error())
 			continue
 		}
-		var raw map[string]map[string]*PR
+		var items []deepItem
+		var raw map[string]map[string]json.RawMessage
 		if err := json.Unmarshal(data, &raw); err != nil {
 			redo("decode: " + err.Error())
 			continue
@@ -531,49 +584,81 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			delete(ents, k)
 		}
 		for alias, repo := range aliases {
-			for _, pr := range raw[alias] {
-				if pr == nil {
+			for name, node := range raw[alias] {
+				if len(node) == 0 || string(node) == "null" {
 					continue
 				}
-				k := ChildKey(repo, pr.Number)
+				// An issue is read as a PR with no PR-only parts (asPR), and
+				// its gh carries only what an issue has (GHOfIssue).
+				var k string
+				var pr *PR
+				var g GH
+				var mark Mark
+				var isIssue bool
+				if strings.HasPrefix(name, "i") {
+					var is Issue
+					if err := json.Unmarshal(node, &is); err != nil {
+						logf("%s.%s: decode: %v (read again next round)", alias, name, err)
+						continue
+					}
+					k, pr, g, mark, isIssue = IssueKey(repo, is.Number), is.asPR(), GHOfIssue(&is), is.Mark(), true
+				} else {
+					pr = &PR{}
+					if err := json.Unmarshal(node, pr); err != nil {
+						logf("%s.%s: decode: %v (read again next round)", alias, name, err)
+						continue
+					}
+					k, g, mark = ChildKey(repo, pr.Number), GHOf(pr), pr.Mark()
+				}
 				e := ents[k]
 				if e == nil {
 					continue
 				}
-				e.Mark, e.DeepAt, e.MarkAt, e.State, e.Redo = pr.Mark(), now, now, pr.State, false
-				e.Unsettled = pr.State == "OPEN" && (pr.Mergeable == "UNKNOWN" || pr.MergeSt == "UNKNOWN")
-				_, held := p.Children[k]
-				fv := forms[k]
-				if p.Owned != nil && held && fv == nil {
-					// The core could not read the form: writing it blind could
-					// clobber a seat's edit. Read and written next round.
-					e.Redo = true
-					logf("%s: form unreadable this round: not written", k)
-					continue
-				}
-				g, notes := sy.entity(k, e, pr, GHOf(pr), fv)
-				fw, digest, final := entityWrite(k, pr, g, append(per[k], notes...), e, now)
-				e.Pend.RO = roHash(&final)
-				if digest != e.Digest || !held || forced[k] || (fv != nil && !sameJSON(fv.ghRaw, fw.Set["gh"])) {
-					if fv != nil {
-						// Every key this write overwrites must still be as the
-						// core read it, including absent (a seat creating it
-						// meanwhile moved the form).
-						fw.Expect = map[string]json.RawMessage{}
-						if len(fv.ghRaw) > 0 {
-							fw.Expect["gh"] = fv.ghRaw
-						} else {
-							fw.ExpectAbsent = append(fw.ExpectAbsent, "gh")
-						}
-						if len(fv.syncRaw) > 0 {
-							fw.Expect["sync"] = fv.syncRaw
-						} else {
-							fw.ExpectAbsent = append(fw.ExpectAbsent, "sync")
-						}
+				items = append(items, deepItem{k: k, e: e, pr: pr, g: g, mark: mark, issue: isIssue})
+			}
+		}
+		// Our comments deeper in a long thread than its newest ThreadLast: read
+		// whole once per count, so a seat can edit ours wherever it sits.
+		if p.Ours != "" {
+			sy.oursThreads(items)
+		}
+		for _, it := range items {
+			k, e, pr, g, mark := it.k, it.e, it.pr, it.g, it.mark
+			// A long thread left unread whole (the round's MaxFullThreads spent)
+			// reads the entity again next round.
+			e.Mark, e.DeepAt, e.MarkAt, e.State, e.Redo = mark, now, now, pr.State, it.again
+			e.Unsettled = e.Kind != KindIssue && pr.State == "OPEN" && (pr.Mergeable == "UNKNOWN" || pr.MergeSt == "UNKNOWN")
+			_, held := p.Children[k]
+			fv := forms[k]
+			if p.Owned != nil && held && fv == nil {
+				// The core could not read the form: writing it blind could
+				// clobber a seat's edit. Read and written next round.
+				e.Redo = true
+				logf("%s: form unreadable this round: not written", k)
+				continue
+			}
+			g, notes := sy.entity(k, e, pr, g, fv)
+			fw, digest, final := entityWrite(k, pr, g, append(per[k], notes...), e, now, p.Ours)
+			e.Pend.RO = roHash(&final)
+			if digest != e.Digest || !held || forced[k] || (fv != nil && !sameJSON(fv.ghRaw, fw.Set["gh"])) {
+				if fv != nil {
+					// Every key this write overwrites must still be as the
+					// core read it, including absent (a seat creating it
+					// meanwhile moved the form).
+					fw.Expect = map[string]json.RawMessage{}
+					if len(fv.ghRaw) > 0 {
+						fw.Expect["gh"] = fv.ghRaw
+					} else {
+						fw.ExpectAbsent = append(fw.ExpectAbsent, "gh")
 					}
-					r.Forms = append(r.Forms, fw)
-					e.Digest = digest
+					if len(fv.syncRaw) > 0 {
+						fw.Expect["sync"] = fv.syncRaw
+					} else {
+						fw.ExpectAbsent = append(fw.ExpectAbsent, "sync")
+					}
 				}
+				r.Forms = append(r.Forms, fw)
+				e.Digest = digest
 			}
 		}
 	}
@@ -611,7 +696,7 @@ func tierOr(t string) string {
 // entityWrite builds one entity form write of g (GHOf(pr) after the sync),
 // the digest of its gh, parsed, alarms and conflicts, and the gh as written
 // (after trims). errs are the PR's partial-read errors and the sync's notes.
-func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Time) (plugin.FormWrite, string, GH) {
+func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Time, ours string) (plugin.FormWrite, string, GH) {
 	ps := Parse(pr)
 	m := pr.Mark()
 	sy := SyncKey{Version: m.Head + "|" + pr.UpdatedAt + "|" + pr.State + "|" + m.Rollup, At: now.Format(time.RFC3339),
@@ -637,11 +722,41 @@ func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Ti
 	if len(sy.Errors) > MaxErrors {
 		sy.Errors = sy.Errors[:MaxErrors]
 	}
-	size := func() int { return len(mustJSON(g)) + len(mustJSON(ps)) + len(mustJSON(sy)) }
+	size := func() int { return len(mustJSON(g.wire())) + len(mustJSON(ps)) + len(mustJSON(sy)) }
+	isOurs := func(c CachedComment) bool { return ours != "" && strings.EqualFold(c.Author, ours) }
+	fits := func() bool { return size() <= MaxForm }
+	// The texts go first (#45), ours last: others' thread comment bodies,
+	// others' conversation comment bodies, the body's text, ours; each cut
+	// to SectionHead and marked cut (an edit of it is refused).
+	cutThreads := func(mine bool) {
+		for id, t := range g.Threads {
+			t.Comments = cutAll(t.Comments, func(c CachedComment) bool { return isOurs(c) == mine })
+			g.Threads[id] = t
+		}
+	}
 	for _, trim := range []struct {
 		name string
 		do   func()
 	}{
+		{"threads.comments", func() { cutThreads(false) }},
+		{"comments", func() { g.Comments = cutAll(g.Comments, func(c CachedComment) bool { return !isOurs(c) }) }},
+		{"body.text", func() {
+			if len(g.Body.Text) > SectionHead {
+				g.Body.Text, g.Body.Cut = cut(g.Body.Text, SectionHead), true
+			}
+		}},
+		{"comments.ours", func() {
+			g.Comments = cutAll(g.Comments, isOurs)
+			cutThreads(true)
+		}},
+		// Many short comments still over the cap: drop them whole, oldest
+		// first, others' before ours (comments_total keeps the real count).
+		{"comments.dropped", func() { dropOldest(&g.Comments, func(c CachedComment) bool { return !isOurs(c) }, fits) }},
+		{"threads.comments.dropped", func() { dropThreadComments(&g, func(c CachedComment) bool { return !isOurs(c) }, fits) }},
+		{"comments.ours.dropped", func() {
+			dropOldest(&g.Comments, isOurs, fits)
+			dropThreadComments(&g, isOurs, fits)
+		}},
 		{"threads", func() { g.Threads = nil }},
 		{"body.sections", func() { g.Body.Sections = nil }},
 		{"reviews", func() { g.Reviews = nil }},
@@ -651,16 +766,19 @@ func entityWrite(key string, pr *PR, g GH, errs []string, e *Entity, now time.Ti
 			}
 		}},
 	} {
-		if size() <= MaxForm {
+		before := size()
+		if before <= MaxForm {
 			break
 		}
 		trim.do()
-		sy.Trimmed = append(sy.Trimmed, trim.name)
+		if size() < before { // named only when it cut something
+			sy.Trimmed = append(sy.Trimmed, trim.name)
+		}
 	}
 	if n := size(); n > MaxForm {
 		sy.Errors = append(sy.Errors, fmt.Sprintf("form %d bytes after every trim (cap %d)", n, MaxForm))
 	}
-	gj, pj := mustJSON(g), mustJSON(ps)
+	gj, pj := mustJSON(g.wire()), mustJSON(ps)
 	return plugin.FormWrite{Key: key, Set: map[string]json.RawMessage{"gh": gj, "parsed": pj, "sync": mustJSON(sy)}},
 		hash12(string(gj) + string(pj) + string(mustJSON(sy.Alarm)) + string(mustJSON(sy.Conflicts))), g
 }
@@ -694,4 +812,220 @@ func mustJSON(v any) json.RawMessage {
 		panic(err)
 	}
 	return b
+}
+
+// cutAll cuts the bodies of the comments which() picks to SectionHead,
+// marked cut; a copy (the caller's map is GitHub's read).
+func cutAll(cs map[string]CachedComment, which func(CachedComment) bool) map[string]CachedComment {
+	if cs == nil {
+		return nil
+	}
+	out := make(map[string]CachedComment, len(cs))
+	for id, c := range cs {
+		if which(c) && len(c.Body) > SectionHead {
+			c.Body, c.Cut = cut(c.Body, SectionHead), true
+		}
+		out[id] = c
+	}
+	return out
+}
+
+// deepItem is one entity of a deep read, decoded, before its form is built.
+type deepItem struct {
+	k     string
+	e     *Entity
+	pr    *PR
+	g     GH
+	mark  Mark
+	issue bool
+	again bool // a long thread of it waits to be read whole: read it again next round
+}
+
+// oursThreads reads whole (once per comment count) the review threads longer
+// than ThreadLast, keeps our comments in each and merges them into the gh the
+// items will write. A failed read keeps the last known ones.
+func (s *syncer) oursThreads(items []deepItem) {
+	type want struct {
+		item *deepItem
+		id   string
+		n    int
+	}
+	var need []want
+	for i := range items {
+		it := &items[i]
+		if it.issue {
+			continue
+		}
+		for id, t := range it.g.Threads {
+			if t.N <= ThreadLast || !nodeIDRe.MatchString(id) {
+				continue
+			}
+			if c, ok := it.e.OursThreads[id]; ok && c.N == t.N {
+				continue
+			}
+			need = append(need, want{it, id, t.N})
+		}
+	}
+	sort.Slice(need, func(i, j int) bool { return need[i].item.k+need[i].id < need[j].item.k+need[j].id })
+	if left := max(MaxFullThreads-s.wholeRead, 0); len(need) > left {
+		s.logf("%d long thread(s) to read whole: %d this round, the rest next", len(need), left)
+		for _, w := range need[left:] {
+			w.item.again = true
+		}
+		need = need[:left]
+	}
+	s.wholeRead += len(need)
+	if len(need) > 0 {
+		var b strings.Builder
+		b.WriteString("{")
+		for i, w := range need {
+			fmt.Fprintf(&b, ` t%d: node(id:"%s"){... on PullRequestReviewThread{comments(first:100){totalCount nodes{%s}}}}`, i, w.id, commentSel)
+		}
+		b.WriteString("}")
+		data, _, err := s.gh.GraphQLPartial(s.ctx, b.String())
+		var raw map[string]*struct {
+			Comments struct {
+				TotalCount int       `json:"totalCount"`
+				Nodes      []Comment `json:"nodes"`
+			} `json:"comments"`
+		}
+		if err == nil {
+			err = json.Unmarshal(data, &raw)
+		}
+		if err != nil {
+			s.logf("reading %d long thread(s) whole: %v (the last known comments of ours stay)", len(need), err)
+		} else {
+			for i, w := range need {
+				t := raw[fmt.Sprintf("t%d", i)]
+				if t == nil {
+					continue
+				}
+				mine := map[string]CachedComment{}
+				for id, c := range cached(t.Comments.Nodes) {
+					if strings.EqualFold(c.Author, s.p.Ours) {
+						mine[id] = c
+					}
+				}
+				if len(mine) == 0 {
+					mine = nil
+				}
+				if w.item.e.OursThreads == nil {
+					w.item.e.OursThreads = map[string]OursThread{}
+				}
+				partial := t.Comments.TotalCount > len(t.Comments.Nodes)
+				w.item.e.OursThreads[w.id] = OursThread{N: w.n, Comments: mine, Partial: partial}
+				if partial {
+					s.logf("%s: thread %s: %d comments, the first %d read whole (gh.threads.%s.partial)", w.item.k, w.id, t.Comments.TotalCount, len(t.Comments.Nodes), w.id)
+				}
+			}
+		}
+	}
+	for i := range items {
+		it := &items[i]
+		for id := range it.e.OursThreads {
+			if _, ok := it.g.Threads[id]; !ok {
+				delete(it.e.OursThreads, id) // the thread is gone (or past the 50 read)
+			}
+		}
+		if len(it.e.OursThreads) == 0 {
+			it.e.OursThreads = nil
+			continue
+		}
+		threads := make(map[string]Thread, len(it.g.Threads)) // a copy: the read's map stays GitHub's
+		for id, t := range it.g.Threads {
+			threads[id] = t
+		}
+		for id, c := range it.e.OursThreads {
+			t := threads[id]
+			merged := make(map[string]CachedComment, len(t.Comments)+len(c.Comments))
+			for cid, cc := range c.Comments {
+				merged[cid] = cc
+			}
+			for cid, cc := range t.Comments {
+				merged[cid] = cc // the newest read is fresher
+			}
+			if len(merged) == 0 {
+				merged = nil
+			}
+			t.Comments, t.Partial = merged, c.Partial
+			threads[id] = t
+		}
+		it.g.Threads = threads
+	}
+}
+
+// dropOldest removes the comments of *cs which() picks, oldest first, until
+// fits(); *cs becomes a copy first (the caller's map is GitHub's read), so
+// fits() measures each removal.
+func dropOldest(cs *map[string]CachedComment, which func(CachedComment) bool, fits func() bool) {
+	if len(*cs) == 0 || fits() {
+		return
+	}
+	orig := *cs
+	out := make(map[string]CachedComment, len(orig))
+	var ids []string
+	for id, c := range orig {
+		out[id] = c
+		if which(c) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		a, b := orig[ids[i]], orig[ids[j]]
+		if a.CreatedAt != b.CreatedAt {
+			return a.CreatedAt < b.CreatedAt
+		}
+		return ids[i] < ids[j]
+	})
+	*cs = out
+	for _, id := range ids {
+		if fits() {
+			break
+		}
+		delete(out, id)
+	}
+	if len(out) == 0 {
+		*cs = nil
+	}
+}
+
+// dropThreadComments removes the thread comments which() picks, oldest first
+// across every thread, until fits().
+func dropThreadComments(g *GH, which func(CachedComment) bool, fits func() bool) {
+	if fits() {
+		return
+	}
+	type at struct{ thread, id, created string }
+	var all []at
+	threads := make(map[string]Thread, len(g.Threads))
+	for tid, t := range g.Threads {
+		cs := make(map[string]CachedComment, len(t.Comments))
+		for id, c := range t.Comments {
+			cs[id] = c
+			if which(c) {
+				all = append(all, at{tid, id, c.CreatedAt})
+			}
+		}
+		t.Comments = cs
+		threads[tid] = t
+	}
+	g.Threads = threads
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].created != all[j].created {
+			return all[i].created < all[j].created
+		}
+		return all[i].thread+all[i].id < all[j].thread+all[j].id
+	})
+	for _, x := range all {
+		if fits() {
+			break
+		}
+		delete(g.Threads[x.thread].Comments, x.id)
+	}
+	for tid, t := range g.Threads {
+		if len(t.Comments) == 0 {
+			t.Comments = nil
+			g.Threads[tid] = t
+		}
+	}
 }

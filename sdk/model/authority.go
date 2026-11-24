@@ -39,8 +39,11 @@ type Authority struct {
 	// AutomatedMarkers the body markers that make a REQUEST_CHANGES or a
 	// blocking thread automated (not a blocker: ApproveBlockers); Maintainer
 	// is the role the critic's alarms wake.
-	Scope            *GHScope `json:"scope,omitempty"`
-	WriteFields      []string `json:"write_fields,omitempty"`
+	Scope       *GHScope `json:"scope,omitempty"`
+	WriteFields []string `json:"write_fields,omitempty"`
+	// OursLogin is the account whose texts are ours (a github-cache critic
+	// reads every review-thread comment of it, and may edit only those).
+	OursLogin        string   `json:"ours_login,omitempty"`
 	Maintainer       string   `json:"maintainer,omitempty"`
 	ApprovePRs       []string `json:"approve_prs,omitempty"`
 	AutomatedMarkers []string `json:"automated_markers,omitempty"`
@@ -61,7 +64,7 @@ func AuthorityOf(w *Critic) Authority {
 	}
 	if g := w.GHWrite; g != nil {
 		sc := g.Scope
-		a.Scope, a.WriteFields = &sc, slices.Clone(g.Fields)
+		a.Scope, a.WriteFields, a.OursLogin = &sc, slices.Clone(g.Fields), g.Ours
 	}
 	a.Maintainer = w.Maintainer
 	a.ApprovePRs, a.AutomatedMarkers = slices.Clone(w.ApprovePRs), slices.Clone(w.AutomatedMarkers)

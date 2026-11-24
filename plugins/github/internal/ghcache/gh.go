@@ -9,8 +9,10 @@ import (
 	"strings"
 )
 
-// GH is the entity form's gh key: GitHub's state of the PR, as read.
+// GH is the entity form's gh key: GitHub's state of the PR or issue, as
+// read. An issue form carries only the keys issueGH names (#45).
 type GH struct {
+	Kind         string            `json:"kind"` // pr | issue
 	Number       int               `json:"number"`
 	URL          string            `json:"url"`
 	Title        string            `json:"title"`
@@ -34,7 +36,47 @@ type GH struct {
 	Reviews      map[string]RevAt  `json:"reviews,omitempty"`
 	Threads      map[string]Thread `json:"threads,omitempty"`
 	ThreadsTotal int               `json:"threads_total"`
-	Body         Body              `json:"body"`
+	// Comments are the conversation comments by node id (the newest 30),
+	// CommentsTotal how many there are.
+	Comments      map[string]CachedComment `json:"comments,omitempty"`
+	CommentsTotal int                      `json:"comments_total"`
+	Body          Body                     `json:"body"`
+}
+
+// CachedComment is one conversation or review-thread comment as read. Cut:
+// Body was trimmed to fit the form (not the whole text: it cannot be edited).
+type CachedComment struct {
+	Author    string `json:"author"` // lower case
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at"`
+	URL       string `json:"url,omitempty"`
+	Cut       bool   `json:"cut,omitempty"`
+}
+
+// issueGH is an issue form's gh: GH without the PR-only keys.
+type issueGH struct {
+	Kind          string                   `json:"kind"`
+	Number        int                      `json:"number"`
+	URL           string                   `json:"url"`
+	Title         string                   `json:"title"`
+	State         string                   `json:"state"`
+	Author        string                   `json:"author"`
+	Labels        []string                 `json:"labels,omitempty"`
+	CreatedAt     string                   `json:"created_at"`
+	UpdatedAt     string                   `json:"updated_at"`
+	Comments      map[string]CachedComment `json:"comments,omitempty"`
+	CommentsTotal int                      `json:"comments_total"`
+	Body          Body                     `json:"body"`
+}
+
+// wire is g as the form carries it.
+func (g GH) wire() any {
+	if g.Kind != KindIssue {
+		return g
+	}
+	return issueGH{Kind: g.Kind, Number: g.Number, URL: g.URL, Title: g.Title, State: g.State, Author: g.Author, Labels: g.Labels,
+		CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt, Comments: g.Comments, CommentsTotal: g.CommentsTotal, Body: g.Body}
 }
 
 // Check is one pipeline: its state in the board's closed set (pass | fail |
@@ -61,6 +103,12 @@ type Thread struct {
 	LastBy   string  `json:"last_by"`
 	N        int     `json:"n"`
 	Replies  []Reply `json:"replies,omitempty"`
+	// Comments are the thread's newest ThreadLast comments plus every one of
+	// ours, by node id (#45).
+	Comments map[string]CachedComment `json:"comments,omitempty"`
+	// Partial: the thread has more comments than its whole read took (100);
+	// ours past them are not on the form.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // Reply is one reply a seat wants posted on a thread.
@@ -68,11 +116,15 @@ type Reply struct {
 	Body string `json:"body"`
 }
 
-// Body is the PR body as sections (split at H2; the preamble first, h ""):
-// each a hash, its first SectionHead bytes; never the whole body (DESIGN 5).
+// Body is the body: Text, the whole of it (#45: the in-place edit is
+// gh.body.text), and its sections (split at H2; the preamble first, h ""),
+// each a hash and its first SectionHead bytes. Cut: Text was trimmed to fit
+// the form (not whole: it cannot be edited).
 type Body struct {
 	Bytes    int       `json:"bytes"`
 	Hash     string    `json:"hash"`
+	Text     string    `json:"text"`
+	Cut      bool      `json:"cut,omitempty"`
 	Sections []Section `json:"sections,omitempty"`
 }
 
@@ -159,7 +211,7 @@ func hash12(s string) string {
 
 // Sections splits a body at lines starting "## ".
 func Sections(body string) Body {
-	b := Body{Bytes: len(body), Hash: hash12(body)}
+	b := Body{Bytes: len(body), Hash: hash12(body), Text: body}
 	if body == "" {
 		return b
 	}
@@ -186,7 +238,7 @@ func Sections(body string) Body {
 
 // GHOf builds gh from a deep read.
 func GHOf(pr *PR) GH {
-	g := GH{Number: pr.Number, URL: pr.URL, Title: pr.Title, State: pr.State, Draft: pr.Draft,
+	g := GH{Kind: KindPR, Number: pr.Number, URL: pr.URL, Title: pr.Title, State: pr.State, Draft: pr.Draft,
 		Author: strings.ToLower(login(pr.Author)), Head: pr.Head, Base: pr.Base, Branch: pr.Branch,
 		CreatedAt: pr.CreatedAt, UpdatedAt: pr.UpdatedAt, Mergeable: pr.Mergeable, MergeState: pr.MergeSt,
 		Lines: [2]int{pr.Additions, pr.Deletions}, Checks: map[string]*Check{}, Fixes: []int{},
@@ -240,7 +292,36 @@ func GHOf(pr *PR) GH {
 		if n := t.Comments.Nodes; len(n) > 0 {
 			last = login(n[len(n)-1].Author)
 		}
-		g.Threads[t.ID] = Thread{Path: t.Path, Resolved: t.Resolved, LastBy: last, N: t.Comments.TotalCount}
+		g.Threads[t.ID] = Thread{Path: t.Path, Resolved: t.Resolved, LastBy: last, N: t.Comments.TotalCount, Comments: cached(t.Comments.Nodes)}
 	}
+	g.Comments, g.CommentsTotal = cached(pr.Comments.Nodes), pr.Comments.TotalCount
 	return g
+}
+
+// GHOfIssue builds an issue's gh from a deep read (#45).
+func GHOfIssue(is *Issue) GH {
+	g := GH{Kind: KindIssue, Number: is.Number, URL: is.URL, Title: is.Title, State: is.State,
+		Author: strings.ToLower(login(is.Author)), CreatedAt: is.CreatedAt, UpdatedAt: is.UpdatedAt,
+		Comments: cached(is.Comments.Nodes), CommentsTotal: is.Comments.TotalCount, Body: Sections(is.Body)}
+	for _, l := range is.Labels.Nodes {
+		g.Labels = append(g.Labels, l.Name)
+	}
+	sort.Strings(g.Labels)
+	return g
+}
+
+// cached keys comments by node id; one without an id is skipped (nothing
+// could address it).
+func cached(cs []Comment) map[string]CachedComment {
+	var out map[string]CachedComment
+	for _, c := range cs {
+		if c.ID == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]CachedComment{}
+		}
+		out[c.ID] = CachedComment{Author: strings.ToLower(login(c.Author)), Body: c.Body, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, URL: c.URL}
+	}
+	return out
 }

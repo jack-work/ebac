@@ -261,16 +261,17 @@ var (
 
 // syncer is one round's write path.
 type syncer struct {
-	ctx      context.Context
-	gh       GitHub
-	p        Pass
-	now      time.Time
-	writes   int
-	raised   []string // this round's new alarms: "<key> <kind>.<field>: detail"
-	logf     func(string, ...any)
-	children map[string]string
-	cur      string     // the entity being synced (telemetry)
-	log      []WriteRec // this round's GitHub writes (telemetry)
+	ctx       context.Context
+	gh        GitHub
+	p         Pass
+	now       time.Time
+	writes    int
+	raised    []string // this round's new alarms: "<key> <kind>.<field>: detail"
+	logf      func(string, ...any)
+	children  map[string]string
+	cur       string     // the entity being synced (telemetry)
+	log       []WriteRec // this round's GitHub writes (telemetry)
+	wholeRead int        // long threads read whole this round (MaxFullThreads)
 }
 
 func (s *syncer) alarm(k string, e *Entity, kind, field, detail string, base, form, gh any) {
@@ -473,8 +474,13 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 	}
 	F, B := fv.gh, *e.Base
 	next := baseOf(&G)
-	ent := model.GHEntity{Repo: e.Repo, Kind: "pr", N: e.N, Author: g.Author}
+	ent := model.GHEntity{Repo: e.Repo, Kind: model.FirstNonEmpty(e.Kind, KindPR), N: e.N, Author: g.Author}
 	auth := func(field string) string {
+		if e.Kind == KindIssue {
+			// #45 reads issues; their writes (title, body, comments,
+			// labels) come with the issue write path (#71 A2/#64).
+			return "issue writes are not built yet: the form's edit is not written"
+		}
 		if s.p.Auth == nil {
 			return "no write authority"
 		}

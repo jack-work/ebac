@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -61,8 +62,9 @@ type Config struct {
 }
 
 // Rule tracks a PR when any of its selectors matches: an author, a label, a
-// title tag, or an explicit number. Repo, when set, scopes the rule to one of
-// config.repos; explicit numbers need it (a number names a PR in one repo).
+// title tag, or an explicit number; and an issue by explicit number (Issues,
+// #45). Repo, when set, scopes the rule to one of config.repos; explicit
+// numbers need it (a number names a PR or an issue in one repo).
 // Tier is hot (default), warm or cold.
 type Rule struct {
 	Repo     string   `json:"repo,omitempty"`
@@ -70,6 +72,7 @@ type Rule struct {
 	Label    []string `json:"label,omitempty"`
 	TitleTag []string `json:"title_tag,omitempty"`
 	PRs      []int    `json:"prs,omitempty"`
+	Issues   []int    `json:"issues,omitempty"`
 	Tier     string   `json:"tier,omitempty"`
 }
 
@@ -129,7 +132,7 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 		return nil, 0, fmt.Errorf("config: %d rules (want 1-%d)", len(c.Rules), MaxRules)
 	}
 	for i, r := range c.Rules {
-		if len(r.Author)+len(r.Label)+len(r.TitleTag)+len(r.PRs) == 0 {
+		if len(r.Author)+len(r.Label)+len(r.TitleTag)+len(r.PRs)+len(r.Issues) == 0 {
 			return nil, 0, fmt.Errorf("config: rule %d selects nothing", i)
 		}
 		if r.Repo != "" && keys[repoKey(r.Repo)] != r.Repo {
@@ -137,6 +140,9 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 		}
 		if len(r.PRs) > 0 && r.Repo == "" {
 			return nil, 0, fmt.Errorf("config: rule %d: prs need a repo", i)
+		}
+		if len(r.Issues) > 0 && r.Repo == "" {
+			return nil, 0, fmt.Errorf("config: rule %d: issues need a repo", i)
 		}
 		if _, ok := Every(r.Tier); !ok {
 			return nil, 0, fmt.Errorf("config: rule %d: tier %q (want hot, warm or cold)", i, r.Tier)
@@ -154,6 +160,11 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 		for _, n := range r.PRs {
 			if n <= 0 {
 				return nil, 0, fmt.Errorf("config: rule %d: pr %d", i, n)
+			}
+		}
+		for _, n := range r.Issues {
+			if n <= 0 || slices.Contains(r.PRs, n) {
+				return nil, 0, fmt.Errorf("config: rule %d: issue %d (a positive number, not also among prs)", i, n)
 			}
 		}
 	}
@@ -190,3 +201,20 @@ func repoKey(repo string) string {
 // ChildKey is a tracked PR's child form key: <repo>-pr-<n> (the core names
 // the form ebac-<critic>-<key>).
 func ChildKey(repo string, n int) string { return fmt.Sprintf("%s-pr-%d", repoKey(repo), n) }
+
+// IssueKey is a tracked issue's child form key: <repo>-issue-<n> (#45).
+func IssueKey(repo string, n int) string { return fmt.Sprintf("%s-issue-%d", repoKey(repo), n) }
+
+// KindPR and KindIssue are an entity's kind (gh.kind).
+const (
+	KindPR    = "pr"
+	KindIssue = "issue"
+)
+
+// keyOf is the child key of an entity of kind.
+func keyOf(kind, repo string, n int) string {
+	if kind == KindIssue {
+		return IssueKey(repo, n)
+	}
+	return ChildKey(repo, n)
+}

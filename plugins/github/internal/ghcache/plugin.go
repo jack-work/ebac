@@ -58,6 +58,9 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		// applied to this critic (model.GHWrite), never the form's config.
 		Auth:       func(e model.GHEntity, field string) string { return model.AuthorizeGHWrite(w, e, field) },
 		Maintainer: w.Maintainer}
+	if w.GHWrite != nil {
+		pass.Ours = w.GHWrite.Ours
+	}
 	r, err := Run(ctx, gh, prev, pass)
 	for _, l := range r.Log {
 		rep.Logf("%s: %s", w.Name, l)
