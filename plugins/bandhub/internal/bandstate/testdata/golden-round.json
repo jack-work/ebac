@@ -1,6 +1,7 @@
 [
   {
     "protocol": 1,
+    "protocol_minor": 1,
     "critic": {
       "name": "band-state",
       "form_id": "@x",
@@ -95,6 +96,7 @@
   },
   {
     "protocol": 1,
+    "protocol_minor": 1,
     "critic": {
       "name": "band-state",
       "form_id": "@x",
