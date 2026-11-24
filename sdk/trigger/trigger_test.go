@@ -104,7 +104,7 @@ func TestFirstMatchWinsAndKeep(t *testing.T) {
 	}
 }
 
-// The order cheroot set: a figaro-sent message (disclosure footer, under the Boss's account) wakes even though
+// The order ops set: a figaro-sent message (disclosure footer, under the Boss's account) wakes even though
 // from=operator would record it.
 func TestTeamsDefaultsDisclosureBeatsOperator(t *testing.T) {
 	rs := Teams()

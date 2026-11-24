@@ -21,7 +21,7 @@ import (
 // authored, ids and short fields only) and wakes the alert role on a
 // NEW non-draft PR (a draft turning ready counts as new) or a MERGE. Close,
 // reopen, head moves and new drafts are recorded, never woken. Asked by the
-// Boss through the Decisions Minister, 2026-10-22.
+// Boss through the Decisions Lead, 2026-10-22.
 //
 // It is the github-author half of ebac-gh.
 type Plugin struct {
@@ -294,7 +294,7 @@ func countWake(events []model.Event) int {
 // STATE TRANSITION (title, open/draft/merged/closed and when). The head sha,
 // created and updated move with every push; they stay in the critic's runtime
 // (Seen, system.* : never studied), so a push to an open PR writes nothing
-// (author-jack flooded the Minister with ~6 deltas a minute, 2026-11-10). The
+// (author-jack flooded the Lead with ~6 deltas a minute, 2026-11-10). The
 // field names are the ones the key always had: the merge path (state MERGED,
 // merged) reads as before.
 type AuthoredLine struct {

@@ -123,7 +123,7 @@ func ValidateForms(w *model.Critic, rep *plugin.Reply) error {
 // commitOutbox merges a reply's ledger_outbox members into the inputs form's
 // ledger_outbox object and writes it whole (a dotted key would be a flat decoy,
 // jack-work/figaro#43): a member whose value is null is removed. Read, merged
-// and written in one versioned Commit, so the steward's ledger_ack writes and
+// and written in one versioned Commit, so the owner's ledger_ack writes and
 // the outbox never clobber each other.
 func (p *Poller) commitOutbox(ctx context.Context, id string, set map[string]json.RawMessage) error {
 	add := model.ObjectOf(set["ledger_outbox"])

@@ -20,7 +20,7 @@ import (
 	"github.com/gluck/ebac/sdk/relevance"
 )
 
-// The author-chiqun filter, as the leader's order encodes the Minister's rule.chiqun_relevance (2026-11-09).
+// The author filter, as the leader's order encodes the relevance rule (2026-11-09).
 const chiqunTitle = `(?i)^(\[(Effort router|Effort retire|Effort tagged-only|MD1 early start|MD1 subagent router|Effort dispatch[^\]]*)\]|(fix|feat|refactor|docs)\(effort\))`
 
 var chiqunPaths = []string{

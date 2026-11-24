@@ -146,7 +146,7 @@
   "payload": {
    "params": {
     "expect_d_equal": false,
-    "label": "keel: notes/decisions-minister repo for the Boss",
+    "label": "keel: notes/decisions-lead repo for the Boss",
     "needs_go": "",
     "sha": "ca63db62c2e34c661b68f319ab1ecd55dccde23d",
     "why": "",
@@ -168,7 +168,7 @@
    "lane": null,
    "last_renewed_by": null,
    "left_s": 255179.729,
-   "owner": "@2ea091e5",
+   "owner": "@000000a6",
    "owner_unreachable": false,
    "renewals": 0,
    "source": null,
@@ -210,7 +210,7 @@
    "lane": null,
    "last_renewed_by": null,
    "left_s": 80389.862,
-   "owner": "@2ea091e5",
+   "owner": "@000000a6",
    "owner_unreachable": false,
    "renewals": 0,
    "source": null,

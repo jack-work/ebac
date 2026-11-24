@@ -14,7 +14,7 @@ import (
 
 const ghe = "github:microsoft.ghe.com"
 
-// cfg is the production numbers (ebac-steward 11-19): GraphQL 40 points/h, burst 10, floor 1000; REST 600/h, burst 60.
+// cfg is the production numbers (ebac-owner 11-19): GraphQL 40 points/h, burst 10, floor 1000; REST 600/h, burst 60.
 func cfg() Config {
 	return Config{Credentials: map[string]map[string]Limit{ghe: {
 		"graphql": {PerHour: 40, Burst: 10, Floor: 1000},

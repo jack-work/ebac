@@ -473,7 +473,7 @@ func (w *world) try(dt time.Duration) (Result, error) {
 	return r, err
 }
 
-// commit is the steward committing the outbox member for n and acking it as ledger_committer.py does: the sha256
+// commit is the owner committing the outbox member for n and acking it as ledger_committer.py does: the sha256
 // of the committed bytes. It returns the hash.
 func (w *world) commit(n string) string {
 	member := model.ObjectOf(w.in["ledger_outbox"])[n]
@@ -564,7 +564,7 @@ func TestSearchPagesPerAlias(t *testing.T) {
 	}
 }
 
-// The entry is the key map in scout.go (the brief's list plus the steward's read list), short keys, nothing else (no
+// The entry is the key map in scout.go (the brief's list plus the owner's read list), short keys, nothing else (no
 // bodies), empty values left out.
 func TestEntryFieldsExactlyTheList(t *testing.T) {
 	w := newWorld(t)
@@ -833,7 +833,7 @@ func TestMergeStateAndBandJobs(t *testing.T) {
 	}
 }
 
-// The ask (dashboard-steward 11-17): an approval at the head with Runtime CI still running reads ready, not
+// The ask (dashboard-owner 11-17): an approval at the head with Runtime CI still running reads ready, not
 // "waiting: Runtime CI"; a Runtime red unsets it until the board proves it main-side (red_not_ours).
 func TestReadyWhileChecksRun(t *testing.T) {
 	w := newWorld(t)
@@ -982,7 +982,7 @@ func TestBoardMarksMoveMergeState(t *testing.T) {
 }
 
 // S2: on merge the final entry goes to the inputs form's ledger outbox, once; a changed final entry is sent again;
-// the steward's ack (the sha256 of the committed record, ledger_committer.py) matches only the member it committed:
+// the owner's ack (the sha256 of the committed record, ledger_committer.py) matches only the member it committed:
 // an ack of an older record, or of something else, leaves the member; the ack of the member clears it; the entry
 // stays until its record is acked and at least KeepClosed after the merge, however long the ack takes.
 func TestLedgerRecordAckAndPrune(t *testing.T) {
@@ -995,7 +995,7 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 	if !strings.Contains(rec, `"kind":"pr-final"`) || !strings.Contains(rec, `"s":"MERGED"`) || !strings.Contains(rec, `"hash"`) || entry(t, r, "pr:101")["s"] != "MERGED" {
 		t.Fatalf("record %s", rec)
 	}
-	w.commit("101") // the steward commits the first record
+	w.commit("101") // the owner commits the first record
 
 	// A comment after the merge (updatedAt moves, the entry's u with it): the record changes, sent again.
 	p.updated = w.now.Add(time.Minute)
@@ -1015,7 +1015,7 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 	if r := w.pass(2 * time.Minute); len(r.Forms)+len(r.Unset) != 0 {
 		t.Fatal("cleared on an ack for another record")
 	}
-	w.commit("101") // the steward commits the record in the outbox now
+	w.commit("101") // the owner commits the record in the outbox now
 	r = w.pass(2 * time.Minute)
 	if string(outboxOf(r)["101"]) != "null" || strings.Join(r.Unset, " ") != "pr:101" || w.st.PRs[101] != nil {
 		t.Fatalf("ack: outbox %v unset %v", outboxOf(r), r.Unset)
@@ -1024,7 +1024,7 @@ func TestLedgerRecordAckAndPrune(t *testing.T) {
 
 // The live shape: ledger_committer.py's ack hash is the sha256 of json.dumps(record, indent=2, sort_keys=True,
 // ensure_ascii=False) + "\n"; CommittedHash reproduces it on records and acks taken from the live inputs form.
-func TestCommittedHashMatchesTheStewardsAcks(t *testing.T) {
+func TestCommittedHashMatchesTheOwnersAcks(t *testing.T) {
 	b, err := os.ReadFile("testdata/ledger-acks.json")
 	if err != nil {
 		t.Fatal(err)
@@ -1040,7 +1040,7 @@ func TestCommittedHashMatchesTheStewardsAcks(t *testing.T) {
 	}
 	for n, c := range m {
 		if got := CommittedHash(c.Record); got != c.Ack.Hash || len(got) != 64 {
-			t.Errorf("#%s: %s, the steward acked %s", n, got, c.Ack.Hash)
+			t.Errorf("#%s: %s, the owner acked %s", n, got, c.Ack.Hash)
 		}
 	}
 	// HTML characters stay as they are, numbers keep their text, non-ASCII stays UTF-8 (hashes from Python).
@@ -1098,7 +1098,7 @@ func TestClosedIssuePruned(t *testing.T) {
 	}
 }
 
-// A round that cannot read its source fails: last_success (what the steward's health timer reads) and the cursor
+// A round that cannot read its source fails: last_success (what the owner's health timer reads) and the cursor
 // do not move; a good round moves both.
 func TestFailedReadDoesNotAdvanceLastSuccess(t *testing.T) {
 	w := newWorld(t)

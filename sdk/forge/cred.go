@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// Cred is one band-cred credential (access table rows 1-3, signed by cheroot
+// Cred is one band-cred credential (access table rows 1-3, signed by ops
 // 2026-10-22). ebac holds no login of its own: every gh and tomb call gets a
 // short-lived access token minted by band-cred, which keeps the refresh token
 // and audits each mint. The token lives in this process's memory and in the
@@ -103,7 +103,7 @@ func (c *Cred) Token(ctx context.Context) (string, error) {
 // 2026-11-05): exactly the ones ebac polls. Any other credential is never written.
 var cacheable = map[string]bool{CredGitHub: true, CredTeams: true}
 
-// logUse names, per round, which token a call used (cheroot 2026-11-05: band-cred only audits MINTS, so a cached use is
+// logUse names, per round, which token a call used (ops 2026-11-05: band-cred only audits MINTS, so a cached use is
 // visible only here). band-cred has no mint id: the token is identified by a 12-hex SHA-256 fingerprint (never the token)
 // and its expiry. Only with EBAC_RPC_AUDIT=1 (ebac's units), so an operator's CLI stays quiet.
 func (c *Cred) logUse(source string) {

@@ -1,9 +1,9 @@
 // Package releases watches one GitHub repo's releases: one event per new
 // release tag, with its semver bump against the release before it (W7 item 3,
-// for the figaro steward: patch = take + bounce; minor or major = ask the Boss).
+// for the figaro owner: patch = take + bounce; minor or major = ask the Boss).
 //
 // It is the github-releases half of ebac-gh. It reads the public REST API
-// without a credential (no github.com token exists for ebac; cheroot
+// without a credential (no github.com token exists for ebac; ops
 // 2026-11-09: unauthenticated api.github.com is an egress allowlist line).
 package releases
 

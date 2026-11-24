@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The parsers: Go ports of the Minister's board-snapshot.py (architect,
+// The parsers: Go ports of the Lead's board-snapshot.py (architect,
 // Praxis gate) and pr-body-evidence.py (reviewer rulings, human hold),
 // plus the title, link, evidence and bot-marker readers DESIGN 3 names. Each
 // reads gh's raw inputs only; a parse failure keeps the raw text in gh and

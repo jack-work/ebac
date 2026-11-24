@@ -19,11 +19,11 @@ func archHold(at, sha string) map[string]any {
 		"body": "<!-- architect-review-hold -->\n\U0001F6AB **MERGE BLOCKED \u2014 Architect review in progress.**\nHead: " + sha + "\n"}
 }
 
-// The positive control the Warden asked for (11-13): RC then APPROVE is not blocked; APPROVE then RC is. The
+// The positive control the Gatekeeper asked for (11-13): RC then APPROVE is not blocked; APPROVE then RC is. The
 // blocked state overrides the step order, names the RC's head, and pings the owner role once per RC comment.
 func TestArchitectRCBlocks(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}}
 	p := w.gh.items[101]
 	bump := func() { p.updated = w.now.Add(time.Minute) }
 
@@ -41,7 +41,7 @@ func TestArchitectRCBlocks(t *testing.T) {
 	if e := entry(t, r, "pr:101"); e["ms"] != "blocked: architect RC at aaaaaaaa" {
 		t.Fatalf("APPROVE then RC: ms %v (log %v)", e["ms"], r.Log)
 	}
-	if len(r.Pings) != 1 || r.Pings[0].To != knight || !strings.Contains(r.Pings[0].Text, "#101") || !strings.Contains(r.Pings[0].Text, "REQUEST_CHANGES at aaaaaaaa") {
+	if len(r.Pings) != 1 || r.Pings[0].To != builder || !strings.Contains(r.Pings[0].Text, "#101") || !strings.Contains(r.Pings[0].Text, "REQUEST_CHANGES at aaaaaaaa") {
 		t.Fatalf("pings %v", r.Pings)
 	}
 	bump() // re-read (a comment elsewhere): the same RC pings no more
@@ -98,11 +98,11 @@ func TestArchitectHold(t *testing.T) {
 	}
 }
 
-// Seeding (Warden 11-13): the first pass that knows RC pings records the RCs already standing as pinged, so a deploy
+// Seeding (Gatekeeper 11-13): the first pass that knows RC pings records the RCs already standing as pinged, so a deploy
 // pings nobody; only an RC arriving after that pass pings.
 func TestArchitectRCSeed(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}, {Author: his, Role: secretary}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}, {Author: his, Role: secretary}}
 	w.gh.items[102].draft = false
 	for _, n := range []int{101, 102, 201} {
 		w.gh.items[n].comments = []map[string]any{archComment("2026-11-10T20:00:00Z", w.gh.items[n].head, "REQUEST_CHANGES")}
@@ -123,16 +123,16 @@ func TestArchitectRCSeed(t *testing.T) {
 	p.comments = append(p.comments, archComment(w.now.Add(5*time.Minute).Format(time.RFC3339), headA, "REQUEST_CHANGES"))
 	p.updated = w.now.Add(5 * time.Minute)
 	r = w.pass(10 * time.Minute)
-	if len(r.Pings) != 1 || r.Pings[0].To != knight || !strings.Contains(r.Pings[0].Text, "#101") {
+	if len(r.Pings) != 1 || r.Pings[0].To != builder || !strings.Contains(r.Pings[0].Text, "#101") {
 		t.Fatalf("a new RC after the seed: pings %v", r.Pings)
 	}
 }
 
 // An architect RC on a PR whose base is not main is recorded on the form (quiet_pings), never pinged; the same RC on
-// main pings (Knight wake noise, 2026-11-17).
+// main pings (Builder wake noise, 2026-11-17).
 func TestArchitectRCOffMainIsQuiet(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}}
 	p := w.gh.items[101]
 	p.base = "stack/x"
 	p.comments = []map[string]any{archComment("2026-11-12T10:00:00Z", headB, "APPROVE")}
@@ -143,7 +143,7 @@ func TestArchitectRCOffMainIsQuiet(t *testing.T) {
 	if e := entry(t, r, "pr:101"); e["ms"] != "blocked: architect RC at aaaaaaaa" {
 		t.Fatalf("ms %v (log %v)", e["ms"], r.Log)
 	}
-	if q := string(r.Set["quiet_pings"]); len(r.Pings) != 0 || !strings.Contains(q, "#101") || !strings.Contains(q, "BLOCKED") || !strings.Contains(q, knight) {
+	if q := string(r.Set["quiet_pings"]); len(r.Pings) != 0 || !strings.Contains(q, "#101") || !strings.Contains(q, "BLOCKED") || !strings.Contains(q, builder) {
 		t.Fatalf("off main: pings %v, quiet %s", r.Pings, q)
 	}
 }

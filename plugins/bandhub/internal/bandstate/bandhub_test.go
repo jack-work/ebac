@@ -363,7 +363,7 @@ func TestStepWritesOnlyOnChange(t *testing.T) {
 	if len(r4.Set) != 0 {
 		t.Fatalf("a claim between heartbeats wrote %v", r4.Changed)
 	}
-	// The heartbeat carries both: queues, node_load and updated, within the warden's 1 KB budget per change.
+	// The heartbeat carries both: queues, node_load and updated, within the gatekeeper's 1 KB budget per change.
 	h.Stats.Hub.Now += int64(UpdatedEvery / time.Millisecond)
 	r5 := Step(ctx, r4.State, h, Config{}, now.Add(13*time.Minute), nil, nil)
 	if strings.Join(r5.Changed, ",") != "queues,node_load" || r5.Set["updated"] == nil {

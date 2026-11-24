@@ -30,8 +30,8 @@ func cmdAddScout(ctx context.Context, g globals, args []string) error {
 	paths := fs.String("paths", "", "relevance: changed-file globs, comma-separated (** spans directories)")
 	var owners ownerFlags
 	fs.Var(&owners, "owner", "AUTHOR[/TITLE_REGEX]=@ROLE, repeatable, first match wins: who gets a material change on an issue\n"+
-		"its PRs link (e.g. 'John-Kelliher/(?i)ledger=@<ledger lead>' before 'John-Kelliher=@<knight>')")
-	warn := fs.String("warn", "", "the role (@form) pinged once when open entries alone pass the form cap (the Decisions Minister)")
+		"its PRs link (e.g. 'Some-Author/(?i)ledger=@<ledger lead>' before 'Some-Author=@<builder>')")
+	warn := fs.String("warn", "", "the role (@form) pinged once when open entries alone pass the form cap (the Decisions Lead)")
 	claimBy := fs.String("claim-by", "", "claims: the login whose comment containing --claim-phrase on an issue makes it a claim (claim:<issue>)")
 	claimPhrase := fs.String("claim-phrase", "Praxis claimed", "claims: the phrase of a claim comment")
 	claimLabel := fs.String("claim-label", "", "claims: an issue carrying this label is a claim (e.g. praxis:pr-open)")

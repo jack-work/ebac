@@ -26,11 +26,11 @@ func TestAuthorizeRefusesDisclosure(t *testing.T) {
 }
 
 func TestPostMarkerNeutral(t *testing.T) {
-	m := model.PostMarker("keel-decisions-minister", "p123")
-	if disclose.Disclosure(m) != "" || strings.Contains(m, "minister") || strings.Contains(m, "p123") {
+	m := model.PostMarker("keel-decisions-lead", "p123")
+	if disclose.Disclosure(m) != "" || strings.Contains(m, "lead") || strings.Contains(m, "p123") {
 		t.Fatalf("marker leaks: %s", m)
 	}
-	if m == model.PostMarker("keel-decisions-minister", "p124") {
+	if m == model.PostMarker("keel-decisions-lead", "p124") {
 		t.Fatal("marker does not depend on the post id")
 	}
 }

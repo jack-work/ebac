@@ -13,7 +13,7 @@ import (
 )
 
 // PullHeads reads refs/pull/<n>/head of each PR over git smart HTTP (protocol v2 ls-refs, one ref-prefix per PR): the
-// head shas at no GraphQL quota (cheroot rule.ghe_quota). On a *.ghe.com host it asks api.<host>, the one GHE host the
+// head shas at no GraphQL quota (ops rule.ghe_quota). On a *.ghe.com host it asks api.<host>, the one GHE host the
 // egress proxy passes, which serves git-upload-pack too (measured 2026-11-17). A PR missing from the answer is absent
 // from the map.
 func (g *GH) PullHeads(ctx context.Context, repo string, prs []int) (map[int]string, error) {

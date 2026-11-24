@@ -11,14 +11,14 @@ import (
 
 func TestVerdictGuardArms(t *testing.T) {
 	a := func(n int) string { return fmt.Sprintf("%032x", n) }
-	rf, kf := "@8292f32b9578e0502343dbd0f6679c7c", "@6d1ebf6900000000000000000000000a"
-	// 1 holds reviewer, 9 holds knight (the author), 10 is a fork of 9 holding nothing.
+	rf, kf := "@000000a59578e0502343dbd0f6679c7c", "@000000a900000000000000000000000a"
+	// 1 holds reviewer, 9 holds builder (the author), 10 is a fork of 9 holding nothing.
 	d := identity.Directory{
-		Forms:  map[string][]string{"reviewer": {rf}, "knight": {kf}},
+		Forms:  map[string][]string{"reviewer": {rf}, "builder": {kf}},
 		Holder: map[string]string{rf: a(1), kf: a(9)},
 		Parent: map[string]string{a(1): "", a(9): "", a(10): a(9)},
 	}
-	cfg := model.KeelReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "knight"}
+	cfg := model.KeelReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "builder"}
 	if form, err := verdictGuard(d, a(1), "reviewer", "r9", "r9", cfg); err != nil || form != rf {
 		t.Fatalf("holder at the current rev: %q %v", form, err)
 	}
@@ -30,7 +30,7 @@ func TestVerdictGuardArms(t *testing.T) {
 		want                             string
 	}{
 		{"no caller", "", "reviewer", "r9", "r9", d, "no caller aria"},
-		{"not a reviewer of this review", a(1), "knight", "r9", "r9", d, "is not a reviewer of this review"},
+		{"not a reviewer of this review", a(1), "builder", "r9", "r9", d, "is not a reviewer of this review"},
 		{"no revision on keel", a(1), "reviewer", "r9", "", d, "keel has no revision"},
 		{"reviewed an older rev", a(1), "reviewer", "r8", "r9", d, `--rev "r8" is not the doc's current revision r9`},
 		{"a fork of the holder", a(10), "reviewer", "r9", "r9", d, "is not the holder of role reviewer"},
@@ -45,16 +45,16 @@ func TestVerdictGuardArms(t *testing.T) {
 
 func TestReviewGuardArms(t *testing.T) {
 	a := func(n int) string { return fmt.Sprintf("%032x", n) }
-	rf, kf := "@8292f32b9578e0502343dbd0f6679c7c", "@6d1ebf6900000000000000000000000a"
+	rf, kf := "@000000a59578e0502343dbd0f6679c7c", "@000000a900000000000000000000000a"
 	d := identity.Directory{
-		Forms:  map[string][]string{"reviewer": {rf}, "knight": {kf}},
+		Forms:  map[string][]string{"reviewer": {rf}, "builder": {kf}},
 		Holder: map[string]string{rf: a(1), kf: a(9)},
 		Parent: map[string]string{a(1): "", a(9): "", a(10): a(9)},
 	}
-	if err := reviewGuard(d, a(9), "knight", []string{"reviewer"}); err != nil {
+	if err := reviewGuard(d, a(9), "builder", []string{"reviewer"}); err != nil {
 		t.Fatalf("author holder: %v", err)
 	}
-	if err := reviewGuard(d, a(10), "knight", []string{"reviewer"}); err != nil {
+	if err := reviewGuard(d, a(10), "builder", []string{"reviewer"}); err != nil {
 		t.Fatalf("fork of the author holder: %v", err)
 	}
 	cases := []struct {
@@ -62,11 +62,11 @@ func TestReviewGuardArms(t *testing.T) {
 		reviewers            []string
 		want                 string
 	}{
-		{"no caller", "", "knight", []string{"reviewer"}, "no caller aria"},
-		{"not the author side", a(1), "knight", []string{"reviewer"}, "only the author role's holder"},
-		{"no reviewers", a(9), "knight", nil, "are required"},
-		{"unknown reviewer", a(9), "knight", []string{"warden"}, `role "warden": no live role form`},
-		{"author as reviewer", a(9), "knight", []string{"reviewer", "knight"}, "cannot be a reviewer"},
+		{"no caller", "", "builder", []string{"reviewer"}, "no caller aria"},
+		{"not the author side", a(1), "builder", []string{"reviewer"}, "only the author role's holder"},
+		{"no reviewers", a(9), "builder", nil, "are required"},
+		{"unknown reviewer", a(9), "builder", []string{"gatekeeper"}, `role "gatekeeper": no live role form`},
+		{"author as reviewer", a(9), "builder", []string{"reviewer", "builder"}, "cannot be a reviewer"},
 	}
 	for _, c := range cases {
 		if err := reviewGuard(d, c.caller, c.author, c.reviewers); err == nil || !strings.Contains(err.Error(), c.want) {

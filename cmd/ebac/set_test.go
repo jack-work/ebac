@@ -164,7 +164,7 @@ func TestApplyEndWithRole(t *testing.T) {
 }
 
 // ebac ls reflects an `ebac set --end` at once: it reads the forms, never a published index that lags the sets and
-// rounds (the thinker 11-19: keel-review-keelpost showed END none while its form held with_role). RED if ls goes back
+// rounds (the strategist 11-19: keel-review-keelpost showed END none while its form held with_role). RED if ls goes back
 // to the index.
 func TestLiveLsShowsASetEndAtOnce(t *testing.T) {
 	if os.Getenv("EBAC_LIVE") != "1" {

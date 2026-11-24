@@ -14,7 +14,7 @@ import (
 )
 
 // cmdAddBandHub mints a band-hub mirror (plugin ebac-bandhub): a role form its
-// studiers study, a timer, no seat (warden order 2026-11-09).
+// studiers study, a timer, no seat (gatekeeper order 2026-11-09).
 func cmdAddBandHub(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("add-band-hub")
 	name := fs.String("name", "band-state", "critic name; the role form is ebac-<name>")

@@ -869,7 +869,7 @@ type ScoutWatch struct {
 	// when set) names the role.
 	Owners []OwnerRule `json:"owners,omitempty"`
 	// WarnTo is the role (@form) pinged once when open entries alone pass
-	// the form cap (the Decisions Minister).
+	// the form cap (the Decisions Lead).
 	WarnTo string `json:"warn_to,omitempty"`
 	// Claims (Praxis): an issue in the repo is a claim when ClaimBy posted a
 	// comment containing ClaimPhrase on it, or it carries ClaimLabel; it is

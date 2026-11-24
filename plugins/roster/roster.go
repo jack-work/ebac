@@ -15,7 +15,7 @@ import (
 )
 
 // ForksEvery bounds how often the forks key is rewritten: fork births and
-// deaths are constant, and every write reaches every student (cheroot
+// deaths are constant, and every write reaches every student (ops
 // 2026-11-10). The full list stays in figaro ls.
 const ForksEvery = 10 * time.Minute
 

@@ -63,7 +63,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	if err != nil {
 		// A round that could not read its source is a failure: last_success
-		// (what the steward's health timer reads) does not move, and neither
+		// (what the owner's health timer reads) does not move, and neither
 		// does the cursor.
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = err.Error()

@@ -24,7 +24,7 @@ func cmdAddApprove(ctx context.Context, g globals, args []string) error {
 	alias := fs.String("chat-alias", "", "the chat value a request must carry (e.g. ahmed)")
 	from := fs.String("ask-from", "", "the Teams sender id the ask must come from (8:orgid:<guid>)")
 	grant := fs.String("grant", "ebac-approve.aether", "the band-grants credential that must be live for --principal (exact)")
-	principal := fs.String("principal", "sbx-cheroot-sec", "the band-grants principal, as stored in grants.json")
+	principal := fs.String("principal", "", "the band-grants principal, as stored in grants.json (required)")
 	ping := fs.String("ping", "", "the role (@form) told one line per approve")
 	askName := fs.String("ask-name", "", "the asker's name in the review body and ping (default: --chat-alias)")
 	every := fs.Duration("every", time.Minute, "poll interval")

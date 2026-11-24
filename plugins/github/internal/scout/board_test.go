@@ -30,7 +30,7 @@ func (w *world) setBoard(at time.Time, checks map[int]string) {
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-// A settling PR the board carries is re-read only when its board state moves (Warden GO 11-17: PR state from the
+// A settling PR the board carries is re-read only when its board state moves (Gatekeeper GO 11-17: PR state from the
 // board, cost 0); off the board it takes the GitHub path.
 func TestSettlingPRReReadOnlyOnABoardChange(t *testing.T) {
 	w := newWorld(t)
@@ -73,7 +73,7 @@ func TestSettlingPRReReadOnlyOnABoardChange(t *testing.T) {
 // board shows turned CONFLICTING is re-read and its owner pinged. Control: a stale board, the mergeability read.
 func TestBoardMergeabilityDrivesTheConflictPing(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}, {Author: his, Role: secretary}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}, {Author: his, Role: secretary}}
 	w.gh.heads = map[string]string{"main": "a1aaaaaaaa"}
 	w.setBoard(w.now, nil)
 	w.pass(0)
@@ -91,7 +91,7 @@ func TestBoardMergeabilityDrivesTheConflictPing(t *testing.T) {
 	if len(w.gh.light) != 0 || !strings.Contains(strings.Join(w.gh.queries, " "), "p101: pullRequest") {
 		t.Fatalf("board conflict: light %q, queries %d, log %v", w.gh.light, len(w.gh.queries), r.Log)
 	}
-	if len(r.Pings) != 1 || r.Pings[0].To != knight || !strings.Contains(r.Pings[0].Text, "#101") {
+	if len(r.Pings) != 1 || r.Pings[0].To != builder || !strings.Contains(r.Pings[0].Text, "#101") {
 		t.Fatalf("pings %v", r.Pings)
 	}
 	if r = w.pass(2 * time.Minute); len(r.Pings) != 0 || w.gh.calls != 1 {

@@ -260,9 +260,9 @@ func TestTeamsTokenNameFallback(t *testing.T) {
 	}
 }
 
-// The operator never wakes a teams seat under the default rules, with no per-critic list (cheroot 2026-11-09): his
+// The operator never wakes a teams seat under the default rules, with no per-critic list (ops 2026-11-09): his
 // message is recorded in the inbox; a non-operator message still wakes; and a figaro-sent message, which goes out
-// under the operator's account carrying the disclosure footer, wakes (cheroot 2026-11-09: the secretary relies on it).
+// under the operator's account carrying the disclosure footer, wakes (ops 2026-11-09: the secretary relies on it).
 func TestTeamsOperatorRecordedButDisclosureWakes(t *testing.T) {
 	chat := testChat()
 	st := &model.TeamsState{}

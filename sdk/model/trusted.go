@@ -13,7 +13,7 @@ import (
 // /etc/ebac/config.json; key "trusted") may set: where a critic's forge host,
 // keel URL and token command, clone, worktree root and notes point. A
 // critic's FORM is writable by its seats and studiers, so the values stored
-// there are ignored and flagged (review d9d993be F5, the Thinker's #10): a
+// there are ignored and flagged (a review finding): a
 // form token_cmd is never executed, a form host never chooses the credential.
 type Trusted struct {
 	// ForgeHosts are the hosts a critic may name; the first is the default.

@@ -501,7 +501,7 @@ func TestLiveBlindRecoveryKeepsTheCritic(t *testing.T) {
 	if err := round("ok"); err != nil {
 		t.Fatalf("baseline: %v", err)
 	}
-	// The victim forms' top-level key set (teams-akshay-chiqun-minister @d7664712): the tree shape the old form
+	// The victim forms' top-level key set (a teams critic form): the tree shape the old form
 	// library mis-deleted depends on it. target-aria names no live aria, so nothing is ever woken.
 	for k, v := range map[string]any{"ack_at": "2026-11-10T18:00:00Z", "ack_note": "n", "ack_round": 1, "inbox": map[string]any{},
 		"target-aria": "0000000000000000deadbeef00000000"} {

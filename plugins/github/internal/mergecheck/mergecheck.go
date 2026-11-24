@@ -1,13 +1,13 @@
-// Package mergecheck is the PR merge checklist of the Commander's rule.merge_ready (role form @2ea091e5, Boss
+// Package mergecheck is the PR merge checklist of the Commander's rule.merge_ready (role form @000000a6, Boss
 // 11-16; it replaced RULE-chiqun-merge-criteria.md): one row per step, each evaluated from facts, and one state per
 // PR (draft, "waiting: <label>" of the first unmet step, ready, merged, closed, unknown, or the architect's
 // "blocked: architect RC at <h8>").
 //
 // ready is MERGE READY by the facts: one general bot approval at the head (or a same-tree head), no red of ours, no
-// conflict. Checks are not waited on. Whether a reviewer's stated condition is open is the Minister's judgment
+// conflict. Checks are not waited on. Whether a reviewer's stated condition is open is the Lead's judgment
 // (ready.<pr> on its form, rule.queue_protocol): the needs-merge table follows ready.<pr>, not this state.
 //
-// The rule is prose, so its steps live here (Steps). Their ids and labels are minister-control states.py's
+// The rule is prose, so its steps live here (Steps). Their ids and labels are decisions-control states.py's
 // (1b629ed), whose local checklist covers the PRs the scout does not carry; RuleSHA is the rule text they encode
 // (sha256[:16]), and the board flags a change of it. Pure: no I/O.
 package mergecheck
@@ -46,7 +46,7 @@ type Step struct {
 	Label string `json:"label"`
 }
 
-// Steps are rule.merge_ready's, in order. conditions has no evaluator: it never blocks (the Minister's ready.<pr>).
+// Steps are rule.merge_ready's, in order. conditions has no evaluator: it never blocks (the Lead's ready.<pr>).
 var Steps = []Step{
 	{"bot-approval", "bot approval"},
 	{"no-red", "no red of ours"},
@@ -320,7 +320,7 @@ func evNoRed(c In) (bool, string, string) {
 	return true, "", "no red at the head"
 }
 
-// evConflict (Minister 11-11): only mergeable CONFLICTING or merge state DIRTY is a conflict. UNKNOWN is GitHub
+// evConflict (Lead 11-11): only mergeable CONFLICTING or merge state DIRTY is a conflict. UNKNOWN is GitHub
 // recomputing: never a wait; the last known value stands meanwhile. BLOCKED and BEHIND are not conflicts.
 func evConflict(c In) (bool, string, string) {
 	ms, mg := c.Facts.MergeState, c.Facts.Mergeable
@@ -358,7 +358,7 @@ func Checklist(c In) []Row {
 	for _, s := range Steps {
 		fn, ok := evaluators[s.ID]
 		if !ok {
-			out = append(out, Row{ID: s.ID, Label: s.Label, OK: true, Status: "manual", Note: "not automated: the Minister's ready.<pr>"})
+			out = append(out, Row{ID: s.ID, Label: s.Label, OK: true, Status: "manual", Note: "not automated: the Lead's ready.<pr>"})
 			continue
 		}
 		yes, st, note := fn(c)
@@ -400,7 +400,7 @@ func StateOf(f *Facts, steps []Row) string {
 	return "ready"
 }
 
-// ArchBlock is the architect's override of an open PR's state (Warden 11-13, narrowed by rule.merge_ready): a
+// ArchBlock is the architect's override of an open PR's state (Gatekeeper 11-13, narrowed by rule.merge_ready): a
 // REQUEST_CHANGES verdict naming the head (or a same-tree head) blocks it ("blocked: architect RC at <h8>") until a
 // later approving architect verdict replaces it (archOf keeps only the latest verdict comment) or an Ilya-Grebnov
 // APPROVED review is submitted after it. An RC at an older head no longer blocks: the fix is pushed, and the

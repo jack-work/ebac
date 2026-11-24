@@ -107,19 +107,19 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	// The race: the operator sets the critic's end (ebac set --end) between ebacd's load and save; write is
 	// authority since #11 and no longer a form field a race can carry (11-19: a set of critic.stop was lost once).
 	round(30, func() {
-		figaroSet(t, id, "critic.stop.with_role", `"@d407b690"`)
-		if critic()["stop"].(map[string]any)["with_role"] != "@d407b690" {
+		figaroSet(t, id, "critic.stop.with_role", `"@000000a4"`)
+		if critic()["stop"].(map[string]any)["with_role"] != "@000000a4" {
 			t.Fatal("the racing set did not land on the form")
 		}
 	})
 	m := critic()
-	if m["stop"].(map[string]any)["with_role"] != "@d407b690" {
+	if m["stop"].(map[string]any)["with_role"] != "@000000a4" {
 		t.Fatalf("the racing critic.stop was overwritten by the save: %v", m)
 	}
 	if m["every_sec"] != float64(30) {
 		t.Fatalf("the round's own change was lost: %v", m)
 	}
-	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 2 || c.Stop.WithRole != "@d407b690" {
+	if c, _ := st.LoadCritic(ctx, name); c.Runtime.Round != 2 || c.Stop.WithRole != "@000000a4" {
 		t.Fatalf("after the race: round %d with_role %q", c.Runtime.Round, c.Stop.WithRole)
 	}
 	if warn.Len() != 0 {
@@ -154,7 +154,7 @@ func TestLiveRacingCriticSetSurvivesSave(t *testing.T) {
 	round(15, func() {
 		figaroSet(t, id, "critic.every_sec", "99")
 	})
-	if m := critic(); m["every_sec"] != float64(99) || m["stop"].(map[string]any)["with_role"] != "@d407b690" {
+	if m := critic(); m["every_sec"] != float64(99) || m["stop"].(map[string]any)["with_role"] != "@000000a4" {
 		t.Fatalf("same-field race: %v", m)
 	}
 	if !strings.Contains(warn.String(), "every_sec changed on the form during the round") {

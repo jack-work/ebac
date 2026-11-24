@@ -14,7 +14,7 @@ import (
 // conflict; nothing moved costs nothing.
 func TestBaseMoveFindsConflict(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}, {Author: his, Role: secretary}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}, {Author: his, Role: secretary}}
 	w.gh.items[201].base = "stack/x"
 	w.gh.heads = map[string]string{"main": "a1aaaaaaaa", "stack/x": "b1bbbbbbbb"}
 	w.pass(0) // tracks the PRs; no base known before the first search
@@ -39,7 +39,7 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	if e := entry(t, r, "pr:101"); e["mg"] != "CONFLICTING" || e["ms"] != "waiting: conflict" {
 		t.Fatalf("#101 entry mg %v ms %v (log %v)", e["mg"], e["ms"], r.Log)
 	}
-	if len(r.Pings) != 1 || r.Pings[0].To != knight || !strings.Contains(r.Pings[0].Text, "#101") || !strings.Contains(r.Pings[0].Text, "CONFLICTING with main") {
+	if len(r.Pings) != 1 || r.Pings[0].To != builder || !strings.Contains(r.Pings[0].Text, "#101") || !strings.Contains(r.Pings[0].Text, "CONFLICTING with main") {
 		t.Fatalf("pings %v", r.Pings)
 	}
 	if r = w.pass(2 * time.Minute); len(r.Pings) != 0 || r.Set["pr:101"] != nil {
@@ -64,7 +64,7 @@ func TestBaseMoveFindsConflict(t *testing.T) {
 	if len(w.gh.light) != 1 || !strings.Contains(w.gh.light[0], "m201:") || strings.Contains(w.gh.light[0], "m101:") {
 		t.Fatalf("recheck reads %q", w.gh.light)
 	}
-	// Not on main: recorded on the form (quiet_pings), never pinged (Knight wake noise, 2026-11-17).
+	// Not on main: recorded on the form (quiet_pings), never pinged (Builder wake noise, 2026-11-17).
 	if len(r.Pings) != 0 || len(w.st.Recheck) != 0 || !strings.Contains(string(r.Set["quiet_pings"]), "with stack/x") ||
 		!strings.Contains(string(r.Set["quiet_pings"]), secretary) {
 		t.Fatalf("settled conflict on the stack base: pings %v, quiet %s, recheck %v", r.Pings, r.Set["quiet_pings"], w.st.Recheck)

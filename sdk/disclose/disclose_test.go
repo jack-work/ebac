@@ -14,7 +14,7 @@ func TestDisclosure(t *testing.T) {
 		{"verified on the gluk stack", "gluk"},
 		{"see keel aether/plan", "keel"},
 		{"the boat keeled over; a stewardship model", ""},
-		{"the Minister ruled; aria-label kept; the merge queue landed it; docs/notes/x.md; frequency band", ""},
+		{"the Lead ruled; aria-label kept; the merge queue landed it; docs/notes/x.md; frequency band", ""},
 		{"routed via ROU2", "ROU2"},
 		{"posted by ebac", "ebac"},
 		{"band-work gate-kit 5336", "band-work"},

@@ -10,7 +10,7 @@ import (
 
 // GHE text may name figaro and no other internal tool, role, node or path
 // (Boss order 3, 2026-11-16). disclose_names.txt is a copy of the GHE audit's
-// list (~/notes/captains-log/cheroot/secretary/ghe-audit/names.txt): one
+// list (the operator's private names list): one
 // case-insensitive regex per line, # comments. The figaro line is skipped.
 //
 //go:embed disclose_names.txt

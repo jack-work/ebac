@@ -141,7 +141,7 @@ func TestPastTheCapPrunesOldestClosed(t *testing.T) {
 // the warn role is pinged once; when room returns the held entries are written.
 func TestOpenAlonePastTheCapHoldsAndPingsOnce(t *testing.T) {
 	w := synthetic(t, 20, 0, false)
-	w.watch.WarnTo = "@2ea091e5000000000000000000000000"
+	w.watch.WarnTo = "@000000a6000000000000000000000000"
 	total, _ := FormSize(&w.st)
 	w.cap = total + 1200 // room for some of the new entries, not all
 	for i := 0; i < 5; i++ {

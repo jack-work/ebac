@@ -11,7 +11,7 @@ import (
 )
 
 // cmdAddRoster mints the role roster (plugin ebac-roster): a role form the
-// Boss and cheroot study, derived from the aria store each round; no seat,
+// Boss and ops study, derived from the aria store each round; no seat,
 // never a wake (Boss ask B, 2026-11-09).
 func cmdAddRoster(ctx context.Context, g globals, args []string) error {
 	fs := newFlagSet("add-roster")

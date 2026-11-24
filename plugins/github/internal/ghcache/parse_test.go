@@ -78,7 +78,7 @@ func TestParseBody(t *testing.T) {
 }
 
 // Ruling: one row per outcome of its closed set (approved, BLOCKING, ruled every item not BLOCKING, commented),
-// including the knight's two cases the Python test pins (Ken's APPROVE header; yugo's all-not-blocking).
+// including the builder's two cases the Python test pins (Ken's APPROVE header; yugo's all-not-blocking).
 func TestRuling(t *testing.T) {
 	for _, c := range []struct{ desc, body, want string }{
 		{"header approve", "## Ken peer review: APPROVE at abc\n\nBLOCKING nothing", "approved"},

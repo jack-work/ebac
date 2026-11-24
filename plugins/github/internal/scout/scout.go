@@ -7,7 +7,7 @@
 // issue (body, checklist, labels, state, a human comment; never an edit
 // confined to the sync's <!-- plan-sync --> blocks, never a bot) pings the owner role of each open PR whose body links it,
 // one line, RECORDED on the form (quiet_pings), never pinged: a seat is woken only by a PR of its own on main
-// turning CONFLICTING or BLOCKED (Knight wake noise, ebac-leader 2026-11-17).
+// turning CONFLICTING or BLOCKED (Builder wake noise, ebac-leader 2026-11-17).
 //
 // Every pass is a catch-up, never a full pull:
 //  1. ONE GraphQL call: one aliased search per author for PRs and issues
@@ -80,7 +80,7 @@ const SchemaVersion = 7
 const KeepClosed = 24 * time.Hour
 
 // KeepClaimClosed is how long a merged or closed claim stays (its last
-// status seen by the steward for a few passes).
+// status seen by the owner for a few passes).
 const KeepClaimClosed = 2 * time.Hour
 
 // MaxTitle caps an entry's title, MaxCheckName a failing check's name (the
@@ -195,10 +195,10 @@ type Hub interface {
 	Tests(ctx context.Context, id int64) (Counts, error)
 }
 
-// The entries are read by every studier of the scout's form (steward,
-// Knight, Secretary) and the whole form sits under figaro's FormStateBudget,
+// The entries are read by every studier of the scout's form (owner,
+// Builder, Secretary) and the whole form sits under figaro's FormStateBudget,
 // so their keys are short and empty values are left out. Times are unix
-// seconds. The key map (dashboard-steward read list, 2026-11-11, plus the
+// seconds. The key map (dashboard-owner read list, 2026-11-11, plus the
 // board-sync v2 brief's list):
 //
 //	pr:<n>    a author, t title, s state (OPEN MERGED CLOSED), d draft (1),
@@ -355,7 +355,7 @@ func (d *IssueDigests) UnmarshalText(b []byte) error {
 }
 
 // ClaimEntry is a Praxis claim (key claim:<issue>), its fields named (a new
-// family the steward projects): the issue, the PR Praxis opened for it, the
+// family the owner projects): the issue, the PR Praxis opened for it, the
 // issue's title, that PR's changed files by directory, the claim comment's
 // time (unix), and its status (claimed, pr-open, merged, closed).
 type ClaimEntry struct {
@@ -401,7 +401,7 @@ type TrackedPR struct {
 	Done      int64             `json:"z,omitempty"`    // merged or closed (unix)
 	Outbox    int64             `json:"ot,omitempty"`   // when the ledger record was last sent (unix)
 	Record    string            `json:"rh,omitempty"`   // that record's hash, 16 hex
-	Acked     bool              `json:"k,omitempty"`    // the steward acked that record
+	Acked     bool              `json:"k,omitempty"`    // the owner acked that record
 	Board     string            `json:"bd,omitempty"`   // digest of the board's pr.<n> state when its facts were last read
 }
 
@@ -672,7 +672,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			if present(j.Result.CancelledBy) || j.State == "cancelled" {
 				continue
 			}
-			// As minister-control graph.py: the hub's verdict, else PASS when ok or passed by a descendant (a
+			// As decisions-control graph.py: the hub's verdict, else PASS when ok or passed by a descendant (a
 			// check-ni a descendant head passed counts at this head), else FAIL when failed or dead, else none yet.
 			mj := mergecheck.Job{ID: j.ID, Queue: j.Queue, Tests: j.param("tests"), State: j.State, Verdict: j.Result.Verdict}
 			switch {
@@ -720,7 +720,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			settlingOnly = append(settlingOnly, n)
 		}
 	}
-	// The board (pr.<n>, its 5-min snapshot) is the PR state for every PR it carries (Warden GO 11-17): a settling
+	// The board (pr.<n>, its 5-min snapshot) is the PR state for every PR it carries (Gatekeeper GO 11-17): a settling
 	// PR on it is re-read only when its board state moved; any tracked open PR whose settled mergeability the board
 	// shows changed is re-read (the read rewrites its entry and pings a turn into conflict). A PR the board lacks,
 	// or a stale board, takes the GitHub path.
@@ -835,7 +835,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	// PR entries.
 	sentNow := map[int]bool{}              // ledger records sent this pass: an ack can only be of an older one
 	var conflictPings, pings []plugin.Ping // pings: owner notes recorded on the form, not sent (quiet_pings)
-	if st.RCSince == "" {                  // the first pass with RC pings: RCs standing before it are old news (Warden 11-13)
+	if st.RCSince == "" {                  // the first pass with RC pings: RCs standing before it are old news (Gatekeeper 11-13)
 		st.RCSince = start.Format(time.RFC3339)
 	}
 	for _, n := range sortedKeys(fresh) {
@@ -885,7 +885,7 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 			}
 			logf("PR #%d turned conflicting", n)
 		}
-		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Warden 11-13).
+		// A new architect REQUEST_CHANGES that blocks the PR pings its owner role once per RC comment (Gatekeeper 11-13).
 		if mergecheck.ArchBlock(&p.Facts, p.Arch) != "" && p.Arch.At != t.RC {
 			if role := ghcfg.RoleOf(owners, p.Author, p.Title); role != "" && rcAfter(p.Arch.At, st.RCSince) {
 				ping := plugin.Ping{To: role, Text: oneLine(fmt.Sprintf(
@@ -1092,9 +1092,9 @@ func Run(ctx context.Context, gh GitHub, hub Hub, prev State, in Pass) (Result, 
 	}
 
 	// S2: the ledger acks. An ack newer than the record's send, for that record, clears its outbox member.
-	// The steward (board-inputs ledger_committer.py) commits an outbox member as prs/<n>.json and acks it with the
+	// The owner (board-inputs ledger_committer.py) commits an outbox member as prs/<n>.json and acks it with the
 	// sha256 of the committed bytes: the member matches its ack when CommittedHash(member) is the ack's hash. A
-	// member we replaced since (a newer record) does not match until the steward commits that one.
+	// member we replaced since (a newer record) does not match until the owner commits that one.
 	acks := ledgerAcks(in.Inputs)
 	box := model.ObjectOf(in.Inputs["ledger_outbox"])
 	for _, n := range sortedKeys(st.PRs) {
@@ -1293,7 +1293,7 @@ func prEntry(p PR, js headJobs, mk mergecheck.Marks) PREntry {
 	if e.Base == "main" {
 		e.Base = ""
 	}
-	// An architect RC at the head overrides the step order (Warden 11-13); a conflict still comes first.
+	// An architect RC at the head overrides the step order (Gatekeeper 11-13); a conflict still comes first.
 	if b := mergecheck.ArchBlock(&p.Facts, p.Arch); b != "" && e.MergeState != "waiting: conflict" {
 		e.MergeState = b
 	}
@@ -1382,7 +1382,7 @@ func ledgerAcks(inputs map[string]json.RawMessage) map[int]ack {
 	return out
 }
 
-// CommittedHash is the sha256 (hex) of a ledger record as the steward commits
+// CommittedHash is the sha256 (hex) of a ledger record as the owner commits
 // it: Python's json.dumps(record, indent=2, sort_keys=True,
 // ensure_ascii=False) + "\n". Numbers keep their text, keys sort, HTML
 // characters stay as they are.
@@ -1494,7 +1494,7 @@ func jobsFor(jobs map[string][]mergecheck.Job, tests map[int64]int, head string)
 
 // marks are the owner-written marks per PR the checklist reads, from the board
 // (read-only): the prs row naming the PR, then the item naming it (as
-// minister-control).
+// decisions-control).
 type marks struct {
 	rows  map[int]map[string]any
 	items map[int]map[string]any

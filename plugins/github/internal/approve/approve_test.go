@@ -66,7 +66,7 @@ const (
 )
 
 var watch = model.ApproveWatch{Chat: chat, ChatAlias: "ahmed", AskFrom: ahmed, Grant: "ebac-approve.aether",
-	Principal: "sbx-cheroot-sec", PingTo: "@d407b690", AskName: "Ahmed Kotb"}
+	Principal: "sbx-ops-sec", PingTo: "@000000a4", AskName: "Pat Doe"}
 
 var now = time.Date(2026, 11, 12, 21, 0, 0, 0, time.UTC)
 
@@ -159,13 +159,13 @@ func msg(id, from, content, arrival string) tomb.TeamsMsg {
 
 func liveGrants() ([]grants.Grant, error) {
 	return []grants.Grant{
-		{ID: "a", Principal: "sbx-cheroot-sec", Credential: "tomb-live.notes", ExpiresAt: now.Unix() + 3600, ApprovedBy: "flake:cheroot"},
-		{ID: "b", Principal: "sbx-cheroot-sec", Credential: "ebac-approve.aether", ExpiresAt: now.Unix() + 86400, ApprovedBy: "jack"},
+		{ID: "a", Principal: "sbx-ops-sec", Credential: "tomb-live.notes", ExpiresAt: now.Unix() + 3600, ApprovedBy: "flake:ops"},
+		{ID: "b", Principal: "sbx-ops-sec", Credential: "ebac-approve.aether", ExpiresAt: now.Unix() + 86400, ApprovedBy: "jack"},
 	}, nil
 }
 
 // world is one scenario: an open aether PR 110001 with an old approval, and
-// Ahmed's ask naming it after that approval.
+// Pat's ask naming it after that approval.
 func world() (*fakeHub, fakeTeams) {
 	h := &fakeHub{prs: map[int]PRInfo{110001: {State: "open"}, 110002: {State: "open", Draft: true}, 110003: {State: "closed"}},
 		reviews: map[int][]Review{110001: {{ID: 1, State: "APPROVED", Body: "lgtm", SubmittedAt: "2026-11-12T19:00:00Z"},
@@ -247,7 +247,7 @@ func TestApproveHappyPath(t *testing.T) {
 	if !r.OK || r.ReviewID == 0 || r.At != "2026-11-12T21:00:00Z" || h.posts() != 1 {
 		t.Fatalf("result %+v, posts %d", r, h.posts())
 	}
-	if len(out.Pings) != 1 || out.Pings[0].To != "@d407b690" || !strings.Contains(out.Pings[0].Text, "bic/aether#110001") ||
+	if len(out.Pings) != 1 || out.Pings[0].To != "@000000a4" || !strings.Contains(out.Pings[0].Text, "bic/aether#110001") ||
 		!strings.Contains(out.Pings[0].Text, msgID) || strings.ContainsAny(out.Pings[0].Text, "\n\r") {
 		t.Fatalf("pings %+v", out.Pings)
 	}
@@ -298,15 +298,15 @@ func TestApproveRefusals(t *testing.T) {
 				return nil, errors.New("open /var/lib/band-grants/grants.json: no such file")
 			}
 		}, want: "grant: grants unreadable"},
-		{name: "grant absent", req: reqJSON(good()), mut: withGrants(), want: "grant: no live grant ebac-approve.aether for sbx-cheroot-sec"},
-		{name: "grant figaro principal", req: reqJSON(good()), mut: withGrants(g("sandbox:cheroot-sec@local:box", "ebac-approve.aether", live, "jack")),
+		{name: "grant absent", req: reqJSON(good()), mut: withGrants(), want: "grant: no live grant ebac-approve.aether for sbx-ops-sec"},
+		{name: "grant figaro principal", req: reqJSON(good()), mut: withGrants(g("sandbox:ops-sec@local:box", "ebac-approve.aether", live, "jack")),
 			want: "grant: no live grant"},
-		{name: "grant prefix only", req: reqJSON(good()), mut: withGrants(g("sbx-cheroot-sec", "ebac-approve.*", live, "jack")), want: "grant: no live grant"},
-		{name: "grant longer name", req: reqJSON(good()), mut: withGrants(g("sbx-cheroot-sec", "ebac-approve.aether2", live, "jack")), want: "grant: no live grant"},
+		{name: "grant prefix only", req: reqJSON(good()), mut: withGrants(g("sbx-ops-sec", "ebac-approve.*", live, "jack")), want: "grant: no live grant"},
+		{name: "grant longer name", req: reqJSON(good()), mut: withGrants(g("sbx-ops-sec", "ebac-approve.aether2", live, "jack")), want: "grant: no live grant"},
 		{name: "grant other principal", req: reqJSON(good()), mut: withGrants(g("sbx-other", "ebac-approve.aether", live, "jack")), want: "grant: no live grant"},
-		{name: "grant expired", req: reqJSON(good()), mut: withGrants(g("sbx-cheroot-sec", "ebac-approve.aether", now.Unix(), "jack")), want: "expired"},
-		{name: "grant standing", req: reqJSON(good()), mut: withGrants(g("sbx-cheroot-sec", "ebac-approve.aether", live, "flake:cheroot")), want: "is standing"},
-		{name: "grant no approver", req: reqJSON(good()), mut: withGrants(g("sbx-cheroot-sec", "ebac-approve.aether", live, "")), want: "is standing"},
+		{name: "grant expired", req: reqJSON(good()), mut: withGrants(g("sbx-ops-sec", "ebac-approve.aether", now.Unix(), "jack")), want: "expired"},
+		{name: "grant standing", req: reqJSON(good()), mut: withGrants(g("sbx-ops-sec", "ebac-approve.aether", live, "flake:ops")), want: "is standing"},
+		{name: "grant no approver", req: reqJSON(good()), mut: withGrants(g("sbx-ops-sec", "ebac-approve.aether", live, "")), want: "is standing"},
 		{name: "repo app-studio", req: with("repo", "bic/app-studio"), want: `scope: repo "bic/app-studio" is not bic/aether`},
 		{name: "repo case", req: with("repo", "bic/Aether"), want: "scope: repo"},
 		{name: "pr draft", req: with("pr", 110002), want: "is a draft"},
@@ -503,14 +503,14 @@ func TestNamesPR(t *testing.T) {
 func TestLiveGrantShape(t *testing.T) {
 	// The live file's shape (band-grants save()): principal is the band-grants
 	// principal name, never figaro's sandbox principal.
-	b := []byte(`{"grants":[{"id":"c1","principal":"sbx-cheroot-sec","credential":"ebac-approve.aether","expires_at":1794532485,"approved_by":"jack"}]}`)
+	b := []byte(`{"grants":[{"id":"c1","principal":"sbx-ops-sec","credential":"ebac-approve.aether","expires_at":1794532485,"approved_by":"jack"}]}`)
 	p := t.TempDir() + "/grants.json"
 	if err := os.WriteFile(p, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gs, err := grants.ReadGrants(p)
-	if err != nil || grants.LiveGrant(gs, "sbx-cheroot-sec", "ebac-approve.aether", 1794532484) != "" ||
-		grants.LiveGrant(gs, "sandbox:cheroot-sec@local:box", "ebac-approve.aether", 1794532484) == "" {
+	if err != nil || grants.LiveGrant(gs, "sbx-ops-sec", "ebac-approve.aether", 1794532484) != "" ||
+		grants.LiveGrant(gs, "sandbox:ops-sec@local:box", "ebac-approve.aether", 1794532484) == "" {
 		t.Fatalf("grants %+v %v", gs, err)
 	}
 	if _, err := grants.ReadGrants(t.TempDir() + "/none.json"); err == nil {
@@ -556,7 +556,7 @@ func TestApproveTwoAskersOneForm(t *testing.T) {
 		t.Fatalf("ahmed critic: results %+v (want a1 ok only; s1 and x1 untouched)", out.Results)
 	}
 	last := h.calls[len(h.calls)-2]
-	if !strings.HasSuffix(strings.Join(last, " "), "on Ahmed Kotb's ask "+msgID+".\n\n<!-- figaro-ask:a1 -->") || !strings.Contains(out.Pings[0].Text, "Ahmed Kotb") {
+	if !strings.HasSuffix(strings.Join(last, " "), "on Pat Doe's ask "+msgID+".\n\n<!-- figaro-ask:a1 -->") || !strings.Contains(out.Pings[0].Text, "Pat Doe") {
 		t.Fatalf("ahmed body %q ping %q", last, out.Pings[0].Text)
 	}
 

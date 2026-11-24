@@ -10,8 +10,8 @@ import (
 func TestAuthorizeKeelArms(t *testing.T) {
 	w := &model.Critic{Name: "keel-captains-log", Mode: model.ModeKeel, Source: "keel-threads", Write: true,
 		Keel: &model.KeelRef{Repo: "notes/captains-log", Paths: []string{"2026/**", "handoffs/*.md"}}}
-	const aria, role = "e680885d31ef318df6abd5ffbfe69868", "figaro-knight"
-	const form = "@8292f32b9578e0502343dbd0f6679c7c"
+	const aria, role = "000000aa31ef318df6abd5ffbfe69868", "figaro-builder"
+	const form = "@000000a59578e0502343dbd0f6679c7c"
 	ok := func(p model.Post) model.Post {
 		p.PR, p.ByAria, p.ByRole, p.ByRoleForm = "notes/captains-log", aria, role, form
 		return p
@@ -42,7 +42,7 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		"event":             {ok(model.Post{ReplyTo: "t1", Body: "x", Event: "APPROVE"}), "no reviews"},
 		"react":             {ok(model.Post{ReplyTo: "t1", React: "+1"}), "no reactions"},
 		"no writer aria":    {model.Post{PR: "notes/captains-log", ByRole: role, ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_aria"},
-		"bad writer role":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: "Knight", ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_role"},
+		"bad writer role":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: "Builder", ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_role"},
 		"no role form":      {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ReplyTo: "t1", Body: "x"}, "by_role_form"},
 		"resolve no thread": {ok(model.Post{Resolve: true}), "resolve needs reply_to"},
 		"empty body":        {ok(model.Post{ReplyTo: "t1"}), "empty body"},

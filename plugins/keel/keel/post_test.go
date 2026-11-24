@@ -58,8 +58,8 @@ func (f *fakeWriter) Write(_ context.Context, method, path, aria, role string, b
 
 const (
 	repo  = "notes/captains-log"
-	aria  = "e680885d31ef318df6abd5ffbfe69868"
-	role  = "figaro-knight"
+	aria  = "000000aa31ef318df6abd5ffbfe69868"
+	role  = "figaro-builder"
 	tpath = "/api/r/notes-captains-log/threads"
 )
 
@@ -150,7 +150,7 @@ func TestKeelNewThreadWithoutAnIDIsAnErrorNotASend(t *testing.T) {
 
 func TestKeelMarkerAlreadyOnTheThreadIsRecoveredNotResent(t *testing.T) {
 	marker := model.PostMarker("keel-captains-log", "r1")
-	byPath := map[string][]Thread{"a.md": {{ID: "t1", Comments: []Comment{{Body: "jack via Figaro e680885d (figaro-knight): answered\n\n" + marker}}}}}
+	byPath := map[string][]Thread{"a.md": {{ID: "t1", Comments: []Comment{{Body: "jack via Figaro 000000aa (figaro-builder): answered\n\n" + marker}}}}}
 	wr := &fakeWriter{}
 	p := &model.Post{PR: repo, ReplyTo: "t1", Body: "answered", ByAria: aria, ByRole: role, Attempts: 1, Error: "timeout"}
 	runPosts(t, byPath, wr, map[string]*model.Post{"r1": p})
@@ -202,13 +202,13 @@ func TestKeel4xxIsAFinalRefusalAnd5xxIsARetry(t *testing.T) {
 	}
 }
 
-// cheroot's ask: ebac's own client never sends an unmarked write, whatever
+// ops's ask: ebac's own client never sends an unmarked write, whatever
 // reaches it.
 func TestKeelClientRefusesAnUnmarkedWriteWithoutSending(t *testing.T) {
 	for name, p := range map[string]*model.Post{
 		"no aria":    {PR: repo, ReplyTo: "t1", Body: "x", ByRole: role},
 		"no role":    {PR: repo, ReplyTo: "t1", Body: "x", ByAria: aria},
-		"bad role":   {PR: repo, ReplyTo: "t1", Body: "x", ByAria: aria, ByRole: "Knight Role"},
+		"bad role":   {PR: repo, ReplyTo: "t1", Body: "x", ByAria: aria, ByRole: "Builder Role"},
 		"short aria": {PR: repo, ReplyTo: "t1", Body: "x", ByAria: "e680", ByRole: role},
 	} {
 		wr := &fakeWriter{}
@@ -248,7 +248,7 @@ func TestKeelPluginHandlesOpPostThroughItsWriter(t *testing.T) {
 }
 
 func TestKeelWriterRoleRuleMatchesTheDoor(t *testing.T) {
-	for role, ok := range map[string]bool{"system1-engineer": true, "figaro-knight": true, "Knight": false, "a_b": false, "": false,
+	for role, ok := range map[string]bool{"system1-engineer": true, "figaro-builder": true, "Builder": false, "a_b": false, "": false,
 		"abcdefghijabcdefghijabcdefghijabcdefghij": true, "abcdefghijabcdefghijabcdefghijabcdefghijk": false} {
 		if got := model.KeelWriter(aria, role) == ""; got != ok {
 			t.Errorf("role %q accepted=%v, want %v", role, got, ok)

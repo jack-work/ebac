@@ -15,7 +15,7 @@ import (
 )
 
 // RED if a default budget number moves: GHE GraphQL 40/h burst 10 floor 1000, REST 600/h burst 60; beat every minute.
-func TestDaemonDefaultsAreTheStewardsNumbers(t *testing.T) {
+func TestDaemonDefaultsAreTheOwnersNumbers(t *testing.T) {
 	c := DefaultDaemonConfig().Budget.Credentials["github:microsoft.ghe.com"]
 	if g := c["graphql"]; g.PerHour != 40 || g.Burst != 10 || g.Floor != 1000 {
 		t.Fatalf("graphql %+v", g)

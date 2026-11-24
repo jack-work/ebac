@@ -16,7 +16,7 @@ import (
 )
 
 var approveCritic = &model.Critic{Name: "ap", Source: model.SourceApprove, InputsForm: "@in",
-	Requests: &model.ApproveWatch{PingTo: "@d407b690"}}
+	Requests: &model.ApproveWatch{PingTo: "@000000a4"}}
 
 // approve-requests writes only results on its inputs form, pings only its
 // configured role, and sets no key on its own role form.
@@ -43,7 +43,7 @@ func TestValidateApproveWrites(t *testing.T) {
 	if err := ValidateForms(&noInputs, &plugin.Reply{Forms: []plugin.FormWrite{ok}}); err == nil {
 		t.Error("a write without an inputs form was not refused")
 	}
-	if err := ValidatePings(approveCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@d407b690", Text: "approved"}}}); err != nil {
+	if err := ValidatePings(approveCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@000000a4", Text: "approved"}}}); err != nil {
 		t.Fatalf("the configured ping refused: %v", err)
 	}
 	if err := ValidatePings(approveCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@aaaaaaaa", Text: "approved"}}}); err == nil {

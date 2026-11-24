@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	knight    = "@8d70861a00000000000000000000aaaa"
+	builder   = "@8d70861a00000000000000000000aaaa"
 	lead      = "@cc540006000000000000000000000bbb"
 	secretary = "@3dbeb326000000000000000000000ccc"
 )
@@ -22,17 +22,17 @@ const (
 func who(l string) map[string]any { return map[string]any{"__typename": "User", "login": l} }
 func bot(l string) map[string]any { return map[string]any{"__typename": "Bot", "login": l} }
 
-// s5World: issue 301 (ours, labelled) is linked from 101 (ours -> the Knight), 104 (ours, ledger -> the ledger lead),
+// s5World: issue 301 (ours, labelled) is linked from 101 (ours -> the Builder), 104 (ours, ledger -> the ledger lead),
 // 201 (Chiqun's -> the Secretary) and 105 (ours, merged: never pinged).
 func s5World(t *testing.T) *world {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: knight}, {Author: his, Role: secretary}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: builder}, {Author: his, Role: secretary}}
 	link := "Part of https://x/bic/aether/issues/301"
 	old := w.now.Add(-time.Hour)
 	w.gh.items[101].body, w.gh.items[201].body = link, link
 	w.gh.items[104] = &item{n: 104, author: ours, title: "[Effort][ledger-2] the ledger piece", state: "OPEN", head: headA, mergeable: "MERGEABLE", updated: old, body: link}
 	w.gh.items[105] = &item{n: 105, author: ours, title: "[Effort][1-1] merged", state: "OPEN", head: headA, mergeable: "MERGEABLE", updated: old, body: link}
-	w.gh.items[301].body = "The plan item.\n\n- [ ] one\n- [x] two\n\n<!-- plan-sync -->\nPlan: owner Knight.\n- [ ] synced step\n<!-- /plan-sync -->\nhuman tail\n"
+	w.gh.items[301].body = "The plan item.\n\n- [ ] one\n- [x] two\n\n<!-- plan-sync -->\nPlan: owner Builder.\n- [ ] synced step\n<!-- /plan-sync -->\nhuman tail\n"
 	w.pass(0)
 	m := w.gh.items[105]
 	m.state, m.mergedAt, m.updated = "MERGED", w.now.Format(time.RFC3339), w.now.Add(time.Minute)
@@ -90,7 +90,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.comments = append(is.comments, map[string]any{"author": who("alice"), "createdAt": w.now.Format(time.RFC3339)})
 	})
 	got := quietTo(t, r)
-	if len(got) != 3 || !strings.Contains(got[knight], "#101") || !strings.Contains(got[lead], "#104") || !strings.Contains(got[secretary], "#201") {
+	if len(got) != 3 || !strings.Contains(got[builder], "#101") || !strings.Contains(got[lead], "#104") || !strings.Contains(got[secretary], "#201") {
 		t.Fatalf("human comment: quiet %v", got)
 	}
 	for to, text := range got {
@@ -105,7 +105,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 
 	// The sync (as John-Kelliher) rewrites its block and ticks a checklist item inside it: nobody is pinged.
 	r = w.change(func(is *item) {
-		is.body = strings.Replace(is.body, "Plan: owner Knight.\n- [ ] synced step", "Plan: owner Knight, needs #4100.\n- [x] synced step", 1)
+		is.body = strings.Replace(is.body, "Plan: owner Builder.\n- [ ] synced step", "Plan: owner Builder, needs #4100.\n- [x] synced step", 1)
 		is.editor = who(ours)
 	})
 	if q := quietNew(t, r); len(q) != 0 {
@@ -115,7 +115,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 	r = w.change(func(is *item) {
 		is.body = strings.Replace(is.body, "human tail", "human tail, amended", 1)
 	})
-	if text := quietTo(t, r)[knight]; !strings.Contains(text, "changed: body by "+ours) {
+	if text := quietTo(t, r)[builder]; !strings.Contains(text, "changed: body by "+ours) {
 		t.Fatalf("edit outside the block: %v", r.Pings)
 	}
 	r = w.change(func(is *item) {
@@ -132,7 +132,7 @@ func TestIssueChangeReachesOwners(t *testing.T) {
 		is.body = strings.Replace(is.body, "- [ ] one", "- [x] one", 1)
 		is.editor = who("bob")
 	})
-	if text := quietTo(t, r)[knight]; !strings.Contains(text, "changed: checklist by bob") {
+	if text := quietTo(t, r)[builder]; !strings.Contains(text, "changed: checklist by bob") {
 		t.Fatalf("checklist tick: %q", text)
 	}
 	// A human relabels (case and order only: no change), then closes it.
@@ -170,10 +170,10 @@ func TestIssueBaselineAndUnlinked(t *testing.T) {
 }
 
 // Issue changes never ping: each is recorded on the form (quiet_pings), the newest MaxQuiet kept, and nothing is
-// re-sent or re-recorded on a later pass (Knight wake noise, 2026-11-17).
+// re-sent or re-recorded on a later pass (Builder wake noise, 2026-11-17).
 func TestIssueChangesRecordedNotPinged(t *testing.T) {
 	w := newWorld(t)
-	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: knight}}
+	w.watch.Owners = []model.OwnerRule{{Author: ours, Role: builder}}
 	var body []string
 	for i := 0; i < MaxQuiet+3; i++ {
 		n := 4000 + i
@@ -195,7 +195,7 @@ func TestIssueChangesRecordedNotPinged(t *testing.T) {
 	if err := json.Unmarshal(r.Set["quiet_pings"], &quiet); err != nil || len(quiet) != MaxQuiet {
 		t.Fatalf("quiet_pings: %d (%v) %s", len(quiet), err, r.Set["quiet_pings"])
 	}
-	if !strings.Contains(quiet[MaxQuiet-1].Text, "#4014") || quiet[0].To != knight {
+	if !strings.Contains(quiet[MaxQuiet-1].Text, "#4014") || quiet[0].To != builder {
 		t.Fatalf("quiet_pings kept the wrong end: first %+v last %+v", quiet[0], quiet[MaxQuiet-1])
 	}
 	r = w.pass(2 * time.Minute)
@@ -233,17 +233,17 @@ func TestIssueDigests(t *testing.T) {
 }
 
 func TestOwnerRules(t *testing.T) {
-	if err := ghcfg.CheckOwners([]model.OwnerRule{{Author: ours, Role: "knight"}}); err == nil {
+	if err := ghcfg.CheckOwners([]model.OwnerRule{{Author: ours, Role: "builder"}}); err == nil {
 		t.Fatal("a role that is not @<hex> was accepted")
 	}
-	if err := ghcfg.CheckOwners([]model.OwnerRule{{Author: ours, TitleMatch: "([", Role: knight}}); err == nil {
+	if err := ghcfg.CheckOwners([]model.OwnerRule{{Author: ours, TitleMatch: "([", Role: builder}}); err == nil {
 		t.Fatal("a bad title regex was accepted")
 	}
-	o, _ := ghcfg.CompileOwners([]model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: knight}})
+	o, _ := ghcfg.CompileOwners([]model.OwnerRule{{Author: ours, TitleMatch: `(?i)ledger`, Role: lead}, {Author: ours, Role: builder}})
 	if r := ghcfg.RoleOf(o, "john-kelliher", "[Effort][LEDGER-1] x"); r != lead {
 		t.Fatalf("ledger PR -> %q", r)
 	}
-	if r := ghcfg.RoleOf(o, ours, "[Effort][cache-1] x"); r != knight {
+	if r := ghcfg.RoleOf(o, ours, "[Effort][cache-1] x"); r != builder {
 		t.Fatalf("other PR -> %q", r)
 	}
 	if r := ghcfg.RoleOf(o, his, "ledger"); r != "" {
@@ -263,7 +263,7 @@ func TestHumanCommentPastTheWindow(t *testing.T) {
 	r := w.change(func(is *item) {
 		is.comments = append(is.comments, map[string]any{"author": who("dave"), "createdAt": w.now.Add(time.Hour).Format(time.RFC3339)})
 	})
-	if !strings.Contains(quietTo(t, r)[knight], "comment by dave") {
+	if !strings.Contains(quietTo(t, r)[builder], "comment by dave") {
 		t.Fatalf("a comment past the window: %s", r.Set["quiet_pings"])
 	}
 }

@@ -276,10 +276,10 @@ func TestTapByJackApprovesAtHead(t *testing.T) {
 
 func TestNoPostWithoutJacksApprovalOfThatRequest(t *testing.T) {
 	cases := map[string]func(r *rig){
-		"standing flake":    func(r *rig) { r.approveTap("flake:cheroot") },
+		"standing flake":    func(r *rig) { r.approveTap("flake:ops") },
 		"another approver":  func(r *rig) { r.approveTap("gluck") },
 		"other credential":  func(r *rig) { r.approveTap("jack"); r.grant[0].Credential = "ebac-approve.aether" },
-		"other principal":   func(r *rig) { r.approveTap("jack"); r.grant[0].Principal = "sbx-cheroot-sec" },
+		"other principal":   func(r *rig) { r.approveTap("jack"); r.grant[0].Principal = "sbx-ops-sec" },
 		"other request row": func(r *rig) { r.approveTap("jack"); r.grant[0].ID = "000000000009" },
 		"expired":           func(r *rig) { r.approveTap("jack"); r.grant[0].ExpiresAt = r.now.Unix() },
 		"pending":           func(r *rig) { r.approveTap("jack"); r.fl.states["000000000001"] = "pending" },
@@ -455,9 +455,9 @@ func TestCheckWatch(t *testing.T) {
 		"no logins":      func(w *model.OrgApproveWatch) { w.Logins = nil },
 		"bad login":      func(w *model.OrgApproveWatch) { w.Logins = []string{"a b"} },
 		"glob grant":     func(w *model.OrgApproveWatch) { w.Grant = "ebac-approve.*" },
-		"flake approver": func(w *model.OrgApproveWatch) { w.Approver = "flake:cheroot" },
+		"flake approver": func(w *model.OrgApproveWatch) { w.Approver = "flake:ops" },
 		"empty approver": func(w *model.OrgApproveWatch) { w.Approver = "" },
-		"ping not role":  func(w *model.OrgApproveWatch) { w.PingTo = "cheroot" },
+		"ping not role":  func(w *model.OrgApproveWatch) { w.PingTo = "ops" },
 	} {
 		w := ok
 		mut(&w)
@@ -475,7 +475,7 @@ func TestTapGrantRefusesNonPersonApprovers(t *testing.T) {
 	row := func(by string) []grants.Grant {
 		return []grants.Grant{{ID: "000000000001", Principal: "org-approve", Credential: "ebac-approve.org", ExpiresAt: live, ApprovedBy: by}}
 	}
-	for _, c := range []struct{ approver, by string }{{"", ""}, {"flake:cheroot", "flake:cheroot"}, {"", "jack"}, {"flake:x", "jack"}} {
+	for _, c := range []struct{ approver, by string }{{"", ""}, {"flake:ops", "flake:ops"}, {"", "jack"}, {"flake:x", "jack"}} {
 		w.Approver = c.approver
 		if why := tapGrant(row(c.by), "000000000001", w, t0.Unix()); why == "" {
 			t.Errorf("approver %q took a row approved by %q", c.approver, c.by)

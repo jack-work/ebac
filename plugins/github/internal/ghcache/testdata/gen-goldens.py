@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate golden-ref.json: the Minister's Python parsers (the reference this package ports) run over deep-6.json.
+"""Generate golden-ref.json: the Lead's Python parsers (the reference this package ports) run over deep-6.json.
 
-Run from this directory: python3 gen-goldens.py ~/dev/minister-tools > golden-ref.json
+Run from this directory: python3 gen-goldens.py ~/dev/decisions-tools > golden-ref.json
 architect = board-snapshot.arch_verdicts, praxis = board-snapshot.praxis_of (approvers as filters.toml:
 architect-review, ilya-grebnov); lair = pr-body-evidence.peer_line's per-reviewer pick with its ruling(),
 the sha unsliced. Regenerate only when the reference changes; the Go test compares field by field.

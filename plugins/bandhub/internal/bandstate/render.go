@@ -10,7 +10,7 @@ import (
 )
 
 // View is the mirror's form keys, each a list of lines. Updated is set by the
-// round, only when another key changed. It is SLIM on purpose (warden
+// round, only when another key changed. It is SLIM on purpose (gatekeeper
 // 2026-11-09): a study mirrors the whole form on every change, so there is no
 // per-job list; `band-hub list` is the on-demand detail.
 type View struct {
@@ -168,7 +168,7 @@ func Render(h *bandhub.Hub, utility []string, tips map[string]string, desc map[s
 
 // dupes groups live jobs that do the same work: same queue, template and the
 // FULL canonical params (sorted JSON of payload.params, attrs and tests
-// included), as warden-submit dedupes. The metadata view ebac reads shows only
+// included), as gate-submit dedupes. The metadata view ebac reads shows only
 // branch, sha, label and node, so the full params arrive as the hub's digest
 // params_sum; a job without one is never grouped (flake.check 4709/4710: same
 // sha, attrs ci vs keel-web-*, were flagged and a real job was cancelled).
@@ -212,7 +212,7 @@ func dupes(live []bandhub.Job) []string {
 var trunk = map[string]bool{"main": true, "master": true}
 
 // superseded names live jobs whose branch tip upstream is a PROVEN strict
-// descendant of their sha (warden 2026-11-10: jobs 4664-4669 were flagged by
+// descendant of their sha (gatekeeper 2026-11-10: jobs 4664-4669 were flagged by
 // an older tip). No tip, no verdict, or a negative one is never flagged.
 func superseded(live []bandhub.Job, tips map[string]string, desc map[string]bool) []string {
 	var out []string

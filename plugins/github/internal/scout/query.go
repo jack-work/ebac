@@ -385,7 +385,7 @@ type Comment struct {
 
 var buildRE = regexp.MustCompile(`buildId=(\d+)`)
 
-// The architect-review[bot] verdict comment and its hold marker (minister-control graph.py, same patterns), and the
+// The architect-review[bot] verdict comment and its hold marker (decisions-control graph.py, same patterns), and the
 // Automaton's verdict marker (<!-- automaton:<pr>:<head8> verdict:<v> -->; its queue acks carry automaton-ack and
 // no verdict).
 var (

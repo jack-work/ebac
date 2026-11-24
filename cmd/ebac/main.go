@@ -44,7 +44,7 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
                                             mirror the band hub (queues, nodes, dupes; slim) into a studied
                                             form (plugin ebac-bandhub); no seat, never a wake, writes only on change
   ebac add-approve --name ahmed-approve --inputs @FORM --chat 19:... --chat-alias ahmed --ask-from 8:orgid:<guid>
-              --grant ebac-approve.aether --principal sbx-cheroot-sec --ping @ROLE [--every 1m]
+              --grant ebac-approve.aether --principal PRINCIPAL --ping @ROLE [--every 1m]
                                             the approve path for a sandboxed principal: requests.<id> on the inputs
                                             form -> APPROVE on bic/aether after grant, scope and Teams-ask checks;
                                             writes requests.<id>.result (plugin ebac-approve); no seat

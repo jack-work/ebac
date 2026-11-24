@@ -158,7 +158,7 @@ func TestConflict(t *testing.T) {
 	}
 }
 
-// The reviewer-conditions step is the Minister's ready.<pr>: shown, never blocking.
+// The reviewer-conditions step is the Lead's ready.<pr>: shown, never blocking.
 func TestConditionsManual(t *testing.T) {
 	rows := Checklist(base())
 	if len(rows) != len(Steps) {

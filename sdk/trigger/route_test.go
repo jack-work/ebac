@@ -12,10 +12,10 @@ func TestGlobMatchesSegmentsAndDoubleStarAnywhere(t *testing.T) {
 		glob, path string
 		want       bool
 	}{
-		{"**/decisions-minister/**", "2026/11/17/decisions-minister/a.md", true},
-		{"**/decisions-minister/**", "2026/11/17/decisions-minister/x/y.md", true},
-		{"**/decisions-minister/**", "2026/11/17/decisions-ministers/a.md", false},
-		{"**/decisions-minister/**", "decisions-minister.md", false},
+		{"**/decisions-lead/**", "2026/11/17/decisions-lead/a.md", true},
+		{"**/decisions-lead/**", "2026/11/17/decisions-lead/x/y.md", true},
+		{"**/decisions-lead/**", "2026/11/17/decisions-leads/a.md", false},
+		{"**/decisions-lead/**", "decisions-lead.md", false},
 		{"**/ebac-*.md", "2026/11/19/ebac-journal-errors.md", true},
 		{"**/ebac-*.md", "ebac-top.md", true},
 		{"**/ebac-*.md", "2026/11/19/ebac-rework/PLAN.md", false},
@@ -50,11 +50,11 @@ func TestCheckGlobRefusesWhatGlobCannotApply(t *testing.T) {
 
 func TestParseRefusesBadRoutes(t *testing.T) {
 	bad := map[string]string{
-		"to without @":           `[{"path":"a/**","to":"6fa9788a","action":"keep"},{"default":true,"action":"keep"}]`,
-		"to with drop":           `[{"path":"a/**","to":"@6fa9788a","action":"drop"},{"default":true,"action":"keep"}]`,
-		"role_in_path with to":   `[{"role_in_path":true,"to":"@6fa9788a","action":"keep"},{"default":true,"action":"keep"}]`,
+		"to without @":           `[{"path":"a/**","to":"000000a1","action":"keep"},{"default":true,"action":"keep"}]`,
+		"to with drop":           `[{"path":"a/**","to":"@000000a1","action":"drop"},{"default":true,"action":"keep"}]`,
+		"role_in_path with to":   `[{"role_in_path":true,"to":"@000000a1","action":"keep"},{"default":true,"action":"keep"}]`,
 		"role_in_path with drop": `[{"role_in_path":true,"action":"drop"},{"default":true,"action":"keep"}]`,
-		"bad path glob":          `[{"path":"a**/b","to":"@6fa9788a","action":"keep"},{"default":true,"action":"keep"}]`,
+		"bad path glob":          `[{"path":"a**/b","to":"@000000a1","action":"keep"},{"default":true,"action":"keep"}]`,
 		"bare @":                 `[{"path":"a/**","to":"@","action":"keep"},{"default":true,"action":"keep"}]`,
 	}
 	for name, s := range bad {
@@ -67,12 +67,12 @@ func TestParseRefusesBadRoutes(t *testing.T) {
 // The captains-log critic's set: explicit rows first, then a path that names a
 // role, then the default owner.
 const routeSet = `[{"contains":["jack via Figaro "],"action":"record"},
- {"path":["**/ebac-rework/**","**/github-cache/**","**/object-model/**","**/ebac-*.md"],"to":"@6fa9788a","action":"keep"},
- {"path":"**/decisions-minister/**","to":"@2ea091e5","action":"keep"},
+ {"path":["**/ebac-rework/**","**/github-cache/**","**/object-model/**","**/ebac-*.md"],"to":"@000000a1","action":"keep"},
+ {"path":"**/decisions-lead/**","to":"@000000a6","action":"keep"},
  {"role_in_path":true,"action":"keep"},
- {"default":true,"to":"@d407b690","action":"keep"}]`
+ {"default":true,"to":"@000000a4","action":"keep"}]`
 
-var roster = map[string]string{"flake-steward": "@9d5cda1d", "figaro-steward": "@e44cf463", "ebac-steward": "@6fa9788a"}
+var roster = map[string]string{"flake-owner": "@000000a3", "figaro-owner": "@000000a2", "ebac-owner": "@000000a1"}
 
 func routeOf(t *testing.T, rs Rules, path string) (string, model.Tier) {
 	t.Helper()
@@ -86,15 +86,15 @@ func routeOf(t *testing.T, rs Rules, path string) (string, model.Tier) {
 func TestRoutesExplicitThenRoleInPathThenDefault(t *testing.T) {
 	rs := mustParse(t, routeSet)
 	cases := map[string]string{
-		"2026/11/19/ebac-rework/PLAN.md":                  "@6fa9788a", // explicit row
-		"2026/11/19/github-cache/DESIGN.md":               "@6fa9788a",
-		"2026/11/19/ebac-journal-errors.md":               "@6fa9788a", // explicit **/ebac-*.md
-		"2026/11/17/decisions-minister/handoff-topo.md":   "@2ea091e5",
-		"2026/11/19/flake-steward/notes.md":               "@9d5cda1d", // derived: a directory names a role
-		"handoffs/figaro-steward.md":                      "@e44cf463", // derived: the file names a role
-		"2026/11/19/peers/mined.md":                       "@d407b690", // "peers" is not a role: default
-		"2026/11/19/flake-steward/ebac-rework/x.md":       "@6fa9788a", // explicit beats derived
-		"2026/11/19/figaro-steward/flake-steward/plan.md": "@9d5cda1d", // the deepest role segment wins
+		"2026/11/19/ebac-rework/PLAN.md":              "@000000a1", // explicit row
+		"2026/11/19/github-cache/DESIGN.md":           "@000000a1",
+		"2026/11/19/ebac-journal-errors.md":           "@000000a1", // explicit **/ebac-*.md
+		"2026/11/17/decisions-lead/handoff-topo.md":   "@000000a6",
+		"2026/11/19/flake-owner/notes.md":             "@000000a3", // derived: a directory names a role
+		"handoffs/figaro-owner.md":                    "@000000a2", // derived: the file names a role
+		"2026/11/19/peers/mined.md":                   "@000000a4", // "peers" is not a role: default
+		"2026/11/19/flake-owner/ebac-rework/x.md":     "@000000a1", // explicit beats derived
+		"2026/11/19/figaro-owner/flake-owner/plan.md": "@000000a3", // the deepest role segment wins
 	}
 	for path, want := range cases {
 		if got, tier := routeOf(t, rs, path); got != want || tier != model.TierWake {
@@ -105,9 +105,9 @@ func TestRoutesExplicitThenRoleInPathThenDefault(t *testing.T) {
 
 func TestRouteNoneWhenRolesUnknownFallsToDefault(t *testing.T) {
 	rs := mustParse(t, routeSet)
-	kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Tier: model.TierWake, Path: "handoffs/figaro-steward.md"}}, nil)
-	if kept[0].Route != "@d407b690" {
-		t.Fatalf("route %q, want the default @d407b690 when no role names are known", kept[0].Route)
+	kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Tier: model.TierWake, Path: "handoffs/figaro-owner.md"}}, nil)
+	if kept[0].Route != "@000000a4" {
+		t.Fatalf("route %q, want the default @000000a4 when no role names are known", kept[0].Route)
 	}
 }
 
@@ -130,11 +130,11 @@ func TestRecordRowStillWinsOverRouting(t *testing.T) {
 
 func TestRoleInPathDeepestSegmentAndFileName(t *testing.T) {
 	cases := map[string]string{
-		"handoffs/ebac-steward.md":              "@6fa9788a",
-		"a/flake-steward/b/figaro-steward/c.md": "@e44cf463",
-		"a/flake-steward.md/x.md":               "",
-		"notes/flake-steward.txt":               "",
-		"":                                      "",
+		"handoffs/ebac-owner.md":            "@000000a1",
+		"a/flake-owner/b/figaro-owner/c.md": "@000000a2",
+		"a/flake-owner.md/x.md":             "",
+		"notes/flake-owner.txt":             "",
+		"":                                  "",
 		"2026/11/19/not-a-role/also-not-a-role.md": "",
 	}
 	for p, want := range cases {
@@ -144,15 +144,15 @@ func TestRoleInPathDeepestSegmentAndFileName(t *testing.T) {
 	}
 }
 
-func TestStampRoleRoutesFindingsToTheKnightAndAnswersToThePool(t *testing.T) {
-	rs := mustParse(t, `[{"stamp_role":"reviewer","to":"@6d1ebf69","action":"wake"},
- {"stamp_role":"knight","to":"@8292f32b","action":"wake"},
+func TestStampRoleRoutesFindingsToTheBuilderAndAnswersToThePool(t *testing.T) {
+	rs := mustParse(t, `[{"stamp_role":"reviewer","to":"@000000a9","action":"wake"},
+ {"stamp_role":"builder","to":"@000000a5","action":"wake"},
  {"default":true,"action":"keep"}]`)
 	cases := map[string]string{
-		"Figaro e680885d (reviewer) ⟩ jack":                  "@6d1ebf69",
-		"Figaro aa758aa465de4f91b483184ab59a0e59 (reviewer)": "@6d1ebf69",
-		"Figaro 6d1ebf69 (knight) ⟩ jack":                    "@8292f32b",
-		"Figaro e680885d (system1-engineer) ⟩ jack":          "",
+		"Figaro 000000aa (reviewer) ⟩ jack":                  "@000000a9",
+		"Figaro aa758aa465de4f91b483184ab59a0e59 (reviewer)": "@000000a9",
+		"Figaro 000000a9 (builder) ⟩ jack":                   "@000000a5",
+		"Figaro 000000aa (system1-engineer) ⟩ jack":          "",
 		"jack ⟩ jack":                       "",
 		"Someone (reviewer) ⟩ jack":         "",
 		"Figaro zzzzzzzz (reviewer) ⟩ jack": "",
@@ -163,7 +163,7 @@ func TestStampRoleRoutesFindingsToTheKnightAndAnswersToThePool(t *testing.T) {
 			t.Errorf("%q: route %q, want %q", author, kept[0].Route, want)
 		}
 	}
-	if StampRole("Figaro e680885d (system1-engineer) ⟩ jack") != "system1-engineer" {
+	if StampRole("Figaro 000000aa (system1-engineer) ⟩ jack") != "system1-engineer" {
 		t.Errorf("digit role not read")
 	}
 }
@@ -202,8 +202,8 @@ func TestAListedStampRoleIsUnchangedBesideAStar(t *testing.T) {
  {"default":true,"action":"keep"}]`)
 	for author, want := range map[string]string{
 		"Figaro 1a2b3c4d (checker) ⟩ jack": "@first",
-		"Figaro 0f1e2d3c (builder) ⟩ jack":   "@pool",
-		"jack ⟩ jack":                       "",
+		"Figaro 0f1e2d3c (builder) ⟩ jack": "@pool",
+		"jack ⟩ jack":                      "",
 	} {
 		kept, _ := rs.Apply([]model.Event{{Kind: model.EvCommentNew, Author: author}}, nil)
 		if kept[0].Route != want {

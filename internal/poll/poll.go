@@ -765,8 +765,8 @@ func (p *Poller) MaybeArchive(ctx context.Context, w *model.Critic, snap *model.
 }
 
 // EndNotify is told of every critic's end and every advance warning, beside
-// the critic's own seat or alert role (ebac-steward, 11-19).
-var EndNotify = "@6fa9788ad194a43d9fe2e32d96b12a83"
+// the critic's own seat or alert role (ebac-owner, 11-19).
+var EndNotify = "@000000a1d194a43d9fe2e32d96b12a83"
 
 // notifyEnd sends one line to the critic's seat or alert role and to EndNotify.
 func (p *Poller) notifyEnd(ctx context.Context, w *model.Critic, msg string) {

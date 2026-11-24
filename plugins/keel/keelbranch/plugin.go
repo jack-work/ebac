@@ -48,7 +48,7 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	}
 	if err != nil {
 		// A round that could not read keel is a failure: last_success (the
-		// health the steward reads) does not move, nor does any state.
+		// health the owner reads) does not move, nor does any state.
 		w.Runtime.ConsecutiveFailures++
 		w.Runtime.LastError = err.Error()
 		rep.Error = err.Error()

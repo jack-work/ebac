@@ -7,7 +7,7 @@
 // It reads only the hub's metadata (GET /stats, /nodes, /jobs?state=..., the
 // hub's metaReaders view) and decodes only the fields it renders: never job
 // logs, outputs, artifacts, diagnostics or reasons, which can quote a log
-// (cheroot 2026-11-09). Every job field outside the meta allowlist (ids,
+// (ops 2026-11-09). Every job field outside the meta allowlist (ids,
 // states, times, counts, payload template + branch/sha/label/node) is
 // optional here: absent renders as "-".
 //

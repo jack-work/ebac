@@ -9,7 +9,7 @@ import (
 // Every authority field: a form value that differs from the trusted one is replaced and named; an equal one is not
 // named. RED if any field is read from the form again.
 func TestAuthorityApplyEveryField(t *testing.T) {
-	trusted := Authority{Source: SourceApprove, Mode: ModeReview, Write: false, Approve: false, Grant: "ebac-approve.aether", Principal: "sbx-cheroot-sec",
+	trusted := Authority{Source: SourceApprove, Mode: ModeReview, Write: false, Approve: false, Grant: "ebac-approve.aether", Principal: "sbx-ops-sec",
 		AskFrom: "8:orgid:a", Chat: "19:c", ChatAlias: "ahmed", InputsForm: "@in", BoardForm: "@board"}
 	form := &Critic{Source: SourceOrgApprove, Mode: ModeReviewer, Write: true, Approve: true, InputsForm: "@evil", BoardForm: "@evil2",
 		Requests: &ApproveWatch{Grant: "ebac-approve.org", Principal: "org-approve", AskFrom: "8:orgid:evil", Chat: "19:evil", ChatAlias: "eve"}}

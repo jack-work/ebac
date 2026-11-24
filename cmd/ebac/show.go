@@ -29,7 +29,7 @@ func cmdLs(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Always from the forms (the thinker, 11-19): the published index lagged
+	// Always from the forms (the strategist, 11-19): the published index lagged
 	// a set and the rounds (keel-review-keelpost showed END none and a stuck
 	// round while its form held with_role), and a stale ls reads as a lost
 	// update. The index stays for the roster form's studiers.

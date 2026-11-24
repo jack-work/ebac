@@ -25,7 +25,7 @@ func TestUnstampedVerdictsCountAsMissing(t *testing.T) {
 }
 
 func TestReviewStateArms(t *testing.T) {
-	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer", "warden"}}
+	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer", "gatekeeper"}}
 	open := map[string]IndexEntry{"a": {Path: "d.md"}, "b": {Path: "d.md", Resolved: true}, "c": {Path: "other.md"}}
 	closed := map[string]IndexEntry{"b": {Path: "d.md", Resolved: true}}
 	pass := Verdict{Verdict: "pass", Rev: "r2"}
@@ -36,21 +36,21 @@ func TestReviewStateArms(t *testing.T) {
 		rev      string
 		want     ReviewState
 	}{
-		{"all pass, nothing open", map[string]Verdict{"reviewer": pass, "warden": pass}, closed, "r2",
+		{"all pass, nothing open", map[string]Verdict{"reviewer": pass, "gatekeeper": pass}, closed, "r2",
 			ReviewState{State: "pass", Doc: "d.md", Rev: "r2", RevChecked: true}},
-		{"all pass but a thread open", map[string]Verdict{"reviewer": pass, "warden": pass}, open, "r2",
+		{"all pass but a thread open", map[string]Verdict{"reviewer": pass, "gatekeeper": pass}, open, "r2",
 			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Open: 1}},
 		{"one missing", map[string]Verdict{"reviewer": pass}, closed, "r2",
-			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Missing: []string{"warden"}}},
-		{"one stale", map[string]Verdict{"reviewer": pass, "warden": {Verdict: "pass", Rev: "r1"}}, closed, "r2",
-			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Stale: []string{"warden"}}},
-		{"changes wins", map[string]Verdict{"reviewer": {Verdict: "changes", Rev: "r2"}, "warden": {Verdict: "comment", Rev: "r2"}}, closed, "r2",
-			ReviewState{State: "changes", Doc: "d.md", Rev: "r2", RevChecked: true, ChangesBy: []string{"reviewer"}, Pending: []string{"warden"}}},
-		{"stale changes do not count", map[string]Verdict{"reviewer": {Verdict: "changes", Rev: "r1"}, "warden": pass}, closed, "r2",
+			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Missing: []string{"gatekeeper"}}},
+		{"one stale", map[string]Verdict{"reviewer": pass, "gatekeeper": {Verdict: "pass", Rev: "r1"}}, closed, "r2",
+			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Stale: []string{"gatekeeper"}}},
+		{"changes wins", map[string]Verdict{"reviewer": {Verdict: "changes", Rev: "r2"}, "gatekeeper": {Verdict: "comment", Rev: "r2"}}, closed, "r2",
+			ReviewState{State: "changes", Doc: "d.md", Rev: "r2", RevChecked: true, ChangesBy: []string{"reviewer"}, Pending: []string{"gatekeeper"}}},
+		{"stale changes do not count", map[string]Verdict{"reviewer": {Verdict: "changes", Rev: "r1"}, "gatekeeper": pass}, closed, "r2",
 			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Stale: []string{"reviewer"}}},
-		{"invalid verdict", map[string]Verdict{"reviewer": {Verdict: "lgtm", Rev: "r2"}, "warden": pass}, closed, "r2",
+		{"invalid verdict", map[string]Verdict{"reviewer": {Verdict: "lgtm", Rev: "r2"}, "gatekeeper": pass}, closed, "r2",
 			ReviewState{State: "waiting", Doc: "d.md", Rev: "r2", RevChecked: true, Invalid: []string{"reviewer"}}},
-		{"rev unknown fails closed", map[string]Verdict{"reviewer": pass, "warden": pass}, closed, "",
+		{"rev unknown fails closed", map[string]Verdict{"reviewer": pass, "gatekeeper": pass}, closed, "",
 			ReviewState{State: "waiting", Doc: "d.md"}},
 	}
 	for _, c := range cases {
@@ -63,7 +63,7 @@ func TestReviewStateArms(t *testing.T) {
 		t.Errorf("implicit pool passed: %+v", got)
 	}
 	// An unstamped review key never passes.
-	if got := reviewState(cfg, false, map[string]Verdict{"reviewer": pass, "warden": pass}, closed, "r2", allStamped); got.State != "waiting" || !got.ConfigUnstamped {
+	if got := reviewState(cfg, false, map[string]Verdict{"reviewer": pass, "gatekeeper": pass}, closed, "r2", allStamped); got.State != "waiting" || !got.ConfigUnstamped {
 		t.Errorf("unstamped config: %+v", got)
 	}
 	if got := reviewState(ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}}, true, map[string]Verdict{"reviewer": pass}, closed, "", allStamped); got.State != "waiting" || got.RevChecked {
@@ -77,10 +77,10 @@ func TestReviewStateArms(t *testing.T) {
 func TestReadReviewParsesAndRefuses(t *testing.T) {
 	keys := map[string]json.RawMessage{
 		keelcfg.ReviewKey:  json.RawMessage(`{"doc":"d.md","reviewers":["reviewer"]}`),
-		keelcfg.VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r2","at":"2026-11-19T20:00:00Z"},"warden":"nonsense"}`),
+		keelcfg.VerdictKey: json.RawMessage(`{"reviewer":{"verdict":"pass","rev":"r2","at":"2026-11-19T20:00:00Z"},"gatekeeper":"nonsense"}`),
 	}
 	cfg, v, ok, err := readReview(keys)
-	if err != nil || !ok || cfg.Doc != "d.md" || v["reviewer"].Rev != "r2" || v["warden"].Verdict != "unreadable" {
+	if err != nil || !ok || cfg.Doc != "d.md" || v["reviewer"].Rev != "r2" || v["gatekeeper"].Verdict != "unreadable" {
 		t.Fatalf("cfg %+v v %+v ok %v err %v", cfg, v, ok, err)
 	}
 	if _, _, ok, err := readReview(map[string]json.RawMessage{}); ok || err != nil {
@@ -114,7 +114,7 @@ func TestDocRevAsksKeelsLogForThePathOnMain(t *testing.T) {
 // roundKeys is a round's keys: a review of d.md (reviewer: reviewer), the
 // verdicts, the core's check, and the review_state now on the form.
 func roundKeys(config bool, valid bool, onForm json.RawMessage) map[string]json.RawMessage {
-	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "knight"}
+	cfg := ReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}, AuthorRole: "builder"}
 	v := Verdict{Verdict: "pass", Rev: "r9"}
 	chk := model.KeelReviewCheck{Config: config, Roles: map[string]model.KeelRoleCheck{"reviewer": {Valid: valid}}}
 	keys := map[string]json.RawMessage{

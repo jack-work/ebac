@@ -16,7 +16,7 @@ func TestCheckVerdictCountsOnlyAStampedBoundVerdictOfTheCurrentHolder(t *testing
 	key := []byte(strings.Repeat("k", 32))
 	w := &model.Critic{Name: "k", FormID: "@7d99311ef30a41de02b53090bd27a2e8", Keel: &model.KeelRef{Repo: "notes/captains-log"}}
 	cfg := model.KeelReviewConfig{Doc: "d.md", Reviewers: []string{"reviewer"}}
-	form, holder := "@8292f32b9578e0502343dbd0f6679c7c", fmt.Sprintf("%032x", 1)
+	form, holder := "@000000a59578e0502343dbd0f6679c7c", fmt.Sprintf("%032x", 1)
 	d := identity.Directory{Forms: map[string][]string{"reviewer": {form}}, Holder: map[string]string{form: holder},
 		Parent: map[string]string{holder: ""}}
 	stamped := func(mut func(v *model.KeelVerdict)) []byte {
@@ -65,8 +65,8 @@ func TestBuildDirectoryFromOneListing(t *testing.T) {
 		{ID: a(1), Kind: "conversation"},
 		{ID: a(2), Kind: "conversation", Parent: a(1)},
 		{ID: a(3), Kind: "conversation", Parent: a(1), ReapedAt: 1794900000000},
-		{ID: "@8292f32b9578e0502343dbd0f6679c7c", Kind: "form", Name: "reviewer", TargetAria: a(1)},
-		{ID: "6d1ebf6900000000000000000000000a", Kind: "form", Name: "knight", TargetAria: a(2)},
+		{ID: "@000000a59578e0502343dbd0f6679c7c", Kind: "form", Name: "reviewer", TargetAria: a(1)},
+		{ID: "000000a900000000000000000000000a", Kind: "form", Name: "builder", TargetAria: a(2)},
 		{ID: "@0000000000000000000000000000dead", Kind: "form", Name: "reviewer~moved", TargetAria: a(2)},
 		{ID: "@000000000000000000000000000000aa", Kind: "form", Name: "gone", ReapedAt: 1},
 	})
@@ -79,11 +79,11 @@ func TestBuildDirectoryFromOneListing(t *testing.T) {
 	if d.Parent[a(2)] != a(1) || len(d.Parent) != 3 {
 		t.Errorf("parents %v", d.Parent)
 	}
-	if got := d.Forms["reviewer"]; len(got) != 1 || got[0] != "@8292f32b9578e0502343dbd0f6679c7c" {
+	if got := d.Forms["reviewer"]; len(got) != 1 || got[0] != "@000000a59578e0502343dbd0f6679c7c" {
 		t.Errorf("reviewer forms %v", got)
 	}
-	if got := d.Forms["knight"]; len(got) != 1 || got[0] != "@6d1ebf6900000000000000000000000a" || d.Holder[got[0]] != a(2) {
-		t.Errorf("knight form %v holder %v", got, d.Holder)
+	if got := d.Forms["builder"]; len(got) != 1 || got[0] != "@000000a900000000000000000000000a" || d.Holder[got[0]] != a(2) {
+		t.Errorf("builder form %v holder %v", got, d.Holder)
 	}
 	if _, ok := d.Forms["reviewer~moved"]; ok || len(d.Forms["gone"]) != 0 {
 		t.Errorf("moved or reaped form named: %v", d.Forms)

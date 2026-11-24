@@ -1,4 +1,4 @@
-// Package relevance is the one PR relevance filter (cheroot work order
+// Package relevance is the one PR relevance filter (ops work order
 // 2026-11-09): a title regex and path globs. The author watch and the scout
 // both use it; a PR is relevant on a title hit or when any file it changes
 // matches a glob.

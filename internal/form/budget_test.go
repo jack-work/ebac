@@ -95,7 +95,7 @@ func TestPostKeepIsFifteenMinutes(t *testing.T) {
 	}
 }
 
-// Cheroot's control for the guard: a write leaving the state at 191 KB lands,
+// Ops's control for the guard: a write leaving the state at 191 KB lands,
 // one at 193 KB is refused, loudly, and the form keeps its last good state.
 func TestLiveBudgetGuardControl(t *testing.T) {
 	f := liveOrSkip(t)

@@ -171,7 +171,7 @@ func TestScoutSourceKeys(t *testing.T) {
 }
 
 // Live, through the core on scratch forms: the scout's entries land on its own role form, its outbox members merge
-// into the inputs form's ledger_outbox (a null removes one) without touching the steward's keys, the board is read
+// into the inputs form's ledger_outbox (a null removes one) without touching the owner's keys, the board is read
 // (prs, items) and never written, and a reply naming another inputs key is refused whole (nothing lands).
 func TestLiveScoutFormsThroughTheCore(t *testing.T) {
 	if os.Getenv("EBAC_LIVE") != "1" {

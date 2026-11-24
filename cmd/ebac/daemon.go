@@ -33,7 +33,7 @@ type DaemonConfig struct {
 	Budget budget.Config `json:"budget"`
 }
 
-// DefaultDaemonConfig: ebac's share of the GHE account (ebac-steward 11-19):
+// DefaultDaemonConfig: ebac's share of the GHE account (ebac-owner 11-19):
 // GraphQL 40 points/h, burst 10, every GitHub round defers while the account
 // has under 1000 points left; REST 600 calls/h, burst 60.
 func DefaultDaemonConfig() DaemonConfig {

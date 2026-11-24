@@ -30,7 +30,7 @@ func (c *countWriter) handle(_ context.Context, req plugin.Request) (*plugin.Rep
 
 const (
 	holderAria = "aa758aa465de4f91b483184ab59a0e59"
-	poolForm   = "@8292f32b9578e0502343dbd0f6679c7c"
+	poolForm   = "@000000a59578e0502343dbd0f6679c7c"
 )
 
 func TestRecheckKeelRolesArms(t *testing.T) {

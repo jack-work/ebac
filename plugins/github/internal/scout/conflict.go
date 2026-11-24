@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Base-head watch (Minister 11-12): a merge into a PR's base branch does not bump the PR's updatedAt, so the
+// Base-head watch (Lead 11-12): a merge into a PR's base branch does not bump the PR's updatedAt, so the
 // incremental search never re-reads it, and the conflict that merge caused went unseen (#108680, 11-12). Each pass
 // reads the head of every distinct base ref of the tracked open PRs (one aliased query, refs only). For the PRs whose
 // base head moved, and those still recomputing from an earlier move, it reads only mergeable + mergeStateStatus

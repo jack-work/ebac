@@ -161,7 +161,7 @@ func TestSourceKeysOnly(t *testing.T) {
 	}
 	// The roster's role:<name> pattern: one more segment, no dots or stars.
 	ros := &plugin.Reply{}
-	for _, k := range []string{"role:cheroot-boss", "role:loner%2Ev2", "forks", "updated"} {
+	for _, k := range []string{"role:ops-lead", "role:loner%2Ev2", "forks", "updated"} {
 		ros.SetKey(k, "x")
 	}
 	ros.Unset = []string{"role:gone"}

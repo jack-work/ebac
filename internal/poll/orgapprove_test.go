@@ -10,7 +10,7 @@ import (
 )
 
 var orgCritic = &model.Critic{Name: "oa", Source: model.SourceOrgApprove, InputsForm: "@board",
-	OrgApprove: &model.OrgApproveWatch{PingTo: "@d407b690"}}
+	OrgApprove: &model.OrgApproveWatch{PingTo: "@000000a4"}}
 
 // org-approve writes only q.oa-* asker fields on its board, pings only its
 // configured role, and sets no key on its own role form.
@@ -42,7 +42,7 @@ func TestValidateOrgApproveWrites(t *testing.T) {
 	if err := ValidateForms(&noBoard, &plugin.Reply{Forms: []plugin.FormWrite{ok}}); err == nil {
 		t.Error("a write without a board was not refused")
 	}
-	if err := ValidatePings(orgCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@d407b690", Text: "asked"}}}); err != nil {
+	if err := ValidatePings(orgCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@000000a4", Text: "asked"}}}); err != nil {
 		t.Fatalf("the configured ping refused: %v", err)
 	}
 	if err := ValidatePings(orgCritic, &plugin.Reply{Pings: []plugin.Ping{{To: "@aaaaaaaa", Text: "asked"}}}); err == nil {
@@ -56,7 +56,7 @@ func TestValidateOrgApproveWrites(t *testing.T) {
 // The merge keeps the Boss's fields and every other asker's q; a q that is
 // not an object is never clobbered; an unchanged write is no write.
 func TestMergeAsksKeepsTheBossAndOtherAskers(t *testing.T) {
-	cur := raw(`{"go-7":{"ask":"cheroot's","answer":"GO"},"oa-1-aaaaaaa":{"ask":"a","status":"open","answer":"approve","elaborate":"why"}}`)
+	cur := raw(`{"go-7":{"ask":"ops's","answer":"GO"},"oa-1-aaaaaaa":{"ask":"a","status":"open","answer":"approve","elaborate":"why"}}`)
 	set, _ := mergeAsks(cur, map[string]map[string]json.RawMessage{
 		"oa-1-aaaaaaa": {"status": raw(`"done"`), "resolved": raw(`"approved"`)},
 		"oa-2-bbbbbbb": {"ask": raw(`"b"`), "status": raw(`"open"`)},

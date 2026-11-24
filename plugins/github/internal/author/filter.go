@@ -13,7 +13,7 @@ import (
 	"github.com/gluck/ebac/sdk/relevance"
 )
 
-// The relevance filter (cheroot work order 2026-11-09, Boss via the Minister:
+// The relevance filter (ops work order 2026-11-09, Boss via the Lead:
 // only Chiqun's PRs related to the effort work). A PR in the recent window is
 // TRACKED when its title matches title_match OR any file it changes matches
 // one of paths; neither key tracks every PR. An untracked PR never wakes and

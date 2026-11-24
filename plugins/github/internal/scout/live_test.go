@@ -185,7 +185,7 @@ func TestLiveIssueChangeRecordedForOwner(t *testing.T) {
 		Holder:  func(context.Context, string) bool { return true }}
 	is := wd.gh.items[301]
 
-	is.body, is.editor, is.updated = strings.Replace(is.body, "Plan: owner Knight.", "Plan: owner Knight, re-synced.", 1), who(ours), now.Add(time.Minute)
+	is.body, is.editor, is.updated = strings.Replace(is.body, "Plan: owner Builder.", "Plan: owner Builder, re-synced.", 1), who(ours), now.Add(time.Minute)
 	now = now.Add(2 * time.Minute)
 	if err := p.Poll(ctx, name); err != nil {
 		t.Fatalf("sync pass: %v\n%s", err, out.String())
@@ -202,7 +202,7 @@ func TestLiveIssueChangeRecordedForOwner(t *testing.T) {
 	}
 	keys, _, _ = f.FormRaw(ctx, role)
 	got := string(keys["quiet_pings"])
-	if len(sent) != 0 || strings.Count(got, "scout: issue #301") != 3 || !strings.Contains(got, knight) || !strings.Contains(got, "comment by alice") {
+	if len(sent) != 0 || strings.Count(got, "scout: issue #301") != 3 || !strings.Contains(got, builder) || !strings.Contains(got, "comment by alice") {
 		t.Fatalf("human comment: sent %q, quiet_pings %s\n%s", sent, got, out.String())
 	}
 }

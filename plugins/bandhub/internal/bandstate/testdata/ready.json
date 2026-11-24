@@ -63,7 +63,7 @@
     "label": "figaro outfits by section + succession-standard (Boss) + var",
     "needs_go": "",
     "sha": "b6252ef902b07aaa6ebbaeeee0421f28497eea57",
-    "why": "cheroot ORDER (Boss 11-09): uniform succession policy; outfits reorganised (figaro resolves nested by basename)",
+    "why": "ops ORDER (Boss 11-09): uniform succession policy; outfits reorganised (figaro resolves nested by basename)",
     "worker_change": false
    },
    "template": "gate.change"
@@ -82,7 +82,7 @@
    "lane": null,
    "last_renewed_by": null,
    "left_s": 258822.318,
-   "owner": "@d407b690",
+   "owner": "@000000a4",
    "owner_unreachable": false,
    "renewals": 0,
    "source": null,
@@ -198,7 +198,7 @@
   "payload": {
    "params": {
     "expect_d_equal": true,
-    "label": "comments: cheroot-style -> cheroot-web",
+    "label": "comments: ops-style -> ops-web",
     "needs_go": "",
     "sha": "76dbd0f737fa0abbae35e359c92ba1e351c8fdf3",
     "why": "role reduction W2 (facilitator 425f965e): owner comments only, D equal",
@@ -244,7 +244,7 @@
   "payload": {
    "params": {
     "expect_d_equal": false,
-    "label": "role reduction: aether-steward -> cowork-leader",
+    "label": "role reduction: aether-owner -> cowork-leader",
     "needs_go": "",
     "sha": "f2cbc2215aeeaafa8d1617fdc99023aabd7bcb3b",
     "why": "Boss 11-09 role reduction W5: daily Aether result goes to cowork-leader; remove the per-role succession enforcer timer (it would fork the leader at turn 2).",
@@ -336,7 +336,7 @@
   "payload": {
    "params": {
     "expect_d_equal": true,
-    "label": "comments: captains-log owner -> figaro-steward (role reducti",
+    "label": "comments: captains-log owner -> figaro-owner (role reducti",
     "needs_go": "",
     "sha": "3f042bb69a505bf0fe26d48a70a46bd8ae197d23",
     "why": "",
@@ -385,7 +385,7 @@
     "label": "keel-ebac-door: forward GET /api/v1/r/<id>/events",
     "needs_go": "",
     "sha": "d1885f8767404b9676cf52715ab684b41fa6e7d3",
-    "why": "cheroot GO-20261105-ebac-keel-threads extended 11-09: door also forwards read-only events for the same declared ids; events upstream timeout 90s (keel-feed long-polls 30s). Toy 29/29; old door fails events cases; timeout-30 mutant fails only the long-poll.",
+    "why": "ops order extended 11-09: door also forwards read-only events for the same declared ids; events upstream timeout 90s (keel-feed long-polls 30s). Toy 29/29; old door fails events cases; timeout-30 mutant fails only the long-poll.",
     "worker_change": false
    },
    "template": "gate.change"
