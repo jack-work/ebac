@@ -96,10 +96,19 @@ MUTANTS=(
   "S57|$G/ghcache.go|		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))|		stuck := e.Unsettled|./$G/"
   "S58|$G/config.go|	UnknownEvery = time.Hour|	UnknownEvery = 2 * time.Hour|./$G/"
   "S59|$G/query.go|			if s.Count > 0 {|			if true {|./$G/"
+  "T1|internal/otel/otel.go|			p.value += m.Value|			p.value = m.Value|./internal/otel/"
+  "T2|internal/otel/otel.go|		if p.critic != critic {|		if false {|./internal/otel/"
+  "T4|internal/poll/poll.go|	if len(rep.Telemetry) > MaxTelemetry {|	if false {|./internal/poll/"
+  "T5|internal/poll/poll.go|		p.export(ctx, w, rep)|		_ = rep|./internal/poll/"
+  "T6|$G/telemetry.go|	case marked && m != e.Mark:|	case false:|./$G/"
+  "T7|$G/telemetry.go|		d.Why, d.Moved = \"mark\", markMoved(e.Mark, m)|		d.Why = \"mark\"|./$G/"
+  "T8|$G/telemetry.go|		if inSearch[ChildKey(ref.Repo, ref.N)] {|		if inSearch[ChildKey(ref.Repo, ref.N)] && false {|./$G/"
+  "T9|$G/ghcache.go|			redoBecause(k, e, \"pending-write\")|			redoBecause(k, e, \"form-edit\")|./$G/"
+  "T10|$G/sync.go|	s.log = append(s.log, w)|	_ = w|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
-for pk in ./internal/poll/ ./internal/pluginrun/ ./internal/form/ ./$G/ ./plugins/github/internal/github/ ./sdk/forge/ ./sdk/model/; do
+for pk in ./internal/poll/ ./internal/otel/ ./internal/pluginrun/ ./internal/form/ ./$G/ ./plugins/github/internal/github/ ./sdk/forge/ ./sdk/model/; do
   mod=.; p=$pk
   case $pk in ./plugins/github/*) mod=plugins/github; p=./${pk#./plugins/github/};; ./sdk/*) mod=sdk; p=./${pk#./sdk/};; esac
   if ! out=$(cd "$mod" && go test -count=1 "$p" 2>&1); then
@@ -128,5 +137,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 84 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 93 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad

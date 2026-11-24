@@ -220,6 +220,11 @@ type Reply struct {
 	// Log lines go to the core's output, prefixed by nothing.
 	Log []string `json:"log,omitempty"`
 
+	// Telemetry is the round's record (one JSON object, at most
+	// MaxTelemetry bytes): the core exports it over OTLP (a log record, and
+	// the metrics its "metrics" member names).
+	Telemetry json.RawMessage `json:"telemetry,omitempty"`
+
 	// Spend is what the round spent on the critic's credential, by limit
 	// ("graphql" points, "rest" calls): the core settles its budget with it.
 	// A plugin that reports none settles at nothing spent.

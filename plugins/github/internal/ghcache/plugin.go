@@ -63,9 +63,20 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 		rep.Logf("%s: %s", w.Name, l)
 	}
 	if sp, ok := gh.(interface{ Spent() forge.Spend }); ok {
-		rep.Logf("%s: cost: %s", w.Name, sp.Spent()) // also when the round failed
-		rep.Spend = sp.Spent().Budget()
+		s := sp.Spent()
+		rep.Logf("%s: cost: %s", w.Name, s) // also when the round failed
+		rep.Spend = s.Budget()
+		r.Telemetry.GraphQL = &Cost{Calls: s.Calls, Points: s.Points, Left: s.Remaining}
+		r.Telemetry.RESTCalls = s.All - s.Calls
 	}
+	if err != nil {
+		r.Telemetry.Error = cut(err.Error(), 300)
+	}
+	if r.Telemetry.At == "" {
+		r.Telemetry.At = now().UTC().Format(time.RFC3339)
+	}
+	r.Telemetry.metrics()
+	rep.Telemetry = model.MustJSON(r.Telemetry)
 	if err != nil {
 		return fail(err)
 	}

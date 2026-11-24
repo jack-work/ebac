@@ -13,6 +13,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/form"
 	"github.com/gluck/ebac/internal/identity"
+	"github.com/gluck/ebac/internal/otel"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
 )
@@ -52,6 +53,9 @@ type Poller struct {
 	// OnSpend, when set, receives what each plugin call spent (ebacd settles
 	// the budget ledger with it; a poll by hand leaves it nil).
 	OnSpend func(spent []model.Spend)
+	// OTel, when set, receives each round's plugin record (Reply.Telemetry)
+	// and exports it over OTLP (ebacd; nil exports nothing).
+	OTel *otel.Exporter
 	// Roles replaces the role-name lookup for trigger role_in_path in tests
 	// (nil: RoleNames, read from the roster critic's form).
 	Roles func(ctx context.Context) (map[string]string, error)
@@ -71,6 +75,9 @@ func (p *Poller) call(ctx context.Context, w *model.Critic, req plugin.Request) 
 	rep, err := p.Plugins.Call(ctx, name, req)
 	if rep != nil && p.OnSpend != nil && len(rep.Spend) > 0 {
 		p.OnSpend(rep.Spend)
+	}
+	if rep != nil {
+		p.export(ctx, w, rep)
 	}
 	return rep, err
 }
@@ -306,6 +313,27 @@ func SourceKeysOnly(source string, rep *plugin.Reply) error {
 	}
 	return nil
 }
+
+// export sends the round's record over OTLP; a failure is said, never fails
+// the round.
+func (p *Poller) export(ctx context.Context, w *model.Critic, rep *plugin.Reply) {
+	if p.OTel == nil || len(rep.Telemetry) == 0 {
+		return
+	}
+	if len(rep.Telemetry) > MaxTelemetry {
+		fmt.Fprintf(p.Out, "%s: telemetry record of %d bytes over %d: not exported\n", w.Name, len(rep.Telemetry), MaxTelemetry)
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := p.OTel.Export(ctx, otel.Round{Critic: w.Name, Source: w.SourceName(), Start: w.Runtime.LastPolled, End: time.Now().UTC(),
+		Record: rep.Telemetry, Error: rep.Error}); err != nil {
+		fmt.Fprintf(p.Out, "%s: telemetry export: %v\n", w.Name, err)
+	}
+}
+
+// MaxTelemetry caps one round's telemetry record.
+const MaxTelemetry = 64 * 1024
 
 // apply lands one round's reply. saved: the critic (its runtime: a
 // two-phase source's prepared records) reached the store, the durable write

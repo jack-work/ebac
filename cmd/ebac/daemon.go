@@ -17,6 +17,7 @@ import (
 	"github.com/gluck/ebac/internal/figaro"
 	"github.com/gluck/ebac/internal/fleet"
 	"github.com/gluck/ebac/internal/form"
+	"github.com/gluck/ebac/internal/otel"
 	"github.com/gluck/ebac/internal/poll"
 	"github.com/gluck/ebac/internal/sched"
 	"github.com/gluck/ebac/internal/systemd"
@@ -125,7 +126,8 @@ func cmdDaemon(ctx context.Context, g globals, args []string) error {
 
 	guard := &figaroGuard{reset: st.Fig.Close}
 	var fatal error
-	base := poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, GH: g.gh, Host: g.host, BackoffDir: st.Root}
+	base := poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, GH: g.gh, Host: g.host, BackoffDir: st.Root,
+		OTel: otel.New(os.Getenv("EBAC_OTLP_ENDPOINT"))} // the node's agent, e.g. http://127.0.0.1:4318; unset exports nothing
 	s := &sched.Scheduler{
 		List: func(ctx context.Context) ([]*model.Critic, error) {
 			ws, err := st.ListCritics(ctx)

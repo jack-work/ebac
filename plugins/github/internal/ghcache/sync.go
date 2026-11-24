@@ -269,6 +269,8 @@ type syncer struct {
 	raised   []string // this round's new alarms: "<key> <kind>.<field>: detail"
 	logf     func(string, ...any)
 	children map[string]string
+	cur      string     // the entity being synced (telemetry)
+	log      []WriteRec // this round's GitHub writes (telemetry)
 }
 
 func (s *syncer) alarm(k string, e *Entity, kind, field, detail string, base, form, gh any) {
@@ -416,10 +418,16 @@ func (s *syncer) readFresh(repo, node string, threads, add []string) (*fresh, er
 	return f, nil
 }
 
-// mutate sends one write, counted against MaxWrites.
+// mutate sends one write, counted against MaxWrites, and records it.
 func (s *syncer) mutate(q string, vars map[string]string) (json.RawMessage, error) {
 	s.writes++
-	return s.gh.Mutate(s.ctx, q, vars)
+	data, err := s.gh.Mutate(s.ctx, q, vars)
+	w := WriteRec{PR: s.cur, Mutation: mutationName(q), OK: err == nil}
+	if err != nil {
+		w.Error = cut(err.Error(), 200)
+	}
+	s.log = append(s.log, w)
+	return data, err
 }
 
 func quoteIDs(ids []string) string {
@@ -442,6 +450,7 @@ func refusedByGitHub(err error) bool {
 // (the caller sets e.Pend.RO from the gh as written), and returns notes for
 // sync.errors.
 func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []string) {
+	s.cur = k
 	var notes []string
 	G := g // GitHub's, untouched
 	out := g

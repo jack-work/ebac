@@ -105,6 +105,8 @@ type Result struct {
 	Track map[string]Track
 	Pings []plugin.Ping
 	Log   []string
+	// Telemetry is the round's record (telemetry.go).
+	Telemetry Telemetry
 }
 
 // Track is one line of the register's index (role form key track).
@@ -176,13 +178,27 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// an entity written but not among the core's children was never minted.
 	// Both are read and written again. A child the core holds that the
 	// cache no longer tracks (a retire that did not land) is retired again.
+	// why is each entity's reason to be read deep this round (telemetry):
+	// the first reason set wins.
+	why := map[string]string{}
+	for k, e := range ents {
+		if e.Redo {
+			why[k] = "retry" // the last round's deep read failed or its write did not land
+		}
+	}
+	redoBecause := func(k string, e *Entity, reason string) {
+		e.Redo = true
+		if why[k] == "" || why[k] == "retry" {
+			why[k] = reason
+		}
+	}
 	unlanded := map[string]bool{}
 	if p.Landed < len(prev.Wrote) {
 		logf("%d of %d form write(s) of the last round did not land: redone", len(prev.Wrote)-p.Landed, len(prev.Wrote))
 		for _, k := range prev.Wrote[p.Landed:] {
 			unlanded[k] = true
 			if e := ents[k]; e != nil {
-				e.Redo = true
+				redoBecause(k, e, "unlanded")
 				e.Digest = "" // what was sent never landed: the rewrite must not be skipped as unchanged
 			}
 		}
@@ -207,7 +223,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	}
 	for k, e := range ents {
 		if _, ok := p.Children[k]; !ok && e.Digest != "" && !e.Redo {
-			e.Redo = true
+			redoBecause(k, e, "unminted")
 		}
 	}
 	for k := range p.Children {
@@ -445,19 +461,22 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 				_, field, _ := strings.Cut(key, ".")
 				delete(e.Conflicts, field)
 				delete(e.Tries, field)
-				e.Redo, forced[k] = true, true
+				redoBecause(k, e, "ack")
+				forced[k] = true
 				logf("%s: sync.alarm.%s acked: cleared", k, key)
 			}
 		}
 		switch {
 		case fv.bad != nil:
-			e.Redo = true
+			redoBecause(k, e, "unparseable")
 		case fv.gh != nil && e.Base == nil:
 			// No base yet (a form written before the write path): read it
 			// deep now, so a base is agreed within one round of the rollout.
-			e.Redo = true
-		case fv.gh != nil && (pending(fv.gh, e.Base) || (e.RO != "" && roHash(fv.gh) != e.RO) || len(fv.unknown) > 0):
-			e.Redo = true
+			redoBecause(k, e, "no-base")
+		case fv.gh != nil && pending(fv.gh, e.Base):
+			redoBecause(k, e, "pending-write")
+		case fv.gh != nil && ((e.RO != "" && roHash(fv.gh) != e.RO) || len(fv.unknown) > 0):
+			redoBecause(k, e, "form-edit")
 		}
 	}
 
@@ -469,6 +488,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		stuck := e.Unsettled && !now.Before(e.DeepAt.Add(UnknownEvery))
 		if moved[k] || e.Redo || (ok && (e.DeepAt.IsZero() || m != e.Mark || stuck)) {
 			deep = append(deep, Ref{e.Repo, e.N})
+			r.Telemetry.Deep = append(r.Telemetry.Deep, deepWhy(k, e, moved[k], why[k], ok, m, stuck))
 		}
 	}
 	sort.Slice(deep, func(i, j int) bool {
@@ -572,6 +592,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		r.Track[fmt.Sprintf("%s#%d", e.Repo, e.N)] = Track{Form: k, Rule: e.Rule, Tier: e.Tier, Since: e.Since.Format(time.RFC3339), State: st}
 	}
 	r.Pings = sy.pings(p.Critic)
+	r.Telemetry.finish(now, len(ents), len(due), doSearch, inSearch, due, r.Forms, sy)
 	sort.Slice(r.Forms, func(i, j int) bool { return r.Forms[i].Key < r.Forms[j].Key })
 	for _, f := range r.Forms {
 		r.State.Wrote = append(r.State.Wrote, f.Key)
