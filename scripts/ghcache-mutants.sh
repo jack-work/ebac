@@ -127,6 +127,17 @@ MUTANTS=(
   "I19|$G/ghcache.go|partial := t.Comments.TotalCount > len(t.Comments.Nodes)|partial := false|./$G/"
   "I20|$G/ghcache.go|dropOldest(&g.Comments, func(c CachedComment) bool { return !isOurs(c) }, fits)|_ = fits|./$G/"
   "I21|$G/ghcache.go|					kind = KindIssue|					kind = KindPR|./$G/"
+  # #64 comment_edit (augustine L2).
+  "E1|$G/comment_edit.go|		case ours == \"\" \|\| strings.ToLower(g.Author) != ours:|		case ours == \"\" && false:|./$G/"
+  "E2|$G/comment_edit.go|		case !c.Mine:|		case false:|./$G/"
+  "E3|$G/comment_edit.go|			} else if why := disclose.Disclosure(f.Body); why != \"\" {|			} else if why := disclose.Disclosure(\"\"); why != \"\" {|./$G/"
+  "E4|$G/comment_edit.go|		case hash12(g.Body) != bh:|		case false:|./$G/"
+  "E5|$G/comment_edit.go|		case c.Body != w.base:|		case false:|./$G/"
+  "E6|$G/comment_edit.go|			if why := auth(model.FieldCommentEdit); why != \"\" {|			if why := \"\"; why != \"\" {|./$G/"
+  "E7|$G/comment_edit.go|		case g.Cut \|\| f.Cut:|		case false:|./$G/"
+  "E8|$G/comment_edit.go|		case c.Number != e.N:|		case false:|./$G/"
+  "E9|$G/sync.go|	c.Comments = noBodies(g.Comments)|	_ = noBodies|./$G/"
+  "E10|$G/comment_edit.go|	next.Comments[id] = hash12(body)|	_ = body|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
@@ -159,5 +170,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 114 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 124 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad
