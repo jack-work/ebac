@@ -37,10 +37,14 @@ const (
 	FieldThreadResolve = "thread_resolve"
 	FieldLabels        = "labels"
 	FieldDraft         = "draft"
+	// FieldCommentEdit edits, in place on the entity form, the body of a
+	// comment or review comment the account itself wrote (GitHub's
+	// viewerDidAuthor, read right before the write).
+	FieldCommentEdit = "comment_edit"
 )
 
 // GHWriteFields is the closed set of write fields.
-var GHWriteFields = []string{FieldThreadReply, FieldThreadResolve, FieldLabels, FieldDraft}
+var GHWriteFields = []string{FieldThreadReply, FieldThreadResolve, FieldLabels, FieldDraft, FieldCommentEdit}
 
 // GHEntity is what a write's authorization looks at: the entity's repo,
 // kind (pr | issue), number and author, and for an issue the PRs that fix it

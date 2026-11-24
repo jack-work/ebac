@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
@@ -68,6 +69,8 @@ type Base struct {
 	Labels   []string `json:"labels"`
 	Draft    bool     `json:"draft"`
 	Resolved []string `json:"resolved,omitempty"` // ids of the threads resolved
+	// Comments: comment node id -> hash12 of its body as agreed (comment_edit).
+	Comments map[string]string `json:"comments,omitempty"`
 }
 
 // Agreed is a round's base and read-only hash, kept pending until the write
@@ -86,10 +89,11 @@ type Agreed struct {
 // Labels are the labels this round added and removed, never GitHub's whole
 // set: a label added upstream meanwhile is not ours to promote.
 type Pushed struct {
-	Added    []string `json:"added,omitempty"`
-	Removed  []string `json:"removed,omitempty"`
-	Draft    *bool    `json:"draft,omitempty"`
-	Resolved []string `json:"resolved,omitempty"`
+	Added    []string          `json:"added,omitempty"`
+	Removed  []string          `json:"removed,omitempty"`
+	Draft    *bool             `json:"draft,omitempty"`
+	Resolved []string          `json:"resolved,omitempty"`
+	Comments map[string]string `json:"comments,omitempty"` // id -> hash12 of the body written
 }
 
 // onto is b with the pushed fields applied.
@@ -105,6 +109,14 @@ func (p *Pushed) onto(b Base) Base {
 	}
 	if len(p.Resolved) > 0 {
 		b.Resolved = sortedSet(append(slices.Clone(b.Resolved), p.Resolved...))
+	}
+	if len(p.Comments) > 0 {
+		c := maps.Clone(b.Comments)
+		if c == nil {
+			c = map[string]string{}
+		}
+		maps.Copy(c, p.Comments)
+		b.Comments = c
 	}
 	return b
 }
@@ -191,18 +203,26 @@ func baseOf(g *GH) Base {
 		}
 	}
 	sort.Strings(b.Resolved)
+	for id, c := range allComments(g) {
+		if b.Comments == nil {
+			b.Comments = map[string]string{}
+		}
+		b.Comments[id] = hash12(c.Body)
+	}
 	return b
 }
 
 // roOf is gh without its write fields (labels, draft, thread resolved and
-// replies), for the read-only check.
+// replies, comment bodies), for the read-only check.
 func roOf(g *GH) GH {
 	c := *g
 	c.Labels, c.Draft = nil, false
+	c.Comments = noBodies(g.Comments)
 	if g.Threads != nil {
 		c.Threads = map[string]Thread{}
 		for id, t := range g.Threads {
 			t.Resolved, t.Replies = false, nil
+			t.Comments = noBodies(t.Comments)
 			c.Threads[id] = t
 		}
 	}
@@ -219,6 +239,11 @@ func pending(f *GH, b *Base) bool {
 	}
 	for id, t := range f.Threads {
 		if len(t.Replies) > 0 || t.Resolved != slices.Contains(b.Resolved, id) {
+			return true
+		}
+	}
+	for id, c := range allComments(f) {
+		if h, ok := b.Comments[id]; ok && h != hash12(c.Body) {
 			return true
 		}
 	}
@@ -475,13 +500,18 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 	next := baseOf(&G)
 	ent := model.GHEntity{Repo: e.Repo, Kind: KindPR, N: e.N, Author: g.Author}
 	auth := func(field string) string {
-		if e.Kind == KindIssue {
-			// #45 reads issues; their writes (title, body, comments,
-			// labels) come with the issue write path (#71 A2/#64).
+		if e.Kind == KindIssue && field != model.FieldCommentEdit {
+			// #45 reads issues; their other writes (title, body, labels)
+			// come with the issue write path (#71 A2).
 			return "issue writes are not built yet: the form's edit is not written"
 		}
 		if s.p.Auth == nil {
 			return "no write authority"
+		}
+		if e.Kind == KindIssue {
+			ie := ent
+			ie.Kind = KindIssue
+			return s.p.Auth(ie, field)
 		}
 		return s.p.Auth(ent, field)
 	}
@@ -671,6 +701,7 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 			}
 		}
 	}
+	s.commentEdits(k, e, G, F, B, &out, &next, auth)
 	e.Pend = &Agreed{Base: next, Pushed: e.pushing} // RO: the caller's, from the gh as written
 	e.pushing = nil
 	return out, notes

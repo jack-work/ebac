@@ -40,7 +40,7 @@ func TestAuthorizeGHWriteEveryClause(t *testing.T) {
 		{"an issue our PR fixes", scopedCritic(), GHEntity{Repo: "acme/widget", Kind: "issue", N: 9, FixedBy: map[string]string{"acme/widget#7": "our-author"}}, FieldLabels, ""},
 		{"read-only critic", readOnly, pr("acme/widget", 7, "our-author"), FieldLabels, "this critic is read-only: write comes from ebac's trusted config (authority.write), not from its form"},
 		{"no trusted scope", noScope, pr("acme/widget", 7, "our-author"), FieldLabels, "no trusted write scope (authority.scope): nothing is written"},
-		{"unknown field", scopedCritic(), pr("acme/widget", 7, "our-author"), "title", `field "title" is not a write field (thread_reply, thread_resolve, labels, draft)`},
+		{"unknown field", scopedCritic(), pr("acme/widget", 7, "our-author"), "title", `field "title" is not a write field (thread_reply, thread_resolve, labels, draft, comment_edit)`},
 		{"field not in write_fields", fewer, pr("acme/widget", 7, "our-author"), FieldLabels, "field labels is not in the trusted write_fields"},
 		{"another repo", scopedCritic(), pr("acme/other", 7, "our-author"), FieldLabels, "repo acme/other is outside the trusted scope"},
 		{"another author", scopedCritic(), pr("acme/widget", 8, "stranger"), FieldLabels, "acme/widget#8 (author stranger) is outside the trusted scope"},
