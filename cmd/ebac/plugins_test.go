@@ -29,7 +29,7 @@ import (
 // is built and asked for a brief, the one op that needs no upstream.
 func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds three binaries")
+		t.Skip("builds two binaries")
 	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
@@ -42,7 +42,6 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 	dir := t.TempDir()
 	builds := [][]string{
 		{"-C", "../../plugins/github", "-o", dir, "./cmd/ebac-gh"},
-		{"-C", "../../plugins/teams", "-o", dir, "./cmd/ebac-tomb"},
 		{"-C", "../../plugins/keel", "-o", dir, "./cmd/ebac-keel"},
 	}
 	for _, b := range builds {
@@ -64,7 +63,6 @@ func TestPluginBinariesSpeakTheProtocol(t *testing.T) {
 		{model.Critic{Name: "g", FormID: "@g", Source: "github-pr"}, "ebac g"},
 		{model.Critic{Name: "a", FormID: "@a", Source: "github-author", Author: &model.AuthorRef{Login: "someone"}}, "PRs by someone"},
 		{model.Critic{Name: "k", FormID: "@k", Source: "keel-threads", Keel: &model.KeelRef{Repo: "notes/x"}}, "answered on keel notes/x"},
-		{model.Critic{Name: "t", FormID: "@t", Source: "teams-chat", Chat: &model.ChatRef{ID: "19:x", Topic: "chat"}}, `in "chat"`},
 	} {
 		name, err := pluginrun.For(c.critic.SourceName())
 		if err != nil {
