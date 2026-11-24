@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	plugin.Serve(func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	plugin.Serve(plugin.Info{Name: "keel", Sources: []string{"keel-threads", model.SourceKeelBranches}}, func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 		if req.Critic.SourceName() == model.SourceKeelBranches {
 			return keelbranch.Plugin{}.Handle(ctx, req)
 		}

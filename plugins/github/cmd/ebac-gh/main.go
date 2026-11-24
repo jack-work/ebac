@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	plugin.Serve(func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	plugin.Serve(plugin.Info{Name: "gh", Sources: []string{"github-pr", "github-author", model.SourceReleases, model.SourceScout, model.SourceGHCache}}, func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 		if req.Critic.SourceName() == model.SourceScout {
 			return scout.Plugin{}.Handle(ctx, req)
 		}

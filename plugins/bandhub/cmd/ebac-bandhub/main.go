@@ -8,4 +8,6 @@ import (
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
-func main() { plugin.Serve(bandstate.Plugin{}.Handle) }
+func main() {
+	plugin.Serve(plugin.Info{Name: "bandhub", Sources: []string{"band-hub"}}, bandstate.Plugin{}.Handle)
+}

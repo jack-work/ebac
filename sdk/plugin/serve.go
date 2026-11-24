@@ -31,33 +31,43 @@ func Decode(plugin string, op Op, b []byte) (*Reply, error) {
 		return nil, fmt.Errorf("plugin %s %s: bad reply: %w", plugin, op, err)
 	}
 	if rep.Protocol != Version {
-		return nil, fmt.Errorf("plugin %s %s: protocol %d, want %d", plugin, op, rep.Protocol, Version)
+		return nil, fmt.Errorf("plugin %s %s: speaks protocol %d.%d, this ebac speaks %d.%d", plugin, op, rep.Protocol, rep.ProtocolMinor, Version, Minor)
 	}
 	return &rep, nil
 }
 
 // Serve is a plugin's main: read one Request from stdin, run h, write one
 // Reply to stdout. A handler error goes to stderr with exit status 1.
-func Serve(h Handler) {
-	if err := serve(context.Background(), h, os.Stdin, os.Stdout); err != nil {
+// Info is what a plugin says of itself in the handshake: its name (the exe is
+// ebac-<name>) and the critic sources it serves. It must match its manifest.
+type Info struct {
+	Name    string
+	Sources []string
+}
+
+func Serve(info Info, h Handler) {
+	if err := serve(context.Background(), info, h, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", filepath.Base(os.Args[0]), err)
 		os.Exit(1)
 	}
 }
 
-func serve(ctx context.Context, h Handler, in io.Reader, out io.Writer) error {
+func serve(ctx context.Context, info Info, h Handler, in io.Reader, out io.Writer) error {
 	var req Request
 	if err := json.NewDecoder(in).Decode(&req); err != nil {
 		return fmt.Errorf("bad request: %w", err)
 	}
 	if req.Protocol != Version {
-		return fmt.Errorf("protocol %d, this plugin speaks %d", req.Protocol, Version)
+		return fmt.Errorf("the core speaks protocol %d.%d, this plugin speaks %d.%d", req.Protocol, req.ProtocolMinor, Version, Minor)
+	}
+	if req.Op == OpHello {
+		return json.NewEncoder(out).Encode(&Reply{Protocol: Version, ProtocolMinor: Minor, Name: info.Name, Sources: info.Sources})
 	}
 	rep, err := h(ctx, req)
 	if err != nil {
 		return err
 	}
-	rep.Protocol = Version
+	rep.Protocol, rep.ProtocolMinor = Version, Minor
 	return json.NewEncoder(out).Encode(rep)
 }
 
@@ -70,13 +80,13 @@ func (p InProc) Call(ctx context.Context, plugin string, req Request) (*Reply, e
 	if !ok {
 		return nil, fmt.Errorf("plugin %s: not found", plugin)
 	}
-	req.Protocol = Version
+	req.Protocol, req.ProtocolMinor = Version, Minor
 	in, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
 	var out bytes.Buffer
-	if err := serve(ctx, h, bytes.NewReader(in), &out); err != nil {
+	if err := serve(ctx, Info{Name: plugin}, h, bytes.NewReader(in), &out); err != nil {
 		return nil, fmt.Errorf("plugin %s %s: %w", plugin, req.Op, err)
 	}
 	return Decode(plugin, req.Op, out.Bytes())

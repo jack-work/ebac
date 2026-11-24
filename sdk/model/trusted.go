@@ -134,7 +134,7 @@ func (t Trusted) Apply(w *Critic) []string {
 // nonForge: sources that read no forge (their host stays empty).
 func nonForge(w *Critic) bool {
 	switch w.SourceName() {
-	case "teams-chat", "keel-threads", SourceKeelBranches, SourceRoster:
+	case "teams-chat", SourceTeamsLive, "keel-threads", SourceKeelBranches, SourceRoster:
 		return true
 	}
 	return false

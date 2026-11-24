@@ -7,4 +7,6 @@ import (
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
-func main() { plugin.Serve(teams.Plugin{}.Handle) }
+func main() {
+	plugin.Serve(plugin.Info{Name: "tomb", Sources: []string{"teams-chat"}}, teams.Plugin{}.Handle)
+}

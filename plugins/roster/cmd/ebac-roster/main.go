@@ -8,4 +8,6 @@ import (
 	"github.com/gluck/ebac/sdk/plugin"
 )
 
-func main() { plugin.Serve(roster.Plugin{}.Handle) }
+func main() {
+	plugin.Serve(plugin.Info{Name: "roster", Sources: []string{"aria-roster"}}, roster.Plugin{}.Handle)
+}

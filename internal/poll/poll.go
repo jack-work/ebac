@@ -249,12 +249,13 @@ func (p *Poller) pollRound(ctx context.Context, name string) error {
 // core's or the seat's, and a plugin that names one is refused before any of
 // its reply is applied.
 var SourceKeys = map[string][]string{
-	"github-pr":         nil,
-	"github-author":     {"authored", model.AuthorFilterErr},
-	"keel-threads":      {"threads", "blind", model.KeelScopeErr, "review_state", "review_error"},
-	"teams-chat":        {"blind", "inbox_fetch"},
-	model.SourceBandHub: {"queues", "nodes", "node_load", "dupes", "updated", "live"}, // live: unset only (dropped key)
-	"github-releases":   {"releases"},
+	"github-pr":           nil,
+	"github-author":       {"authored", model.AuthorFilterErr},
+	"keel-threads":        {"threads", "blind", model.KeelScopeErr, "review_state", "review_error"},
+	"teams-chat":          {"blind", "inbox_fetch"},
+	model.SourceTeamsLive: {"live_state"},
+	model.SourceBandHub:   {"queues", "nodes", "node_load", "dupes", "updated", "live"}, // live: unset only (dropped key)
+	"github-releases":     {"releases"},
 	// role:<name> is one key per role ("*" is a prefix pattern: one more
 	// segment, no dots, so it cannot reach a nested key).
 	model.SourceRoster: {"role:*", "forks", "updated"}, // updated: unset only (dropped key)

@@ -23,8 +23,13 @@ import (
 	"github.com/gluck/ebac/sdk/model"
 )
 
-// Version is the protocol revision; a reply of any other version is refused.
-const Version = 1
+// Version is the protocol's MAJOR revision; a reply of any other major is
+// refused, naming both. Minor is additive: a core runs plugins of its own minor
+// or lower.
+const (
+	Version = 1
+	Minor   = 1
+)
 
 // MaxReply caps a plugin's stdout. A reply this large is a bug, not news.
 const MaxReply = 8 << 20
@@ -32,6 +37,9 @@ const MaxReply = 8 << 20
 type Op string
 
 const (
+	// OpHello is the handshake: Serve answers it from the plugin's Info
+	// (name, sources, protocol) without calling the handler.
+	OpHello Op = "hello"
 	// OpRound fetches the upstream once and returns what changed.
 	OpRound Op = "round"
 	// OpPost takes posts the core has already AUTHORIZED as far as they go
@@ -83,9 +91,10 @@ func Unwire(evs []Event) []model.Event {
 // keeps no state of its own between execs (its state rides in the critic's
 // runtime and comes back in the Reply).
 type Request struct {
-	Protocol int          `json:"protocol"`
-	Op       Op           `json:"op"`
-	Critic   model.Critic `json:"critic"`
+	Protocol      int          `json:"protocol"`
+	ProtocolMinor int          `json:"protocol_minor"`
+	Op            Op           `json:"op"`
+	Critic        model.Critic `json:"critic"`
 	// Snapshot is the previous round's snapshot on OpRound, and the current
 	// one on OpPost and OpBrief.
 	Snapshot *model.Snapshot `json:"snapshot,omitempty"`
@@ -174,7 +183,11 @@ type Gone struct {
 }
 
 type Reply struct {
-	Protocol int `json:"protocol"`
+	Protocol      int `json:"protocol"`
+	ProtocolMinor int `json:"protocol_minor,omitempty"`
+	// Name and Sources answer OpHello.
+	Name    string   `json:"name,omitempty"`
+	Sources []string `json:"sources,omitempty"`
 
 	// Critic is the critic as the plugin leaves it. The core adopts only the
 	// fields a source owns (see Adopt); everything else stays the core's.

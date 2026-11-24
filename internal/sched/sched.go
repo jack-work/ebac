@@ -385,7 +385,7 @@ func Credential(w *model.Critic) string {
 	switch w.SourceName() {
 	case model.SourceReleases, model.SourceRoster, model.SourceKeelBranches, "keel-threads":
 		return "" // public github.com, figaro, keel: no shared account quota
-	case "teams-chat":
+	case "teams-chat", model.SourceTeamsLive:
 		return "teams"
 	}
 	host := w.Host

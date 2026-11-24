@@ -472,6 +472,7 @@ const (
 // SourceReads are, per source, the role-form keys the core hands its plugin
 // on every round (Request.Keys): configuration the role holder edits.
 var SourceReads = map[string][]string{
+	SourceTeamsLive: {"live", "columns", "rows", "footnote", "window", "updated_at", "live_state"},
 	"github-author": {AuthorPathsKey, AuthorTitleKey},
 	SourceGHCache:   {GHCacheConfigKey},
 	"keel-threads":  {KeelThreadsScopeKey, KeelInboxScopeKey, KeelMirrorKey, "review", "verdict", "review_state"},
@@ -904,6 +905,9 @@ const SourceKeelBranches = "keel-branches"
 // sync), tracked by the rules in the role form's holder-edited config key;
 // the plugin writes its index to the role form's track key.
 const SourceGHCache = "github-cache"
+
+// SourceTeamsLive keeps one Teams message in step with a form (plugin teamslive).
+const SourceTeamsLive = "teams-live"
 
 // GHCacheConfigKey is the github-cache role form's holder-edited config:
 // {repos[], rules[{author[], label[], tier}], ttl}.

@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 func fakePlugin(mode string) {
 	switch mode {
 	case "echo":
-		plugin.Serve(func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
+		plugin.Serve(plugin.Info{Name: "probe"}, func(_ context.Context, req plugin.Request) (*plugin.Reply, error) {
 			evs := plugin.Unwire(req.Pending)
 			for i := range evs {
 				evs[i].Text += " (seen)"
@@ -38,9 +38,9 @@ func fakePlugin(mode string) {
 			return rep, nil
 		})
 	case "probe":
-		plugin.Serve(func(context.Context, plugin.Request) (*plugin.Reply, error) { return &plugin.Reply{Log: probe()}, nil })
+		plugin.Serve(plugin.Info{Name: "probe"}, func(context.Context, plugin.Request) (*plugin.Reply, error) { return &plugin.Reply{Log: probe()}, nil })
 	case "fail":
-		plugin.Serve(func(context.Context, plugin.Request) (*plugin.Reply, error) {
+		plugin.Serve(plugin.Info{Name: "probe"}, func(context.Context, plugin.Request) (*plugin.Reply, error) {
 			return nil, fmt.Errorf("upstream said no")
 		})
 	case "garbage":

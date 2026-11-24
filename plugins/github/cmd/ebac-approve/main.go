@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	plugin.Serve(func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
+	plugin.Serve(plugin.Info{Name: "approve", Sources: []string{model.SourceApprove, model.SourceOrgApprove}}, func(ctx context.Context, req plugin.Request) (*plugin.Reply, error) {
 		if req.Critic.SourceName() == model.SourceOrgApprove {
 			return orgapprove.Plugin{}.Handle(ctx, req)
 		}
