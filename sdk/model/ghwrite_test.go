@@ -115,3 +115,29 @@ func TestSplitRef(t *testing.T) {
 		}
 	}
 }
+
+// A2: an issue not created yet is in scope only by its repo, only for
+// issue_create, and only when the scope names the ours login.
+func TestANewIssueIsAuthorizedByRepoAndOursOnly(t *testing.T) {
+	w := &Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Ours: "ours", Fields: []string{FieldIssueCreate, FieldCommentCreate}}}
+	e := GHEntity{Repo: "example/repo", Kind: KindNewIssue}
+	if why := AuthorizeGHWrite(w, e, FieldIssueCreate); why != "" {
+		t.Fatalf("in scope: %s", why)
+	}
+	for name, c := range map[string]struct {
+		w     *Critic
+		e     GHEntity
+		field string
+		want  string
+	}{
+		"other repo":      {w, GHEntity{Repo: "example/other", Kind: KindNewIssue}, FieldIssueCreate, "repo example/other is outside the trusted scope"},
+		"no ours":         {&Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Fields: []string{FieldIssueCreate}}}, e, FieldIssueCreate, "names no ours login"},
+		"field not given": {&Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Ours: "ours", Fields: []string{FieldLabels}}}, e, FieldIssueCreate, "not in the trusted write_fields"},
+		"wrong field":     {w, e, FieldCommentCreate, "does not apply to an issue not created yet"},
+		"read-only":       {&Critic{GHWrite: w.GHWrite}, e, FieldIssueCreate, "read-only"},
+	} {
+		if why := AuthorizeGHWrite(c.w, c.e, c.field); !strings.Contains(why, c.want) {
+			t.Errorf("%s: %q, want it to say %q", name, why, c.want)
+		}
+	}
+}

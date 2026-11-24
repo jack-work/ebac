@@ -123,7 +123,7 @@ func TestTruncatedReadsAreNamed(t *testing.T) {
 	if len(pr.Reviews.Nodes) != 30 || len(pr.Comments.Nodes) != 30 || len(pr.Threads.Nodes) != 12 {
 		t.Fatalf("fixture: reviews %d, comments %d, threads %d", len(pr.Reviews.Nodes), len(pr.Comments.Nodes), len(pr.Threads.Nodes))
 	}
-	fw, _, _ := entityWrite("k", pr, GHOf(pr), nil, &Entity{}, t0, "")
+	fw, _, _ := entityWrite("k", pr, GHOf(pr), nil, &Entity{}, t0, "", nil)
 	var sy SyncKey
 	if err := json.Unmarshal(fw.Set["sync"], &sy); err != nil {
 		t.Fatal(err)
