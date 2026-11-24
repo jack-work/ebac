@@ -226,3 +226,24 @@ func TestAPendingKeyKeepsItsDeadline(t *testing.T) {
 		t.Fatalf("wake %v at %s, want [e] at %s", e.Wake, e.WakeAt, due)
 	}
 }
+
+// Review r2: a CADENCE round that fails puts back the seat changes it took
+// (due ones and future ones), a gap later, not a cadence interval later.
+func TestAFailedCadenceRoundRequeuesTheKeysItTook(t *testing.T) {
+	c := newClock()
+	k := &keysRun{hold: make(chan error, 1)}
+	s := wakeSched(c, t, k, critic("cache", 30*time.Minute))
+	tickWait(s)
+	c.add(15*time.Minute - 500*time.Millisecond)
+	s.Wake("cache", "e") // due in 1 s; the cadence round is due in 0.5 s
+	c.add(500 * time.Millisecond)
+	k.hold <- errors.New("forge down")
+	tickWait(s)
+	if got := k.got(); len(got) != 1 || got[0] != nil {
+		t.Fatalf("rounds %q, want one full round", got)
+	}
+	e := s.Snapshot()["cache"]
+	if !slices.Equal(e.Wake, []string{"e"}) || !e.WakeAt.Equal(c.now().Add(DefaultWakeGap)) {
+		t.Fatalf("after a failed cadence round: wake %v at %s, want [e] at +gap (%s)", e.Wake, e.WakeAt, c.now().Add(DefaultWakeGap))
+	}
+}

@@ -147,6 +147,11 @@ func (w *Watcher) dial(id string, t followed) {
 		w.settle(id, nil, nil)
 		return
 	}
+	if w.ctx.Err() != nil { // Close won the race for the slot
+		<-w.sem
+		w.settle(id, nil, nil)
+		return
+	}
 	stop, done, err := w.Follow(w.ctx, id, func(patch json.RawMessage) { w.delta(t.critic, t.key, patch) })
 	<-w.sem
 	if err != nil {

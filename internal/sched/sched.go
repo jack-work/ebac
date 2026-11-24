@@ -63,7 +63,8 @@ type Entry struct {
 	interval time.Duration
 	pend     map[string]time.Time // key -> deadline
 	wrote    map[string]time.Time // key -> when a round last took it
-	taken    []string             // the running write-only round's keys
+	taken    []string             // the keys the running round took
+	wakeOnly bool                 // the running round is write-only
 }
 
 // Scheduler runs the rounds. Fields are set before Run; zero values take
@@ -186,12 +187,10 @@ func (s *Scheduler) Tick(ctx context.Context) {
 			continue
 		}
 		rctx := ctx
-		e.taken = e.take(now, cadence)
+		e.taken, e.wakeOnly = e.take(now, cadence), !cadence
 		if !cadence {
 			rctx = wake.With(ctx, e.taken)
 			fmt.Fprintf(s.Out, "%s: write-only round for %s\n", name, strings.Join(e.taken, ","))
-		} else {
-			e.taken = nil
 		}
 		e.Deferred = ""
 		e.Running = true
@@ -480,22 +479,25 @@ func (s *Scheduler) finish(name string, g budget.Grant, spent []model.Spend, mu 
 		return
 	}
 	now := s.Now()
-	taken := e.taken
-	e.Running, e.Hung, e.taken = false, false, nil
+	taken, wakeOnly := e.taken, e.wakeOnly
+	e.Running, e.Hung, e.taken, e.wakeOnly = false, false, nil, false
 	e.Err = ""
-	if taken != nil {
-		// A write-only round leaves the cadence and the estimate alone. One
-		// that failed puts its keys back, due a gap later (review N1).
+	if err != nil && len(taken) > 0 {
+		// A failed round, write-only or full, puts back the seat changes it
+		// took, due a gap later, not a cadence interval later (review N1, r2).
+		for _, k := range taken {
+			if at, ok := e.pend[k]; !ok || at.After(now.Add(s.WakeGap)) {
+				e.pend[k] = now.Add(s.WakeGap)
+			}
+		}
+		e.mirror()
+	}
+	if wakeOnly {
+		// A write-only round leaves the cadence and the estimate alone.
 		e.LastWake = now
 		if err != nil {
 			e.Err = model.FirstLine(err.Error())
 			fmt.Fprintf(s.Out, "%s: write-only round: %v (retried in %s)\n", name, err, s.WakeGap)
-			for _, k := range taken {
-				if at, ok := e.pend[k]; !ok || at.After(now.Add(s.WakeGap)) {
-					e.pend[k] = now.Add(s.WakeGap)
-				}
-			}
-			e.mirror()
 		}
 		return
 	}
