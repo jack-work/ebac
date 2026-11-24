@@ -301,3 +301,34 @@ func TestCommentBodiesAreNotReadOnlyFields(t *testing.T) {
 		t.Fatal("the comment author is not read-only")
 	}
 }
+
+func TestEditsPastTheRoundCapDrainOverTwoRounds(t *testing.T) {
+	r := newCommentRig(t)
+	for i := 10; i < 10+MaxWrites+3; i++ { // more of ours than one round may write
+		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "old", author: "ours", number: 7}
+	}
+	g := r.github()
+	b := baseOf(&g)
+	r.e.Base = &b
+	edit := func(f *GH) {
+		for id, c := range f.Comments {
+			if c.Body == "old" {
+				c.Body = "new"
+				f.Comments[id] = c
+			}
+		}
+	}
+	r.round(edit)
+	if len(r.gh.mutations) != MaxWrites {
+		t.Fatalf("first round wrote %d, want the cap %d", len(r.gh.mutations), MaxWrites)
+	}
+	r.round(edit)
+	if len(r.gh.mutations) != MaxWrites+3 {
+		t.Fatalf("after two rounds %d written, want %d", len(r.gh.mutations), MaxWrites+3)
+	}
+	for id, c := range r.gh.comments {
+		if strings.HasPrefix(id, "IC_000000") && c.author == "ours" && c.body == "old" {
+			t.Fatalf("%s never drained", id)
+		}
+	}
+}
