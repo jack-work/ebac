@@ -65,7 +65,6 @@ type Create struct {
 	Body   string          `json:"body,omitempty"`   // ends with the praxis-id marker
 	Praxis json.RawMessage `json:"praxis,omitempty"` // the request, minted on the form
 	ID     string          `json:"id,omitempty"`     // the praxis id (the register key)
-	ID     string          `json:"id,omitempty"`     // the praxis id (the register key)
 	Issue  int             `json:"issue,omitempty"`
 	URL    string          `json:"url,omitempty"`
 	Key    string          `json:"key,omitempty"` // the minted child key
