@@ -214,7 +214,7 @@ const AlarmOverBound = "over-bound"
 func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 	key := AlarmOverBound + ".comments"
 	if len(b.Comments) <= MaxBaseComments {
-		delete(e.Alarms, key)
+		delete(e.Alarms, key) // under the bound
 		return
 	}
 	ours := strings.ToLower(s.p.Ours)
@@ -239,7 +239,7 @@ func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 		delete(b.Comments, id)
 	}
 	if lost == 0 {
-		delete(e.Alarms, key)
+		delete(e.Alarms, key) // none of ours left out
 		return
 	}
 	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (%d hashes kept per entity, the newest): an edit of those is not written", lost, MaxBaseComments), nil, nil, nil)

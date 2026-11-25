@@ -3,6 +3,7 @@ package ghcache
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -204,5 +205,49 @@ func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 	r.round(func(*GH) {})
 	if _, ok := r.e.Alarms["over-bound.comments"]; ok {
 		t.Fatalf("back under the bound, the alarm stands: %v", r.e.Alarms)
+	}
+}
+
+// boundBase alone: past the bound the newest of the others stay (by created_at), ours first whatever their age; a
+// standing over-bound alarm clears once none of ours is left out.
+func TestTheBoundKeepsTheNewestOfTheOthersAndClearsItsAlarm(t *testing.T) {
+	g := GH{Comments: map[string]CachedComment{}}
+	b := Base{Comments: map[string]string{}}
+	for i := 0; i < 24; i++ { // someone's, created one minute apart: IC_00000000 the oldest
+		id := fmt.Sprintf("IC_%08d", i)
+		g.Comments[id] = CachedComment{Author: "someone", Body: "x", CreatedAt: fmt.Sprintf("2026-11-20T04:%02d:00Z", i)}
+		b.Comments[id] = "h"
+	}
+	g.Comments["IC_OURS0001"] = CachedComment{Author: "Ours", Body: "x", CreatedAt: "2026-11-01T00:00:00Z"} // the oldest of all
+	b.Comments["IC_OURS0001"] = "h"
+	e := &Entity{Alarms: map[string]Alarm{"over-bound.comments": {Detail: "an earlier round"}}}
+	s := &syncer{p: Pass{Ours: "ours"}, now: t0, logf: func(string, ...any) {}}
+	s.boundBase("k", e, &b, &g)
+	var kept []string
+	for id := range b.Comments {
+		kept = append(kept, id)
+	}
+	slices.Sort(kept)
+	want := []string{"IC_00000005", "IC_00000006", "IC_00000007", "IC_00000008", "IC_00000009", "IC_00000010", "IC_00000011",
+		"IC_00000012", "IC_00000013", "IC_00000014", "IC_00000015", "IC_00000016", "IC_00000017", "IC_00000018", "IC_00000019",
+		"IC_00000020", "IC_00000021", "IC_00000022", "IC_00000023", "IC_OURS0001"}
+	if !slices.Equal(kept, want) {
+		t.Fatalf("kept %v, want %v", kept, want)
+	}
+	if _, ok := e.Alarms["over-bound.comments"]; ok {
+		t.Fatalf("none of ours left out, yet the alarm stands: %v", e.Alarms)
+	}
+}
+
+// The first base of an entity (no base yet: the form is rewritten from GitHub) is bounded the same way.
+func TestAFirstBaseIsBoundedToo(t *testing.T) {
+	r := newCommentRig(t)
+	for i := 10; i < 40; i++ {
+		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "noted", author: "someone", number: 7}
+	}
+	r.e.Base = nil
+	r.round(func(*GH) {})
+	if r.e.Base == nil || len(r.e.Base.Comments) != 20 {
+		t.Fatalf("first base: %+v, want 20 comment hashes", r.e.Base)
 	}
 }

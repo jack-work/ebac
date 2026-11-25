@@ -141,6 +141,18 @@ MUTANTS=(
   "E11|$G/comment_edit.go|		if wants = wants[:room]; len(wants) == 0 {|		if wants = wants[:0]; len(wants) == 0 {|./$G/"
   "E12|$G/sync.go|			ie.Kind = KindIssue|			ie.Kind = KindPR|./$G/"
   "E13|$G/sync.go|		if h, ok := b.Comments[id]; ok && !c.Cut && h != hash12(c.Body) {|		if h, ok := b.Comments[id]; ok && h != hash12(c.Body) {|./$G/"
+  "X1|$G/ghcache.go|			e.shed()|			_ = e|./$G/"
+  "X2|$G/ghcache.go|e.Base, e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = nil, \"\", nil, nil, nil, nil|e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = \"\", nil, nil, nil, nil|./$G/"
+  "X3|$G/ghcache.go|case fv.gh != nil && e.Base == nil && e.EndedAt.IsZero():|case fv.gh != nil && e.Base == nil:|./$G/"
+  "X4|$G/sync.go|if len(b.Comments) <= MaxBaseComments {|if true {|./$G/"
+  "X5|$G/sync.go|			return mine(a)|			return !mine(a)|./$G/"
+  "X6|$G/sync.go|		if mine(id) {|		if true {|./$G/"
+  "X7|$G/sync.go|return ta > tc // newest first|return ta < tc // newest first|./$G/"
+  "X8|$G/sync.go|delete(e.Alarms, key) // under the bound|_ = key // under the bound|./$G/"
+  "X9|$G/sync.go|delete(e.Alarms, key) // none of ours left out|_ = key // none of ours left out|./$G/"
+  "X10|$G/sync.go|const MaxBaseComments = 20|const MaxBaseComments = 21|./$G/"
+  "X11|$G/sync.go|	s.boundBase(k, e, &next, &G)|	_ = next|./$G/"
+  "X12|$G/sync.go|		s.boundBase(k, e, &b, &out)|		_ = b|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
