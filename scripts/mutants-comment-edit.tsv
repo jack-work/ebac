@@ -14,3 +14,5 @@ Z12-stale-expect-ok	cmd/ebac/commentedit.go	160	if r.Expect == "" || r.Expect !=
 Z13-rewrite-same-body	cmd/ebac/commentedit.go	163	if c.Body == r.Body {	if false {	./cmd/ebac	TestAnEditGitHubAlreadyHoldsWritesNothing
 Z14-wrong-mutation	cmd/ebac/commentedit.go	166	forge.EditCommentMutation(c.Review)	forge.EditCommentMutation(!c.Review)	./cmd/ebac	TestAnEditOfOurCommentOnAMergedPRLandsAndReadsBack|TestAConversationCommentOnAPRUsesTheIssueCommentMutation
 Z15-no-read-back-check	cmd/ebac/commentedit.go	173	if back.Body != r.Body {	if false {	./cmd/ebac	TestAReadBackThatDoesNotHoldTheBodyIsAnError
+Z16-ours-issue-edit-refused	sdk/model/ghwrite.go	108	if (field == FieldCommentCreate || field == FieldCommentEdit) && g.Ours	if field == FieldCommentCreate && g.Ours	./sdk/model	TestACommentOnOurOwnIssueIsInScopeAndOnlyThat
+Z17-ours-issue-any-field	sdk/model/ghwrite.go	108	if (field == FieldCommentCreate || field == FieldCommentEdit) && g.Ours	if (field == FieldCommentCreate || field == FieldCommentEdit || true) && g.Ours	./sdk/model	TestACommentOnOurOwnIssueIsInScopeAndOnlyThat
