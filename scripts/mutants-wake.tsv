@@ -1,20 +1,22 @@
 # A3 write-on-change mutants (#71 L4): id file line old new package test-regex
-W1-wake-mode-off	plugins/github/internal/ghcache/ghcache.go	201	wakeOnly := len(p.Wake) > 0	wakeOnly := false	./plugins/github/internal/ghcache	TestAWakeRound
-W2-wake-reads-heads	plugins/github/internal/ghcache/ghcache.go	269	if !e.ended() && e.Kind != KindIssue && !wakeOnly {	if !e.ended() && e.Kind != KindIssue {	./plugins/github/internal/ghcache	TestAWakeRoundWritesTheWokenEntityAndReadsNothingElse
+W1-wake-mode-off	plugins/github/internal/ghcache/ghcache.go	230	wakeOnly := len(p.Wake) > 0	wakeOnly := false	./plugins/github/internal/ghcache	TestAWakeRound
+W2-wake-reads-heads	plugins/github/internal/ghcache/ghcache.go	298	if !e.ended() && e.Kind != KindIssue && !wakeOnly {	if !e.ended() && e.Kind != KindIssue {	./plugins/github/internal/ghcache	TestAWakeRoundWritesTheWokenEntityAndReadsNothingElse
 W3-wake-moves-cadence	internal/sched/sched.go	495	\tif wakeOnly {\n\t\t// A write-only round leaves	\tif wakeOnly && false {\n\t\t// A write-only round leaves	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W4-wake-is-full-round	internal/sched/sched.go	173	cadence := !e.Next.After(now)	cadence := true	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W5-wake-waits-for-cadence	internal/sched/sched.go	336	if !e.WakeAt.IsZero() && e.WakeAt.Before(e.Next) {	if false {	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W6-pending-deadline-reset	internal/sched/sched.go	359	\tif _, ok := e.pend[key]; ok {\n\t\treturn\n\t}		./internal/sched	TestAPendingKeyKeepsItsDeadline
 W7-no-gap	internal/sched/sched.go	364	if g := e.wrote[key].Add(s.WakeGap);	if g := e.wrote[key].Add(0);	./internal/sched	TestAnEntityIsWrittenAtMostOncePerGap
-W8-any-path-wakes	internal/wake/wake.go	222	if model.GHCacheWakes(p) {	if model.GHCacheWakes(p) || true {	./internal/wake	TestAReadOnlyChangeIsNotReported
-W9-dropped-follow-kept	internal/wake/wake.go	118	if t, ok := want[id]; !ok || dropped || t.critic != f.critic	if t, ok := want[id]; !ok || t.critic != f.critic	./internal/wake	TestADroppedOrRefusedFollowIsFollowedAgain
+W8-any-path-wakes	internal/wake/wake.go	225	if model.GHCacheWakes(p) {	if model.GHCacheWakes(p) || true {	./internal/wake	TestAReadOnlyChangeIsNotReported
+W9-dropped-follow-kept	internal/wake/wake.go	121	if t, ok := want[id]; !ok || dropped || t.critic != f.critic	if t, ok := want[id]; !ok || t.critic != f.critic	./internal/wake	TestADroppedOrRefusedFollowIsFollowedAgain
 W10-watch-not-told	internal/sched/sched.go	157	\t\t\tif s.Watch != nil {	\t\t\tif false {	./internal/sched	TestWatchIsToldEveryListing
-W11-path-wildcard-any	sdk/model/ghwake.go	34	if want[i] != "*" && want[i] != got[i] {	if false {	./sdk/model	TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly
+W11-path-wildcard-any	sdk/model/ghwake.go	42	if want[i] != "*" && want[i] != got[i] {	if false {	./sdk/model	TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly
 W12-cadence-leaves-wake	internal/sched/sched.go	377	if cadence || !at.After(now) {	if !at.After(now) {	./internal/sched	TestADueCadenceRoundTakesThePendingWake
 W13-other-sources-followed	internal/wake/wake.go	99	if c.SourceName() != model.SourceGHCache || c.Runtime.Stopped	if c.Runtime.Stopped	./internal/wake	TestSyncFollowsOnlyGitHubCacheEntityForms
 W14-takes-undue-keys	internal/sched/sched.go	377	if cadence || !at.After(now) {	if cadence || !at.After(now) || true {	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W15-take-not-recorded	internal/sched/sched.go	380	\t\t\te.wrote[k] = now	\t\t\t_ = now	./internal/sched	TestAnEditAfterARoundTookItsKeyGetsASecondRound|TestAnEntityIsWrittenAtMostOncePerGap
 W16-failed-round-drops-keys	internal/sched/sched.go	490	\t\t\t\te.pend[k] = now.Add(s.WakeGap)	\t\t\t\t_ = k	./internal/sched	TestAFailedWriteOnlyRoundRequeuesItsKeys|TestAFailedCadenceRoundRequeuesTheKeysItTook
 W17-dials-unbounded	internal/wake/wake.go	82	w.sem = make(chan struct{}, w.Parallel)	w.sem = make(chan struct{}, 1000)	./internal/wake	TestDialsAreBounded
-W18-dialling-form-redialled	internal/wake/wake.go	128	\t\tif w.follows[id] == nil {\n\t\t\tstart = append(start, id)	\t\tif true {\n\t\t\tstart = append(start, id)	./internal/wake	TestAStuckFollowBlocksNeitherSyncNorOthers
+W18-dialling-form-redialled	internal/wake/wake.go	131	\t\tif w.follows[id] == nil {\n\t\t\tstart = append(start, id)	\t\tif true {\n\t\t\tstart = append(start, id)	./internal/wake	TestAStuckFollowBlocksNeitherSyncNorOthers
 W19-cadence-failure-drops-keys	internal/sched/sched.go	485	\tif err != nil && len(taken) > 0 {	\tif err != nil && len(taken) > 0 && wakeOnly {	./internal/sched	TestAFailedCadenceRoundRequeuesTheKeysItTook
+W20-register-not-followed	internal/wake/wake.go	107	\t\tif c.FormID != "" { // the register	\t\tif false && c.FormID != "" { // the register	./internal/wake	TestTheRegisterIsFollowedAndAnIssueAskWakes
+W21-create-records-do-not-wake	sdk/model/ghwake.go	22	"sync.comment_new.*", "sync.praxis_new.*",		./sdk/model	TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly

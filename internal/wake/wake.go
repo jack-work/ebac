@@ -104,6 +104,9 @@ func (w *Watcher) Sync(ctx context.Context, ws []*model.Critic) {
 				want[id] = followed{critic: c.Name, key: key}
 			}
 		}
+		if c.FormID != "" { // the register: issue asks (ours.praxis_new) and their records
+			want[c.FormID] = followed{critic: c.Name, key: model.GHCacheRegisterWake}
+		}
 	}
 	for id, f := range w.follows {
 		if f.stop == nil {

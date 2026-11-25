@@ -16,7 +16,15 @@ var GHCacheWakePaths = []string{
 	"gh.comments.*.body",
 	"want.comments.new.*",
 	"ours.praxis_new.*",
+	// A create is recorded one round and POSTed the next (record before POST):
+	// the record ebac writes (sync.comment_new on the entity, sync.praxis_new
+	// on the register) wakes that next round, so a create lands in seconds too.
+	"sync.comment_new.*", "sync.praxis_new.*",
 }
+
+// GHCacheRegisterWake is the wake key of a github-cache critic's own role form
+// (the register: ours.praxis_new issue asks), beside its entity keys.
+const GHCacheRegisterWake = "@register"
 
 // GHCacheWakes reports whether a change at path (dot-separated) can touch a
 // write field: path is one of GHCacheWakePaths, lies under one, or is an

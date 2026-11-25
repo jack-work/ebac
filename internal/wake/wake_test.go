@@ -262,3 +262,22 @@ func TestKeysTravelInTheContext(t *testing.T) {
 		t.Fatalf("keys %q", got)
 	}
 }
+
+// The critic's own role form (the register: issue asks) is followed too; an
+// issue ask there wakes the critic under the register's key.
+func TestTheRegisterIsFollowedAndAnIssueAskWakes(t *testing.T) {
+	w, ff, got := rig()
+	defer w.Close()
+	c := cacheCritic("cache", map[string]string{"k": formA})
+	c.FormID = formB
+	w.Sync(context.Background(), []*model.Critic{c})
+	w.Wait()
+	if w.Following() != 2 || !ff.has(formB) {
+		t.Fatalf("following %d, register followed %v", w.Following(), ff.has(formB))
+	}
+	ff.push(formB, `{"patch":{"object":{"Update":{"ours":{"object":{"Update":{"praxis_new":{"object":{"Set":{"000000000001":{"summary":"x"}}}}}}}}}}}`)
+	ff.push(formB, `{"patch":{"object":{"Update":{"track":{"object":{"Set":{"x":1}}}}}}}`) // ebac's index: no wake
+	if got.n() != 1 || got.all[0] != (woke{"cache", model.GHCacheRegisterWake}) {
+		t.Fatalf("reported %+v, want one register wake", got.all)
+	}
+}

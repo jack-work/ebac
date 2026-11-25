@@ -1,9 +1,13 @@
 package ghcache
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gluck/ebac/sdk/model"
 )
 
 // A3 write-on-change: a write-only round (Pass.Wake) writes the woken
@@ -66,5 +70,24 @@ func TestACadenceRoundAfterAWakeReadsAsEver(t *testing.T) {
 	w.round()
 	if w.gh.lsrefs == 0 || len(w.gh.calls) == 0 {
 		t.Fatalf("the cadence round after a wake read nothing: %d ls-refs, %d calls", w.gh.lsrefs, len(w.gh.calls))
+	}
+}
+
+// A wake of the register alone (an issue ask) runs the creates and reads no
+// entity: the ask is recorded, and the next woken round creates the issue.
+func TestARegisterWakeCreatesTheAskedIssue(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	gh := &createGH{now: t0}
+	pass := func(at time.Time) Pass {
+		return Pass{Config: &Config{Repos: []string{"example/repo"}}, Now: at, Auth: scopeAuth("example/repo"), Ours: "ours",
+			Children: map[string]string{}, PraxisNew: ask(nil), Wake: map[string]bool{model.GHCacheRegisterWake: true}}
+	}
+	r1, err := Run(context.Background(), gh, State{}, pass(t0))
+	if err != nil || r1.State.Creates[askID] == nil || r1.State.Creates[askID].State != "creating" || len(gh.mutations) != 0 {
+		t.Fatalf("woken round 1 (record): %v %+v mutations %v", err, r1.State.Creates, gh.mutations)
+	}
+	r2, err := Run(context.Background(), gh, r1.State, pass(t0.Add(2*time.Second)))
+	if err != nil || len(gh.mutations) != 1 || !strings.HasPrefix(gh.mutations[0], "createIssue ") || r2.State.Creates[askID].State != "created" {
+		t.Fatalf("woken round 2 (create): %v mutations %v creates %+v", err, gh.mutations, r2.State.Creates)
 	}
 }

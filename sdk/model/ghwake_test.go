@@ -12,7 +12,9 @@ func TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly(t *testing.T) {
 		"gh": true, "gh.threads": true, "gh.comments.00000003": true, "want": true, "ours": true,
 		// read-only and unknown keys never wake
 		"gh.state": false, "gh.head": false, "gh.comments.00000003.author": false, "gh.threads.00000001.path": false,
-		"sync": false, "sync.alarm.conflict.labels": false, "want.title": false, "want.create": false,
+		"sync.comment_new.k1": true, "sync.praxis_new.000000000001": true, "sync.comment_new": true,
+		"sync":                       true, // an ancestor of the create records
+		"sync.alarm.conflict.labels": false, "sync.at": false, "want.title": false, "want.create": false,
 		"ours.other": false, "track": false, "": false, "gh.titles": false,
 	} {
 		if got := GHCacheWakes(path); got != want {
