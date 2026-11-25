@@ -91,3 +91,42 @@ func TestARegisterWakeCreatesTheAskedIssue(t *testing.T) {
 		t.Fatalf("woken round 2 (create): %v mutations %v creates %+v", err, gh.mutations, r2.State.Creates)
 	}
 }
+
+// Review N1: the self-wake ends. Once the ask is created and its form has
+// landed, a woken round changes nothing: no register write (Register nil),
+// no form, no GitHub write, so no further wake (measured: two rounds after
+// the create, the second records the landed form's id).
+func TestASettledRegisterWakeWritesNothing(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	gh := &createGH{now: t0}
+	pass := func(at time.Time) Pass {
+		return Pass{Config: &Config{Repos: []string{"example/repo"}}, Now: at, Auth: scopeAuth("example/repo"), Ours: "ours",
+			Children: map[string]string{}, PraxisNew: ask(nil), Wake: map[string]bool{model.GHCacheRegisterWake: true}}
+	}
+	r1, err := Run(context.Background(), gh, State{}, pass(t0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Run(context.Background(), gh, r1.State, pass(t0.Add(2*time.Second)))
+	if err != nil || r2.State.Creates[askID].State != "created" {
+		t.Fatalf("round 2: %v %+v", err, r2.State.Creates)
+	}
+	kids := map[string]string{}
+	for _, f := range r2.Forms {
+		kids[f.Key] = "@" + f.Key // the minted forms landed
+	}
+	// Round 3 records the landed form's id in the register (one more write,
+	// so one more wake); round 4, with nothing new, writes nothing.
+	p3 := pass(t0.Add(4 * time.Second))
+	p3.Children, p3.Landed = kids, len(r2.State.Wrote)
+	r3, err := Run(context.Background(), gh, r2.State, p3)
+	if err != nil || len(gh.mutations) != 1 {
+		t.Fatalf("round 3: %v mutations %v", err, gh.mutations)
+	}
+	p4 := pass(t0.Add(6 * time.Second))
+	p4.Children, p4.Landed = kids, len(r3.State.Wrote)
+	r4, err := Run(context.Background(), gh, r3.State, p4)
+	if err != nil || r4.Register != nil || len(r4.Forms) != 0 || len(gh.mutations) != 1 {
+		t.Fatalf("round 4 (settled): %v register %v forms %d mutations %v", err, r4.Register, len(r4.Forms), gh.mutations)
+	}
+}
