@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gluck/ebac/internal/praxis"
+	praxisstd "github.com/gluck/ebac/internal/praxis"
 	"github.com/gluck/ebac/sdk/disclose"
 	"github.com/gluck/ebac/sdk/model"
 	"github.com/gluck/ebac/sdk/plugin"
@@ -72,9 +72,6 @@ type CommentNew struct {
 	Tries int       `json:"tries,omitempty"`
 	Why   string    `json:"why,omitempty"`
 }
-
-// IssueKey is an issue entity's child key (form ebac-<critic>-<repo>-issue-<n>).
-func IssueKey(repo string, n int) string { return fmt.Sprintf("%s-issue-%d", repoKey(repo), n) }
 
 // CommentMarker is the hidden first line of a created comment: no tool
 // name and no form id reach GitHub, only a hash of them.
@@ -236,7 +233,7 @@ func (c *creator) record(id string, raw json.RawMessage) *Create {
 	}
 	repo, _ := m["repo"].(string)
 	cr.Repo = repo
-	issue, err := praxis.FromForm(map[string]any{"praxis": m})
+	issue, err := praxisstd.FromForm(map[string]any{"praxis": m})
 	if err != nil {
 		cr.Rule, cr.Detail = AlarmUnparseable, err.Error()
 		return cr
@@ -246,9 +243,9 @@ func (c *creator) record(id string, raw json.RawMessage) *Create {
 		cr.Rule, cr.Detail = "scope", why
 		return cr
 	}
-	r, err := praxis.Render(issue, c.parent(repo, issue.Parent))
+	r, err := praxisstd.Render(issue, c.parent(repo, issue.Parent))
 	if err != nil {
-		if ref, ok := err.(*praxis.Refusal); ok {
+		if ref, ok := err.(*praxisstd.Refusal); ok {
 			cr.Rule, cr.Detail = "praxis:"+string(ref.Rule), ref.Detail
 		} else {
 			cr.Rule, cr.Detail = AlarmUnparseable, err.Error()
@@ -267,7 +264,7 @@ func (c *creator) record(id string, raw json.RawMessage) *Create {
 
 // parent is the state of issue #n of repo as its entity form shows it, nil
 // when it has no form this round (the validator then checks the form only).
-func (c *creator) parent(repo string, n int) *praxis.ParentState {
+func (c *creator) parent(repo string, n int) *praxisstd.ParentState {
 	if n == 0 {
 		return nil
 	}
@@ -281,8 +278,8 @@ func (c *creator) parent(repo string, n int) *praxis.ParentState {
 	_ = json.Unmarshal(owned["gh"], &g)
 	var px map[string]any
 	_ = json.Unmarshal(owned["praxis"], &px)
-	ps := &praxis.ParentState{Number: n, Open: g.State == "" || g.State == "OPEN"}
-	if i, err := praxis.FromForm(map[string]any{"praxis": px}); err == nil {
+	ps := &praxisstd.ParentState{Number: n, Open: g.State == "" || g.State == "OPEN"}
+	if i, err := praxisstd.FromForm(map[string]any{"praxis": px}); err == nil {
 		ps.Status = i.Status
 	}
 	return ps
@@ -318,7 +315,7 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
 		return nil, false
 	}
-	marker := praxis.Marker(id)
+	marker := praxisstd.Marker(id)
 	for _, is := range ans.Repo.Issues.Nodes {
 		if strings.Contains(is.Body, marker) {
 			c.s.logf("praxis_new %s: adopted #%d (its create's answer was lost)", id, is.Number)

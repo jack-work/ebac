@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gluck/ebac/internal/praxis"
+	praxisstd "github.com/gluck/ebac/internal/praxis"
 	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 )
@@ -111,7 +111,7 @@ func TestAnIssueAskIsRecordedOneRoundThenCreatedOnceWithItsMarker(t *testing.T) 
 	p := &creator{s: c.s, st: st, p: c.p, reg: map[string]any{}}
 	p.p.Now = t0.Add(time.Minute)
 	fws := p.issues(ask(nil))
-	if len(gh.mutations) != 1 || !strings.HasPrefix(gh.mutations[0], "createIssue ") || !strings.HasSuffix(gh.mutations[0], praxis.Marker(askID)) {
+	if len(gh.mutations) != 1 || !strings.HasPrefix(gh.mutations[0], "createIssue ") || !strings.HasSuffix(gh.mutations[0], praxisstd.Marker(askID)) {
 		t.Fatalf("round 2: mutations %v", gh.mutations)
 	}
 	if len(fws) != 1 || fws[0].Key != "repo-issue-1001" || len(fws[0].ExpectAbsent) != 2 {
@@ -137,7 +137,7 @@ func TestACreateWhoseAnswerWasLostIsAdoptedNotMadeAgain(t *testing.T) {
 	gh := &createGH{}
 	createRound(t, gh, st, ask(nil), t0, nil)
 	// The create went out and GitHub made #1007, but its answer never came back.
-	gh.issues = []ourIssue{{Number: 1007, URL: "u", Body: "body\n\n" + praxis.Marker(askID)}, {Number: 1006, Body: "another"}}
+	gh.issues = []ourIssue{{Number: 1007, URL: "u", Body: "body\n\n" + praxisstd.Marker(askID)}, {Number: 1006, Body: "another"}}
 	c, n := createRound(t, gh, st, ask(nil), t0.Add(time.Minute), nil)
 	if len(gh.mutations) != 0 || n != 1 || regState(c, askID)["issue"] != 1007 {
 		t.Fatalf("adopt: mutations %v forms %d register %v", gh.mutations, n, c.reg)
