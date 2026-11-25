@@ -155,6 +155,10 @@ MUTANTS=(
   "X12|$G/sync.go|		s.boundBase(k, e, &b, &out)|		_ = b|./$G/"
   "X13|$G/sync.go|MaxBaseOurs   = 50|MaxBaseOurs   = 51|./$G/"
   "X14|$G/sync.go|for _, id := range others[min(len(others), MaxBaseOthers):] {|for _, id := range others[:0] {|./$G/"
+  "X15|$G/ghcache.go|		if hashes(e) == 0 \|\| size() <= MaxState {|		if true {|./$G/"
+  "X16|$G/ghcache.go|const MaxState = 128 * 1024|const MaxState = 192 * 1024|./$G/"
+  "X17|$G/ghcache.go|			delete(e.Alarms, key) // the state fits|			_ = e // the state fits|./$G/"
+  "X18|$G/ghcache.go|			e.Pend.Base.Comments = nil|			_ = e|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).

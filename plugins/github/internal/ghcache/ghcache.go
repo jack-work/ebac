@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -90,6 +91,60 @@ type Entity struct {
 	// CommentNew are the comment creates asked on the form (create.go), by
 	// client key.
 	CommentNew map[string]*CommentNew `json:"comment_new,omitempty"`
+}
+
+// MaxState bounds the plugin's part of the critic form, runtime.gh_cache and
+// track together (#71s): figaro refuses a form state past 196,608 B and the
+// critic form carries more than this plugin's keys. The per-entity bounds
+// (boundBase) times the entities tracked can still pass it, so past MaxState
+// the comment hashes of the entities holding the most are dropped, an
+// over-bound.state alarm on each, until it fits; a round that fits without
+// dropping clears those alarms.
+const MaxState = 128 * 1024
+
+func boundState(r *Result, sy *syncer) {
+	size := func() int { return len(mustJSON(r.State)) + len(mustJSON(r.Track)) }
+	hashes := func(e *Entity) int {
+		n := 0
+		if e.Base != nil {
+			n += len(e.Base.Comments)
+		}
+		if e.Pend != nil {
+			n += len(e.Pend.Base.Comments)
+		}
+		return n
+	}
+	key := AlarmOverBound + ".state"
+	if size() <= MaxState {
+		for _, e := range r.State.Entities {
+			delete(e.Alarms, key) // the state fits
+		}
+		return
+	}
+	ks := slices.Collect(maps.Keys(r.State.Entities))
+	sort.Slice(ks, func(i, j int) bool {
+		a, b := hashes(r.State.Entities[ks[i]]), hashes(r.State.Entities[ks[j]])
+		if a != b {
+			return a > b
+		}
+		return ks[i] < ks[j]
+	})
+	for _, k := range ks {
+		e := r.State.Entities[k]
+		if hashes(e) == 0 || size() <= MaxState {
+			break
+		}
+		if e.Base != nil {
+			e.Base.Comments = nil
+		}
+		if e.Pend != nil {
+			e.Pend.Base.Comments = nil
+		}
+		sy.alarm(k, e, AlarmOverBound, "state", fmt.Sprintf("the cache's state passed its bound (%d B): this entity's comment hashes were dropped, so an edit of a comment is not written until they are agreed again", MaxState), nil, nil, nil)
+	}
+	if n := size(); n > MaxState {
+		sy.logf("state %d B is past its bound %d B with every comment hash dropped", n, MaxState)
+	}
 }
 
 // shed drops the write path's bookkeeping (base, read-only hash, pending
@@ -819,6 +874,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 		r.Track[fmt.Sprintf("%s#%d", e.Repo, e.N)] = Track{Form: k, Rule: e.Rule, Tier: e.Tier, Since: e.Since.Format(time.RFC3339), State: st}
 	}
+	boundState(&r, sy)
 	r.Pings = sy.pings(p.Critic)
 	r.Telemetry.finish(now, len(ents), len(due), doSearch, inSearch, due, r.Forms, sy)
 	sort.Slice(r.Forms, func(i, j int) bool { return r.Forms[i].Key < r.Forms[j].Key })

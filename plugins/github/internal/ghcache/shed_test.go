@@ -23,10 +23,15 @@ var incidentCounts = []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 3, 3, 4, 4,
 // busyPR is synthPR with n comments: up to 30 in the conversation (comments(last:30)), the rest three to a review
 // thread (comments(last:3)); every fifth by our-author, the rest by reviewer.
 func busyPR(t *testing.T, num, n int) *PR {
+	return busyPRBy(t, num, n, func(i int) bool { return i%5 == 0 })
+}
+
+// busyPRBy is busyPR with comment i by our-author when ours(i).
+func busyPRBy(t *testing.T, num, n int, ours func(int) bool) *PR {
 	t.Helper()
 	pr := synthPR(t, num, "our-author", []string{"area:core"}, false, 0)
 	author := func(i int) *Login {
-		if i%5 == 0 {
+		if ours(i) {
 			return &Login{Login: "our-author"}
 		}
 		return &Login{Login: "reviewer"}
@@ -250,5 +255,58 @@ func TestAFirstBaseIsBoundedToo(t *testing.T) {
 	r.round(func(*GH) {})
 	if r.e.Base == nil || len(r.e.Base.Comments) != 22 {
 		t.Fatalf("first base: %+v, want 22 comment hashes (our 2 and 20 of someone's)", r.e.Base)
+	}
+}
+
+// GPT review r1 (BLOCK): the per-entity bounds admit 44 open PRs each with exactly 50 of ours and 20 others'
+// comments, all read deep in one round: 70 hashes in each base and pend, 246 KB of maps alone. The state bound
+// drops the comment hashes of the entities holding the most, with an over-bound.state alarm on each, until the
+// plugin's part of the form is at most MaxState (131,072 B); a round that fits clears those alarms.
+func TestTheWorstCaseThePerEntityBoundsAdmitIsCutToTheStateBound(t *testing.T) {
+	prs := map[int]*PR{}
+	var nums []string
+	for i := 0; i < 44; i++ {
+		prs[2000+i] = busyPRBy(t, 2000+i, 70, func(j int) bool { return j < 50 })
+		nums = append(nums, fmt.Sprint(2000+i))
+	}
+	gh := &fakeGH{t: t, failLand: -1, children: map[string]string{}, search: map[string][]int{},
+		prs: map[string]map[int]*PR{"acme/widget": prs}, wr: &fakeWrites{repoLabels: map[string]bool{"area:core": true}}}
+	c, ttl := cfg(t, `{"repos":["acme/widget"],"max":80,"rules":[{"repo":"acme/widget","prs":[`+strings.Join(nums, ",")+`]}]}`)
+	w := &writeWorld{t: t, gh: gh, c: c, ttl: ttl, forms: map[string]map[string]json.RawMessage{}, now: t0, ours: "our-author",
+		critic: &model.Critic{Name: "ghc", Source: model.SourceGHCache, Write: true, GHWrite: &model.GHWrite{
+			Scope: model.GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}}, Fields: model.GHWriteFields}, Maintainer: trustedMaint}}
+	w.round()
+	w.round()
+	for _, pr := range prs {
+		bump(pr)
+	}
+	w.round() // every entity read deep: a base and a pend each
+	got := stateBytes(w)
+	t.Logf("the plugin's state: %d B", got)
+	if got > 131072 {
+		t.Fatalf("the plugin's state is %d B, want <= 131072 (MaxState)", got)
+	}
+	cut := 0
+	for _, e := range w.st.Entities {
+		if _, ok := e.Alarms["over-bound.state"]; ok {
+			cut++
+			if (e.Base != nil && len(e.Base.Comments) != 0) || (e.Pend != nil && len(e.Pend.Base.Comments) != 0) {
+				t.Fatalf("an entity alarmed over-bound.state keeps comment hashes")
+			}
+		}
+	}
+	if cut == 0 || cut == 44 {
+		t.Fatalf("%d of 44 entities cut, want some but not all", cut)
+	}
+	for n := 2000; n < 2034; n++ { // 34 close and are shed: the rest fit
+		prs[n].State = "CLOSED"
+		bump(prs[n])
+	}
+	w.round()
+	w.round()
+	for k, e := range w.st.Entities {
+		if _, ok := e.Alarms["over-bound.state"]; ok {
+			t.Fatalf("%s: the state fits, yet over-bound.state stands (%d B)", k, stateBytes(w))
+		}
 	}
 }
