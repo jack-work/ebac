@@ -342,4 +342,9 @@ func TestAnIssueCommentEditIsAuthorizedAsAnIssue(t *testing.T) {
 	if len(r.kinds) == 0 || r.kinds[0] != KindIssue {
 		t.Fatalf("the trusted check saw kinds %v, want the issue's", r.kinds)
 	}
+	// The trusted scope admits an issue only through an in-scope PR that fixes it, which this entity does not
+	// carry: the edit is refused, fail-closed, and nothing is written.
+	if len(r.gh.mutations) != 0 || r.alarm(AlarmWriteRefused, "IC_00000001") == nil {
+		t.Fatalf("an issue comment edit outside the trusted scope: mutations %v, alarms %v", r.gh.mutations, r.e.Alarms)
+	}
 }
