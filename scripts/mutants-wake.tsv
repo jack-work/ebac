@@ -1,6 +1,6 @@
 # A3 write-on-change mutants (#71 L4): id file line old new package test-regex
-W1-wake-mode-off	plugins/github/internal/ghcache/ghcache.go	199	wakeOnly := len(p.Wake) > 0	wakeOnly := false	./plugins/github/internal/ghcache	TestAWakeRound
-W2-wake-reads-heads	plugins/github/internal/ghcache/ghcache.go	267	if !e.ended() && e.Kind != KindIssue && !wakeOnly {	if !e.ended() && e.Kind != KindIssue {	./plugins/github/internal/ghcache	TestAWakeRoundWritesTheWokenEntityAndReadsNothingElse
+W1-wake-mode-off	plugins/github/internal/ghcache/ghcache.go	201	wakeOnly := len(p.Wake) > 0	wakeOnly := false	./plugins/github/internal/ghcache	TestAWakeRound
+W2-wake-reads-heads	plugins/github/internal/ghcache/ghcache.go	269	if !e.ended() && e.Kind != KindIssue && !wakeOnly {	if !e.ended() && e.Kind != KindIssue {	./plugins/github/internal/ghcache	TestAWakeRoundWritesTheWokenEntityAndReadsNothingElse
 W3-wake-moves-cadence	internal/sched/sched.go	495	\tif wakeOnly {\n\t\t// A write-only round leaves	\tif wakeOnly && false {\n\t\t// A write-only round leaves	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W4-wake-is-full-round	internal/sched/sched.go	173	cadence := !e.Next.After(now)	cadence := true	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W5-wake-waits-for-cadence	internal/sched/sched.go	336	if !e.WakeAt.IsZero() && e.WakeAt.Before(e.Next) {	if false {	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
