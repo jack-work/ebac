@@ -244,8 +244,8 @@ func pending(f *GH, b *Base) bool {
 		}
 	}
 	for id, c := range allComments(f) {
-		if h, ok := b.Comments[id]; ok && h != hash12(c.Body) {
-			return true
+		if h, ok := b.Comments[id]; ok && !c.Cut && h != hash12(c.Body) {
+			return true // a cut body is a head of the text, never an edit
 		}
 	}
 	return false

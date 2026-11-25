@@ -113,6 +113,14 @@ func (s *syncer) commentEdits(k string, e *Entity, G GH, F *GH, B Base, out *GH,
 		f := fc[id]
 		bh, hadBase := B.Comments[id]
 		g, onGH := gc[id]
+		if f.Cut || (onGH && g.Cut) {
+			// A body cut to fit the form is never an edit: the form holds a
+			// head of the text, the base hashes the whole (live 11-25: every
+			// cut comment read as an edit and raised a write-refused alarm).
+			// The alarms that misreading raised are cleared here.
+			delete(e.Alarms, AlarmWriteRefused+"."+commentField(id))
+			continue
+		}
 		if !hadBase {
 			continue // first seen this round: nothing to diff yet (the base is GitHub's)
 		}
@@ -128,8 +136,6 @@ func (s *syncer) commentEdits(k string, e *Entity, G GH, F *GH, B Base, out *GH,
 			s.conflictValue(e, field, f.Body)
 		case ours == "" || strings.ToLower(g.Author) != ours:
 			s.alarm(k, e, AlarmWriteRefused, field, fmt.Sprintf("the comment is %s's, not ours: another author's text is never edited", model.FirstNonEmpty(g.Author, "an unknown author")), bh, f.Body, g.Body)
-		case g.Cut || f.Cut:
-			s.alarm(k, e, AlarmWriteRefused, field, "the comment was cut to fit the form: its whole text is not on the form, so it is not edited", bh, f.Body, nil)
 		case f.Body == g.Body:
 			settled(e, field) // GitHub already has the form's text
 		case hash12(g.Body) != bh:

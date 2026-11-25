@@ -277,8 +277,44 @@ func TestACutCommentIsNotEdited(t *testing.T) {
 		c.Body, c.Cut = "second take", true
 		f.Comments["IC_00000001"] = c
 	})
-	if len(r.gh.mutations) != 0 || r.alarm(AlarmWriteRefused, "IC_00000001") == nil {
-		t.Fatalf("a cut comment was edited: %v %v", r.gh.mutations, r.e.Alarms)
+	if len(r.gh.mutations) != 0 || len(r.e.Alarms) != 0 {
+		t.Fatalf("a cut comment was edited or alarmed: %v %v", r.gh.mutations, r.e.Alarms)
+	}
+}
+
+// #71e (live 11-25: 417 false write-refused alarms): the form as the cache writes it cuts some bodies to fit
+// (Cut, a head of the text); an untouched form with a cut comment of ours and a cut comment of another author is
+// no edit: no alarm, no read, no write, nothing pending; alarms that misreading raised are cleared; and an uncut
+// edit of ours in the same round is still written.
+func TestAnUntouchedFormWithCutCommentsIsNoEditAndOurUncutEditStillWrites(t *testing.T) {
+	r := newCommentRig(t)
+	r.gh.comments["IC_00000004"] = &fakeComment{body: strings.Repeat("long text of ours ", 40), author: "ours", number: 7}
+	r.gh.comments["IC_00000005"] = &fakeComment{body: strings.Repeat("long text of someone ", 40), author: "someone", number: 7}
+	g := r.github()
+	b := baseOf(&g)
+	r.e.Base = &b
+	r.e.Alarms = map[string]Alarm{AlarmWriteRefused + "." + commentField("IC_00000004"): {Detail: "the comment was cut to fit the form"}}
+	asWritten := func(f *GH) { // the cut the cache writes, nothing else
+		for _, id := range []string{"IC_00000004", "IC_00000005"} {
+			c := f.Comments[id]
+			c.Body, c.Cut = c.Body[:40], true
+			f.Comments[id] = c
+		}
+	}
+	asWritten(&g)
+	if pending(&g, r.e.Base) {
+		t.Fatal("an untouched form with cut comments asks for a write (it would be read deep every round)")
+	}
+	r.round(asWritten)
+	if len(r.gh.mutations) != 0 || r.gh.reads != 0 || len(r.e.Alarms) != 0 {
+		t.Fatalf("an untouched form: mutations %v, reads %d, alarms %v", r.gh.mutations, r.gh.reads, r.e.Alarms)
+	}
+	r.round(func(f *GH) {
+		asWritten(f)
+		setBody(f, "IC_00000001", "second take")
+	})
+	if len(r.gh.mutations) != 1 || r.gh.mutations[0] != "updateIssueComment IC_00000001 b=second take" || len(r.e.Alarms) != 0 {
+		t.Fatalf("our uncut edit beside cut comments: mutations %v, alarms %v", r.gh.mutations, r.e.Alarms)
 	}
 }
 

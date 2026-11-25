@@ -134,12 +134,13 @@ MUTANTS=(
   "E4|$G/comment_edit.go|		case hash12(g.Body) != bh:|		case false:|./$G/"
   "E5|$G/comment_edit.go|		case c.Body != w.base:|		case false:|./$G/"
   "E6|$G/comment_edit.go|			if why := auth(model.FieldCommentEdit); why != \"\" {|			if why := \"\"; why != \"\" {|./$G/"
-  "E7|$G/comment_edit.go|		case g.Cut \|\| f.Cut:|		case false:|./$G/"
+  "E7|$G/comment_edit.go|		if f.Cut \|\| (onGH && g.Cut) {|		if false {|./$G/"
   "E8|$G/comment_edit.go|		case c.Number != e.N:|		case false:|./$G/"
   "E9|$G/sync.go|	c.Comments = noBodies(g.Comments)|	_ = noBodies|./$G/"
   "E10|$G/comment_edit.go|	next.Comments[id] = hash12(body)|	_ = body|./$G/"
   "E11|$G/comment_edit.go|		if wants = wants[:room]; len(wants) == 0 {|		if wants = wants[:0]; len(wants) == 0 {|./$G/"
   "E12|$G/sync.go|			ie.Kind = KindIssue|			ie.Kind = KindPR|./$G/"
+  "E13|$G/sync.go|		if h, ok := b.Comments[id]; ok && !c.Cut && h != hash12(c.Body) {|		if h, ok := b.Comments[id]; ok && h != hash12(c.Body) {|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
@@ -172,5 +173,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 126 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 127 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad
