@@ -264,7 +264,7 @@ func TestParseConfigIssues(t *testing.T) {
 	}
 }
 
-// Ours deep in a long thread (#45, the knight's L1 change (a)): a thread longer than ThreadLast is read whole once
+// Ours deep in a long thread (#45): a thread longer than ThreadLast is read whole once
 // per comment count and our comments in it join the form's thread comments; the next round at the same count reads
 // nothing more; a new comment (count moves) reads it whole again. Others' older comments stay off the form.
 func TestOursDeepInALongThreadIsReadWholeOncePerCount(t *testing.T) {
