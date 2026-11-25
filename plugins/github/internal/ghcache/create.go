@@ -229,15 +229,15 @@ func (c *creator) issues(asks map[string]json.RawMessage) []plugin.FormWrite {
 			c.regAlarm(alarmKindOf(cr.Rule), alarmFieldOf(cr.Rule, id), map[string]any{"rule": strings.TrimPrefix(cr.Rule, "praxis:"), "detail": cr.Detail, "at": cr.At.Format(time.RFC3339)})
 			continue
 		}
-		if c.s.inflight+len(raw) > MaxInFlightBytes {
-			c.s.logf("praxis_new %s: %d bytes of creates in flight (max %d): recorded next round", id, c.s.inflight, MaxInFlightBytes)
-			continue
-		}
 		cr = c.record(id, raw)
-		c.st.Creates[id] = cr
 		if cr.State == "creating" {
+			if size := len(cr.Body) + len(cr.Praxis); c.s.inflight+size > MaxInFlightBytes {
+				c.s.logf("praxis_new %s: %d bytes of creates in flight (max %d): recorded next round", id, c.s.inflight, MaxInFlightBytes)
+				continue
+			}
 			c.s.inflight += len(cr.Body) + len(cr.Praxis)
 		}
+		c.st.Creates[id] = cr
 		if cr.State == "refused" {
 			c.regAlarm(alarmKindOf(cr.Rule), alarmFieldOf(cr.Rule, id), map[string]any{"rule": strings.TrimPrefix(cr.Rule, "praxis:"), "detail": cr.Detail, "at": cr.At.Format(time.RFC3339)})
 			c.s.logf("praxis_new %s refused: %s: %s", id, cr.Rule, cr.Detail)
@@ -270,6 +270,10 @@ func alarmFieldOf(rule, id string) string {
 func (c *creator) record(id string, raw json.RawMessage) *Create {
 	now := c.p.Now.UTC()
 	cr := &Create{At: now, Req: hashJSON(raw), State: "refused"}
+	if len(raw) > MaxBodyBytes {
+		cr.Rule, cr.Detail = "too-long", fmt.Sprintf("request of %d bytes: an issue body takes at most %d", len(raw), MaxBodyBytes)
+		return cr
+	}
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		cr.Rule, cr.Detail = AlarmUnparseable, err.Error()

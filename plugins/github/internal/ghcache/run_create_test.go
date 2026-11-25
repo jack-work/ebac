@@ -193,6 +193,9 @@ func TestRunTheChildBudgetHoldsWithFreshMintsAndCreates(t *testing.T) {
 	if err := poll.ValidateForms(ghcCritic(copyKids(kids)), &plugin.Reply{Forms: r.Forms}); err != nil {
 		t.Fatalf("the core refuses the round's reply: %v (creates posted: %d)", err, len(cg.mutations))
 	}
+	if len(cg.mutations) != 0 {
+		t.Fatalf("%d creates posted with no form slot left (70 held + 20 fresh of max 90; %d form writes)", len(cg.mutations), len(r.Forms))
+	}
 	set := copyKids(kids)
 	for _, f := range r.Forms {
 		if f.Retire {
@@ -202,7 +205,7 @@ func TestRunTheChildBudgetHoldsWithFreshMintsAndCreates(t *testing.T) {
 		}
 	}
 	if len(set) > 90 {
-		t.Fatalf("the round's child set is %d forms, past max 90", len(set))
+		t.Fatalf("the round's child set is %d forms, past max 90 (creates posted %d)", len(set), len(cg.mutations))
 	}
 }
 
