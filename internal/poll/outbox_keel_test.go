@@ -27,6 +27,8 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		// keel is internal: a body naming our tools is sent (backlog #34); the same body to a GHE PR is refused
 		// (TestDisclosure's GHE arm).
 		"names an internal term": ok(model.Post{ReplyTo: "t1", Body: "queued on band-hub, see the captains-log"}),
+		// A role form with figaro's 8-hex short id (11-25: keel posts for such a role were refused).
+		"short role form id": {PR: "notes/captains-log", ByAria: aria, ByRole: role, ByRoleForm: "@000000ab", ReplyTo: "t1", Body: "x"},
 	}
 	for name, p := range accept {
 		if why := Authorize(w, nil, "jack", &p); why != "" {
@@ -44,6 +46,9 @@ func TestAuthorizeKeelArms(t *testing.T) {
 		"no writer aria":    {model.Post{PR: "notes/captains-log", ByRole: role, ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_aria"},
 		"bad writer role":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: "Builder", ByRoleForm: form, ReplyTo: "t1", Body: "x"}, "by_role"},
 		"no role form":      {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ReplyTo: "t1", Body: "x"}, "by_role_form"},
+		"role form no @":    {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ByRoleForm: "000000ab", ReplyTo: "t1", Body: "x"}, "by_role_form"},
+		"role form 9 hex":   {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ByRoleForm: "@000000abc", ReplyTo: "t1", Body: "x"}, "by_role_form"},
+		"role form 31 hex":  {model.Post{PR: "notes/captains-log", ByAria: aria, ByRole: role, ByRoleForm: "@" + strings.Repeat("0", 31), ReplyTo: "t1", Body: "x"}, "by_role_form"},
 		"resolve no thread": {ok(model.Post{Resolve: true}), "resolve needs reply_to"},
 		"empty body":        {ok(model.Post{ReplyTo: "t1"}), "empty body"},
 		"too long":          {long, "keel takes at most 16000"},

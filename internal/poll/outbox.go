@@ -342,7 +342,9 @@ func (p *Poller) post(ctx context.Context, w *model.Critic, snap *model.Snapshot
 	}
 }
 
-var keelRoleForm = regexp.MustCompile(`^@[0-9a-f]{32}$`)
+// keelRoleForm is a figaro form id: 32 hex, or the 8-hex short id a few
+// anchored role forms carry.
+var keelRoleForm = regexp.MustCompile(`^@[0-9a-f]{8}([0-9a-f]{24})?$`)
 
 // KeelBodyMax is keel-web's comment limit (16384 chars) less room for the
 // door's stamp and the post marker.
