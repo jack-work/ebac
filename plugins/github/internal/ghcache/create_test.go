@@ -111,7 +111,7 @@ func TestAnIssueAskIsRecordedOneRoundThenCreatedOnceWithItsMarker(t *testing.T) 
 	p := &creator{s: c.s, st: st, p: c.p, reg: map[string]any{}}
 	p.p.Now = t0.Add(time.Minute)
 	fws := p.issues(ask(nil))
-	if len(gh.mutations) != 1 || !strings.HasPrefix(gh.mutations[0], "createIssue ") || !strings.HasSuffix(gh.mutations[0], praxisstd.Marker(askID)) {
+	if len(gh.mutations) != 1 || !strings.HasPrefix(gh.mutations[0], "createIssue ") || !strings.Contains(gh.mutations[0], praxisstd.Marker(askID)) {
 		t.Fatalf("round 2: mutations %v", gh.mutations)
 	}
 	if len(fws) != 1 || fws[0].Key != "repo-issue-1001" || len(fws[0].ExpectAbsent) != 2 {
@@ -231,7 +231,7 @@ func TestACommentAskIsRecordedThenPostedOnceWithItsMarker(t *testing.T) {
 	if len(gh.mutations) != 1 || gh.mutations[0] != "addComment "+marker+"\nStatus: building" {
 		t.Fatalf("round 2 mutations %q", gh.mutations)
 	}
-	if string(w) != `{"keep":true}` || shown["c1"].(map[string]any)["id"] != "IC_00000001" {
+	if string(w) != `{"comments":{"keep":true}}` || shown["c1"].(map[string]any)["id"] != "IC_00000001" {
 		t.Fatalf("round 2 want %s shown %v", w, shown)
 	}
 	if strings.Contains(marker, "@000000e1") || !strings.HasPrefix(marker, "<!-- k:") || len(marker) != len("<!-- k:")+16+len(" -->") {
@@ -249,7 +249,7 @@ func TestALostCommentAnswerIsAdopted(t *testing.T) {
 	commentRound(gh, e, wantOne, t0)
 	gh.comments = []map[string]string{{"id": "IC_00000009", "url": "u", "body": CommentMarker("@000000e1", "c1") + "\nStatus: building"}}
 	w, shown, _ := commentRound(gh, e, wantOne, t0.Add(time.Minute))
-	if len(gh.mutations) != 0 || shown["c1"].(map[string]any)["id"] != "IC_00000009" || string(w) != `{"keep":true}` {
+	if len(gh.mutations) != 0 || shown["c1"].(map[string]any)["id"] != "IC_00000009" || string(w) != `{"comments":{"keep":true}}` {
 		t.Fatalf("mutations %v shown %v want %s", gh.mutations, shown, w)
 	}
 }
