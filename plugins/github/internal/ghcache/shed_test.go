@@ -1,0 +1,208 @@
+package ghcache
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/gluck/ebac/sdk/model"
+)
+
+// #71s (live 11-25): the critic form's state grew past figaro's 196,608 B budget (212,621 B asked at 13:16Z) and
+// every round's write was refused. Measured on the form: 79 entities, 35 of them merged; pend 95 KB, nearly all of
+// it the comment hash map of each entity's base. Synthesized fixtures only (repo acme/widget, logins
+// our-author / reviewer, node ids IC_kwSYNTH... / PRRC_kwSYNTH... of the real ids' length).
+
+// incidentCounts are the comment counts of the 44 open entities as measured (pend.base.comments), reused for the
+// 35 merged ones (their first 35).
+var incidentCounts = []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 3, 3, 4, 4, 4, 4, 6, 6, 7, 8, 9, 10, 19, 19, 19, 24,
+	25, 29, 35, 42, 54, 63, 67, 69, 73, 93, 95, 104, 123, 132}
+
+// busyPR is synthPR with n comments: up to 30 in the conversation (comments(last:30)), the rest three to a review
+// thread (comments(last:3)); every fifth by our-author, the rest by reviewer.
+func busyPR(t *testing.T, num, n int) *PR {
+	t.Helper()
+	pr := synthPR(t, num, "our-author", []string{"area:core"}, false, 0)
+	author := func(i int) *Login {
+		if i%5 == 0 {
+			return &Login{Login: "our-author"}
+		}
+		return &Login{Login: "reviewer"}
+	}
+	at := func(i int) string { return fmt.Sprintf("2026-11-%02dT%02d:%02d:00Z", 10+i/600, i/60%10, i%60) }
+	conv := min(n, 30)
+	for i := 0; i < conv; i++ {
+		pr.Comments.Nodes = append(pr.Comments.Nodes, Comment{ID: fmt.Sprintf("IC_kwSYNTH%04d%06d", num, i), Author: author(i),
+			Body: fmt.Sprintf("A review note %d on change %d.", i, num), CreatedAt: at(i), UpdatedAt: at(i)})
+	}
+	pr.Comments.TotalCount = conv
+	for i, th := conv, 0; i < n; th++ {
+		var cs []Comment
+		for j := 0; j < 3 && i < n; j, i = j+1, i+1 {
+			cs = append(cs, Comment{ID: fmt.Sprintf("PRRC_kwSYNTH%04d%04d%d", num, th, j), Author: author(i),
+				Body: fmt.Sprintf("Thread %d reply %d.", th, j), CreatedAt: at(i), UpdatedAt: at(i)})
+		}
+		node := pr.Threads.Nodes
+		node = append(node, struct {
+			ID       string `json:"id"`
+			Path     string `json:"path"`
+			Resolved bool   `json:"isResolved"`
+			Comments struct {
+				TotalCount int       `json:"totalCount"`
+				Nodes      []Comment `json:"nodes"`
+			} `json:"comments"`
+		}{ID: fmt.Sprintf("PRRT_kwSYNTH%04d%04d", num, th), Path: fmt.Sprintf("src/f%d.go", th)})
+		node[len(node)-1].Comments.TotalCount = len(cs)
+		node[len(node)-1].Comments.Nodes = cs
+		pr.Threads.Nodes = node
+	}
+	pr.Threads.TotalCount = len(pr.Threads.Nodes)
+	return pr
+}
+
+// incidentWorld: 79 explicit PRs of acme/widget with the measured comment counts, minted and agreed over two
+// rounds (the first mints, the second lands the base), then 35 of them merged.
+func incidentWorld(t *testing.T) *writeWorld {
+	prs := map[int]*PR{}
+	var nums []string
+	for i := 0; i < 79; i++ {
+		num := 1000 + i
+		prs[num] = busyPR(t, num, incidentCounts[i%len(incidentCounts)])
+		nums = append(nums, fmt.Sprint(num))
+	}
+	gh := &fakeGH{t: t, failLand: -1, children: map[string]string{}, search: map[string][]int{},
+		prs: map[string]map[int]*PR{"acme/widget": prs}, wr: &fakeWrites{repoLabels: map[string]bool{"area:core": true}}}
+	c, ttl := cfg(t, `{"repos":["acme/widget"],"max":80,"rules":[{"repo":"acme/widget","prs":[`+strings.Join(nums, ",")+`]}]}`)
+	w := &writeWorld{t: t, gh: gh, c: c, ttl: ttl, forms: map[string]map[string]json.RawMessage{}, now: t0,
+		critic: &model.Critic{Name: "ghc", Source: model.SourceGHCache, Write: true, GHWrite: &model.GHWrite{
+			Scope: model.GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}}, Fields: model.GHWriteFields}, Maintainer: trustedMaint}}
+	w.round()
+	w.round()
+	for i := 0; i < 35; i++ {
+		pr := prs[1000+44+i%35]
+		pr.State, pr.Mergeable, pr.MergeSt = "MERGED", "UNKNOWN", "UNKNOWN"
+		bump(pr)
+	}
+	return w
+}
+
+// stateBytes is what the plugin puts on the critic form: runtime.gh_cache and track.
+func stateBytes(w *writeWorld) int { return len(mustJSON(w.st)) + len(mustJSON(w.r.Track)) }
+
+// The incident's shape: the round that reads the merges also reads every open PR deep (each moved: CI, a push, a
+// comment), so every entity carries a pend beside its base. The state that round asks to write, the plugin's part
+// of the form, is under three quarters of the 196,608 B budget (147,456 B); ended entities carry no write path,
+// open ones keep their base.
+func TestTheIncidentShapedStateStaysUnderThreeQuartersOfTheBudget(t *testing.T) {
+	w := incidentWorld(t)
+	for n := 1000; n < 1044; n++ {
+		bump(w.gh.prs["acme/widget"][n])
+	}
+	w.round() // reads all 79 deep: the 35 end
+	got := stateBytes(w)
+	t.Logf("the plugin's state: %d B", got)
+	if got >= 147456 {
+		t.Fatalf("the plugin's state is %d B, want < 147456 (75%% of the 196608 B budget)", got)
+	}
+	ended, open := 0, 0
+	for k, e := range w.st.Entities {
+		switch {
+		case !e.EndedAt.IsZero():
+			ended++
+			if e.Base != nil || e.Pend != nil || e.RO != "" {
+				t.Fatalf("%s ended but keeps its write path: base %v pend %v ro %q", k, e.Base != nil, e.Pend != nil, e.RO)
+			}
+		default:
+			open++
+			if e.Base == nil {
+				t.Fatalf("%s is open but has no base", k)
+			}
+		}
+	}
+	if ended != 35 || open != 44 {
+		t.Fatalf("ended %d open %d, want 35 and 44", ended, open)
+	}
+}
+
+// An ended entity with a form and no base is not read deep every round for a base (it would cost a deep read per
+// round for ClosedTTL); a mark that does not move reads nothing.
+func TestAnEndedEntityIsNotReadDeepForABase(t *testing.T) {
+	w := incidentWorld(t)
+	w.round()
+	w.round()
+	before := len(w.gh.calls)
+	w.round()
+	for _, q := range w.gh.calls[before:] {
+		if strings.Contains(q, "...D") {
+			t.Fatalf("a quiet round read deep: %.200s", q)
+		}
+	}
+	if len(w.r.Telemetry.Deep) != 0 {
+		t.Fatalf("deep reads in a quiet round: %v", w.r.Telemetry.Deep)
+	}
+}
+
+// Back from its end (reopened), an entity is read deep in its next round and agrees a base again.
+func TestAReopenedEntityAgreesABaseAgain(t *testing.T) {
+	w := incidentWorld(t)
+	w.round()
+	w.round()
+	pr := w.gh.prs["acme/widget"][1044]
+	k := keyOf(KindPR, "acme/widget", 1044)
+	if e := w.st.Entities[k]; e == nil || e.EndedAt.IsZero() || e.Base != nil {
+		t.Fatalf("1044 should be ended and shed: %+v", e)
+	}
+	pr.State, pr.Mergeable, pr.MergeSt = "OPEN", "MERGEABLE", "BLOCKED"
+	bump(pr)
+	w.round() // the mark moves: read deep, the end clears, a pend is agreed
+	w.round() // the pend lands: the base
+	e := w.st.Entities[k]
+	if e == nil || !e.EndedAt.IsZero() || e.Base == nil {
+		t.Fatalf("reopened 1044: %+v", e)
+	}
+}
+
+// The per-entity bound: an entity with more comments than MaxBaseComments keeps exactly MaxBaseComments hashes,
+// ours first; when ours alone pass the bound, the ones left out raise one over-bound alarm (and its wake) instead
+// of growing the base.
+func TestABaseKeepsTwentyCommentHashesOursFirst(t *testing.T) {
+	r := newCommentRig(t)
+	for i := 10; i < 40; i++ { // 30 of someone's
+		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "noted", author: "someone", number: 7}
+	}
+	r.round(func(*GH) {})
+	if n := len(r.e.Base.Comments); n != 20 {
+		t.Fatalf("base keeps %d comment hashes, want 20", n)
+	}
+	for _, id := range []string{"IC_00000001", "PRRC_00000003"} {
+		if _, ok := r.e.Base.Comments[id]; !ok {
+			t.Fatalf("our %s fell out of the base: %v", id, r.e.Base.Comments)
+		}
+	}
+	if a := r.alarm("over-bound", "comments"); a != nil {
+		t.Fatalf("only someone's past the bound, yet alarmed: %+v", a)
+	}
+}
+
+func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
+	r := newCommentRig(t)
+	for i := 10; i < 33; i++ { // 23 more of ours: 25 in all
+		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "mine", author: "ours", number: 7}
+	}
+	r.round(func(*GH) {})
+	if n := len(r.e.Base.Comments); n != 20 {
+		t.Fatalf("base keeps %d comment hashes, want 20", n)
+	}
+	a := r.e.Alarms["over-bound.comments"]
+	if a.Detail != "5 of our comments are past the base bound (20 hashes kept per entity, the newest): an edit of those is not written" {
+		t.Fatalf("over-bound alarm = %+v (alarms %v)", a, r.e.Alarms)
+	}
+	for i := 10; i < 33; i++ {
+		delete(r.gh.comments, fmt.Sprintf("IC_000000%02d", i))
+	}
+	r.round(func(*GH) {})
+	if _, ok := r.e.Alarms["over-bound.comments"]; ok {
+		t.Fatalf("back under the bound, the alarm stands: %v", r.e.Alarms)
+	}
+}
