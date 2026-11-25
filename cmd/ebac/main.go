@@ -104,6 +104,10 @@ const usage = `ebac — snapshot GitHub pull requests into figaro forms and wake
   ebac migrate [--dry-run]                  move pre-form critics (critics/, snapshots/) into their forms
   ebac roster [--sync] [--cast ARIA]        the fleet view, as its own role
   ebac issue  --critic N --title T --body-file - < F   file a harness defect
+  ebac comment-edit --repo O/R --comment ID (--dry-run | --expect H --body-file - < F) [--critic gh-cache]
+                                            edit one of OUR comments now, outside the cache (a merged PR's too):
+                                            the critic's trusted comment_edit authority, ours login + viewerDidAuthor,
+                                            the disclose list, GitHub's body still at --expect; read back after
   ebac queue add --pr URL [--priority N]    enqueue a PR (the queue is a FORM)
   ebac queue ls | rm ID | config --max-active N | promote [--dry-run]
   ebac reconcile [--dry-run]                rectify drift between critics/, forms and timers
@@ -226,6 +230,8 @@ func main() {
 		err = cmdRoster(ctx, g, args)
 	case "issue":
 		err = cmdIssue(ctx, g, args)
+	case "comment-edit":
+		err = cmdCommentEdit(ctx, g, args)
 	case "queue":
 		err = cmdQueue(ctx, g, args)
 	case "reconcile":

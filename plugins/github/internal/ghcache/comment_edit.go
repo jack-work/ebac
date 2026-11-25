@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gluck/ebac/sdk/disclose"
+	"github.com/gluck/ebac/sdk/forge"
 	"github.com/gluck/ebac/sdk/model"
 )
 
@@ -198,11 +199,7 @@ func (s *syncer) commentEdits(k string, e *Entity, G GH, F *GH, B Base, out *GH,
 				keepForm(w.id, w.body)
 			}
 		default:
-			q := `mutation($c:ID!,$b:String!){updateIssueComment(input:{id:$c,body:$b}){issueComment{body}}}`
-			if c.Review {
-				q = `mutation($c:ID!,$b:String!){updatePullRequestReviewComment(input:{pullRequestReviewCommentId:$c,body:$b}){pullRequestReviewComment{body}}}`
-			}
-			if _, err := s.mutate(q, map[string]string{"c": w.id, "b": w.body}); err != nil {
+			if _, err := s.mutate(forge.EditCommentMutation(c.Review), map[string]string{"c": w.id, "b": w.body}); err != nil {
 				if refusedByGitHub(err) || retry(e, field) {
 					s.alarm(k, e, AlarmWriteRefused, field, "GitHub refused the comment edit: "+err.Error(), nil, w.body, nil)
 					s.conflictValue(e, field, w.body)
