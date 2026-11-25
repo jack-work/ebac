@@ -1,0 +1,16 @@
+# #64b comment-edit mutants: id file line old new package test-regex
+Z1-parent-is-issue	cmd/ebac/commentedit.go	99	p := n.PR	p := n.Issue	./cmd/ebac	TestRefusalsWriteNothing
+Z2-no-node-id-guard	cmd/ebac/commentedit.go	124	if !commentNodeID.MatchString(r.ID) {	if false {	./cmd/ebac	TestRefusalsWriteNothing
+Z3-empty-body-written	cmd/ebac/commentedit.go	127	if strings.TrimSpace(r.Body) == "" && !r.DryRun {	if false {	./cmd/ebac	TestRefusalsWriteNothing
+Z4-no-ours-guard	cmd/ebac/commentedit.go	134	if ours == "" {	if false {	./cmd/ebac	TestRefusalsWriteNothing
+Z5-any-repo	cmd/ebac/commentedit.go	143	case !strings.EqualFold(c.EntityRepo, r.Repo):	case false:	./cmd/ebac	TestRefusalsWriteNothing
+Z6-any-author	cmd/ebac/commentedit.go	145	case !strings.EqualFold(c.Author, ours):	case false:	./cmd/ebac	TestRefusalsWriteNothing
+Z7-not-viewer-ok	cmd/ebac/commentedit.go	147	case !c.Mine:	case false:	./cmd/ebac	TestRefusalsWriteNothing
+Z8-no-authority	cmd/ebac/commentedit.go	150	model.FieldCommentEdit); why != "" {	model.FieldCommentEdit); why != "" && false {	./cmd/ebac	TestRefusalsWriteNothing
+Z9-dry-run-writes	cmd/ebac/commentedit.go	154	if r.DryRun {	if false {	./cmd/ebac	TestADryRunPrintsTheExpectAndWritesNothing
+Z10-no-disclose	cmd/ebac/commentedit.go	157	if why := disclose.Disclosure(r.Body); why != "" {	if why := disclose.Disclosure(r.Body); why != "" && false {	./cmd/ebac	TestRefusalsWriteNothing
+Z11-empty-expect-ok	cmd/ebac/commentedit.go	160	if r.Expect == "" || r.Expect != cur {	if r.Expect != "" && r.Expect != cur {	./cmd/ebac	TestRefusalsWriteNothing
+Z12-stale-expect-ok	cmd/ebac/commentedit.go	160	if r.Expect == "" || r.Expect != cur {	if r.Expect == "" {	./cmd/ebac	TestRefusalsWriteNothing
+Z13-rewrite-same-body	cmd/ebac/commentedit.go	163	if c.Body == r.Body {	if false {	./cmd/ebac	TestAnEditGitHubAlreadyHoldsWritesNothing
+Z14-wrong-mutation	cmd/ebac/commentedit.go	166	forge.EditCommentMutation(c.Review)	forge.EditCommentMutation(!c.Review)	./cmd/ebac	TestAnEditOfOurCommentOnAMergedPRLandsAndReadsBack|TestAConversationCommentOnAPRUsesTheIssueCommentMutation
+Z15-no-read-back-check	cmd/ebac/commentedit.go	173	if back.Body != r.Body {	if false {	./cmd/ebac	TestAReadBackThatDoesNotHoldTheBodyIsAnError
