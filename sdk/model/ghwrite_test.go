@@ -164,6 +164,13 @@ func TestACommentOnOurOwnIssueIsInScopeAndOnlyThat(t *testing.T) {
 			t.Errorf("%s: %q, want %q", name, why, c.want)
 		}
 	}
+	edit := &Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Ours: "ours", Fields: []string{FieldCommentEdit}}}
+	if why := AuthorizeGHWrite(edit, ours, FieldCommentEdit); why != "" {
+		t.Fatalf("an edit of our comment on our own issue: %s", why)
+	}
+	if why := AuthorizeGHWrite(edit, GHEntity{Repo: "example/repo", Kind: "issue", N: 5, Author: "someone"}, FieldCommentEdit); why != "issue example/repo#5: issues are outside the trusted scope (issues_fixed_by_scope is off)" {
+		t.Fatalf("an edit on another author's issue: %q", why)
+	}
 	noOurs := &Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Fields: []string{FieldCommentCreate}}}
 	if why := AuthorizeGHWrite(noOurs, GHEntity{Repo: "example/repo", Kind: "issue", N: 5, Author: ""}, FieldCommentCreate); why == "" {
 		t.Fatal("an empty ours login matched an empty author")

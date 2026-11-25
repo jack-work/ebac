@@ -168,7 +168,9 @@ func TestRefusalsWriteNothing(t *testing.T) {
 			"refused: critic gh-cache's trusted scope names no ours login: no comment is ours"},
 		{"a PR of a read-only author", func(c *fakeComment, _ *model.Critic, _ *commentEditReq) { c.onAuthor = "someone" },
 			"refused: example/repo#1001: author someone is read-only in the trusted scope"},
-		{"an issue no scope PR fixes", func(c *fakeComment, _ *model.Critic, _ *commentEditReq) { c.review, c.onPR = false, false },
+		{"an issue no scope PR fixes", func(c *fakeComment, _ *model.Critic, _ *commentEditReq) {
+			c.review, c.onPR, c.onAuthor = false, false, "someone"
+		},
 			"refused: issue example/repo#1001 is fixed by no PR in the trusted scope"},
 		{"not a comment node id", func(_ *fakeComment, _ *model.Critic, r *commentEditReq) { r.ID = "PR_00000009" },
 			`refused: --comment "PR_00000009" is not a comment node id (IC_... or PRRC_...)`},
@@ -258,5 +260,23 @@ func TestAReadBackThatDoesNotHoldTheBodyIsAnError(t *testing.T) {
 	want := "edited PRRC_00000003, but the read-back holds cdcc073f4531, not the body sent (" + bodyHash(scrubBody) + ")"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant  %s", err, want)
+	}
+}
+
+// Our comment on an issue we authored (no PR fixes it) is edited with the issue-comment mutation and read back:
+// the issue twin of comment_create's rule (a disclosure scrub on our own open issue).
+func TestAnEditOfOurCommentOnOurOwnIssueLands(t *testing.T) {
+	c := ourReviewComment()
+	c.review, c.onPR = false, false
+	gh := &fakeCommentGH{comments: map[string]*fakeComment{"IC_00000002": c}}
+	out, err := commentEdit(context.Background(), gh, ghCacheCritic(), commentEditReq{Repo: "example/repo", ID: "IC_00000002", Body: scrubBody, Expect: leakHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "IC_00000002 on example/repo#1001: edited " + leakHash + " -> " + bodyHash(scrubBody) + ", read back"; out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if len(gh.mutations) != 1 || gh.mutations[0] != "updateIssueComment IC_00000002 b="+scrubBody {
+		t.Fatalf("mutations = %q", gh.mutations)
 	}
 }
