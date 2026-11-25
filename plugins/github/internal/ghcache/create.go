@@ -39,8 +39,8 @@ import (
 // CreatedTTL is how long a created issue's sync.praxis_new record stays.
 const CreatedTTL = 24 * time.Hour
 
-// AdoptFirst is how many of our newest open issues a retry reads for its
-// marker.
+// AdoptFirst is the page size of an adopt listing (our issues, a subject's
+// comments).
 const AdoptFirst = 50
 
 // Create is one asked-for issue's bookkeeping (State.Creates, by praxis id).
@@ -66,6 +66,7 @@ type Create struct {
 type CommentNew struct {
 	State string    `json:"state"` // creating | created | refused
 	At    time.Time `json:"at"`
+	Ask   string    `json:"ask,omitempty"`  // the body as asked (compared with the form's ask)
 	Body  string    `json:"body,omitempty"` // as posted: the marker line, then the asked body
 	ID    string    `json:"id,omitempty"`
 	URL   string    `json:"url,omitempty"`
@@ -73,21 +74,15 @@ type CommentNew struct {
 	Why   string    `json:"why,omitempty"`
 }
 
-// CommentMarker is the hidden first line of a created comment: no tool
-// name and no form id reach GitHub, only a hash of them.
-func CommentMarker(form, key string) string {
-	h := sha256.Sum256([]byte(form + ":" + key))
-	return "<!-- k:" + hex.EncodeToString(h[:])[:16] + " -->"
-}
-
 func hashJSON(raw json.RawMessage) string { return hash12(string(raw)) }
 
 // creator runs one round's creations; it shares the syncer's write budget.
 type creator struct {
-	s   *syncer
-	st  *State
-	p   Pass
-	reg map[string]any // the register's sync key, rebuilt every round
+	s     *syncer
+	st    *State
+	p     Pass
+	reg   map[string]any // the register's sync key, rebuilt every round
+	mints int            // forms this round mints (they count against the form cap)
 }
 
 // regAlarm sets sync.alarm.<kind>.<field> on the register.
@@ -114,19 +109,42 @@ func (c *creator) regSet(group, key string, v any) {
 	g[key] = v
 }
 
-// ourIssue is one of our open issues as the adopt listing reads it.
+// ourIssue is one of our issues as the adopt listing reads it.
 type ourIssue struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	Body   string `json:"body"`
+	Number    int       `json:"number"`
+	URL       string    `json:"url"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-// IssuesQuery lists our newest open issues in repo (and, when assignee is
-// set, that user's node id).
-func IssuesQuery(repo, login, assignee string) string {
+// pageInfo is a connection's paging.
+type pageInfo struct {
+	HasNext bool   `json:"hasNextPage"`
+	HasPrev bool   `json:"hasPreviousPage"`
+	End     string `json:"endCursor"`
+	Start   string `json:"startCursor"`
+}
+
+// AdoptPages bounds an adopt listing (AdoptFirst each): a listing that has
+// not reached items older than the record by then is inconclusive, and
+// nothing is created.
+const AdoptPages = 10
+
+// adoptSlack: an item created up to this long before its record is still
+// read (clock skew between us and GitHub).
+const adoptSlack = 5 * time.Minute
+
+// IssuesQuery lists our issues in repo, open AND closed, newest first, from
+// cursor after ("" = the first page); and, when assignee is set, that
+// user's node id.
+func IssuesQuery(repo, login, assignee, after string) string {
 	owner, name, _ := strings.Cut(repo, "/")
-	q := fmt.Sprintf(`{ repo: repository(owner:%q,name:%q){ id issues(first:%d,states:OPEN,filterBy:{createdBy:%q},orderBy:{field:CREATED_AT,direction:DESC}){ nodes{ number url body } } }`,
-		owner, name, AdoptFirst, login)
+	cur := ""
+	if after != "" {
+		cur = fmt.Sprintf(",after:%q", after)
+	}
+	q := fmt.Sprintf(`{ repo: repository(owner:%q,name:%q){ id issues(first:%d%s,filterBy:{createdBy:%q},orderBy:{field:CREATED_AT,direction:DESC}){ nodes{ number url body createdAt } pageInfo{ hasNextPage endCursor } } }`,
+		owner, name, AdoptFirst, cur, login)
 	if assignee != "" {
 		q += fmt.Sprintf(` assignee: user(login:%q){ id }`, assignee)
 	}
@@ -253,7 +271,7 @@ func (c *creator) record(id string, raw json.RawMessage) *Create {
 		return cr
 	}
 	for _, t := range []string{r.Title, r.Body} {
-		if why := disclose.Disclosure(t); why != "" {
+		if why := c.p.discloses(t); why != "" {
 			cr.Rule, cr.Detail = "disclose", why
 			return cr
 		}
@@ -285,61 +303,106 @@ func (c *creator) parent(repo string, n int) *praxisstd.ParentState {
 	return ps
 }
 
-// finish creates (or adopts) a recorded issue and mints its form.
+// finish creates (or adopts) a recorded issue and mints its form. Every
+// guard runs again right before the POST: the trusted scope and the
+// disclose list may have changed since the record, and a held form count at
+// the cap would make the mint refuse the whole reply.
 func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
-	var assignee string
+	keep := func() {
+		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
+	}
+	refuse := func(rule, detail string) {
+		cr.State, cr.Rule, cr.Detail = "refused", rule, detail
+		c.regAlarm(alarmKindOf(rule), alarmFieldOf(rule, id), map[string]any{"rule": strings.TrimPrefix(rule, "praxis:"), "detail": detail, "at": c.p.Now.UTC().Format(time.RFC3339)})
+	}
 	var px map[string]any
 	_ = json.Unmarshal(cr.Praxis, &px)
-	if a, _ := px["assignee"].(string); a != "" {
-		assignee = a
-	}
-	data, errs, err := c.s.gh.GraphQLPartial(c.s.ctx, IssuesQuery(cr.Repo, c.p.Ours, assignee))
-	if err != nil || (len(errs) > 0 && data == nil) {
-		c.s.logf("praxis_new %s: listing our issues failed (retried next round): %v", id, err)
-		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
-		return nil, false
-	}
-	var ans struct {
-		Repo struct {
-			ID     string `json:"id"`
-			Issues struct {
-				Nodes []ourIssue `json:"nodes"`
-			} `json:"issues"`
-		} `json:"repo"`
-		Assignee *struct {
-			ID string `json:"id"`
-		} `json:"assignee"`
-	}
-	if err := json.Unmarshal(data, &ans); err != nil || ans.Repo.ID == "" {
-		c.s.logf("praxis_new %s: listing our issues unreadable (retried next round)", id)
-		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
-		return nil, false
-	}
+	assignee, _ := px["assignee"].(string)
+
+	// Adopt: our issues, open and closed, newest first, until one older than
+	// the record (then every issue a lost create could have made was read).
 	marker := praxisstd.Marker(id)
-	for _, is := range ans.Repo.Issues.Nodes {
-		if strings.Contains(is.Body, marker) {
-			c.s.logf("praxis_new %s: adopted #%d (its create's answer was lost)", id, is.Number)
-			return c.created(id, cr, is.Number, is.URL), true
+	since := cr.At.Add(-adoptSlack)
+	var repoID, assigneeID, after string
+	conclusive := false
+	for page := 0; page < AdoptPages; page++ {
+		data, errs, err := c.s.gh.GraphQLPartial(c.s.ctx, IssuesQuery(cr.Repo, c.p.Ours, assignee, after))
+		if err != nil || len(errs) > 0 {
+			// A partial answer is no proof the issue is absent: nothing is created.
+			c.s.logf("praxis_new %s: listing our issues failed (retried next round): %v %v", id, err, errs)
+			keep()
+			return nil, false
+		}
+		var ans struct {
+			Repo *struct {
+				ID     string `json:"id"`
+				Issues *struct {
+					Nodes    []ourIssue `json:"nodes"`
+					PageInfo pageInfo   `json:"pageInfo"`
+				} `json:"issues"`
+			} `json:"repo"`
+			Assignee *struct {
+				ID string `json:"id"`
+			} `json:"assignee"`
+		}
+		if json.Unmarshal(data, &ans) != nil || ans.Repo == nil || ans.Repo.ID == "" || ans.Repo.Issues == nil {
+			c.s.logf("praxis_new %s: listing our issues unreadable (retried next round)", id)
+			keep()
+			return nil, false
+		}
+		repoID = ans.Repo.ID
+		if ans.Assignee != nil {
+			assigneeID = ans.Assignee.ID
+		}
+		for _, is := range ans.Repo.Issues.Nodes {
+			if strings.Contains(is.Body, marker) {
+				c.s.logf("praxis_new %s: adopted #%d (its create's answer was lost)", id, is.Number)
+				return c.created(id, cr, is.Number, is.URL), true
+			}
+			if is.CreatedAt.Before(since) {
+				conclusive = true
+			}
+		}
+		if conclusive || !ans.Repo.Issues.PageInfo.HasNext {
+			conclusive = true
+			break
+		}
+		after = ans.Repo.Issues.PageInfo.End
+	}
+	if !conclusive {
+		c.s.logf("praxis_new %s: %d pages of our issues are all newer than its record: not created (retried next round)", id, AdoptPages)
+		keep()
+		return nil, false
+	}
+
+	if why := c.p.Auth(model.GHEntity{Repo: cr.Repo, Kind: model.KindNewIssue}, model.FieldIssueCreate); why != "" {
+		refuse("scope", why)
+		return nil, false
+	}
+	for _, t := range []string{cr.Title, cr.Body} {
+		if why := c.p.discloses(t); why != "" {
+			refuse("disclose", why)
+			return nil, false
 		}
 	}
-	if c.s.writes >= MaxWrites {
-		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
+	if max := maxForms(c.p.Config); len(c.p.Children)+c.mints >= max {
+		c.s.logf("praxis_new %s: the cache holds %d forms (max %d): created when one is free", id, len(c.p.Children)+c.mints, max)
+		keep()
 		return nil, false
 	}
-	aid := ""
-	if ans.Assignee != nil {
-		aid = ans.Assignee.ID
+	if c.s.writes >= MaxWrites {
+		keep()
+		return nil, false
 	}
 	c.s.cur = cr.Repo + "#new"
-	resp, err := c.s.mutate(createIssueMutation(aid), map[string]string{"r": ans.Repo.ID, "t": cr.Title, "b": cr.Body})
+	resp, err := c.s.mutate(createIssueMutation(assigneeID), map[string]string{"r": repoID, "t": cr.Title, "b": cr.Body})
 	if err != nil {
 		cr.Tries++
 		if refusedByGitHub(err) || cr.Tries >= MaxTries {
-			cr.State, cr.Rule, cr.Detail = "refused", "github", cut(err.Error(), 300)
-			c.regAlarm(AlarmWriteRefused, "praxis_new."+id, map[string]any{"rule": "github", "detail": cr.Detail, "at": c.p.Now.UTC().Format(time.RFC3339)})
+			refuse("github", cut(err.Error(), 300))
 			return nil, false
 		}
-		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
+		keep()
 		return nil, false
 	}
 	var made struct {
@@ -352,15 +415,34 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 	}
 	if json.Unmarshal(resp, &made) != nil || made.CreateIssue.Issue.Number == 0 {
 		// Created but unreadable: the next round's listing adopts it.
-		c.regSet("praxis_new", id, map[string]any{"state": "creating", "at": cr.At.Format(time.RFC3339)})
+		keep()
 		return nil, false
 	}
 	return c.created(id, cr, made.CreateIssue.Issue.Number, made.CreateIssue.Issue.URL), true
 }
 
-// created records issue n as id's and mints its entity form.
+// discloses is the disclose list's verdict on a text GitHub would show
+// (Pass.Disclose in tests, else the sdk's list).
+func (p Pass) discloses(t string) string {
+	if p.Disclose != nil {
+		return p.Disclose(t)
+	}
+	return disclose.Disclosure(t)
+}
+
+// maxForms is the forms the cache may hold (Config.Max, else DefaultMax).
+func maxForms(cfg *Config) int {
+	if cfg != nil && cfg.Max > 0 {
+		return cfg.Max
+	}
+	return DefaultMax
+}
+
+// created records issue n as id's, enrols it as a tracked entity (ours:
+// kept without a rule) and mints its entity form.
 func (c *creator) created(id string, cr *Create, n int, url string) []plugin.FormWrite {
-	cr.State, cr.Issue, cr.URL, cr.Key, cr.At = "created", n, url, IssueKey(cr.Repo, n), c.p.Now.UTC()
+	now := c.p.Now.UTC()
+	cr.State, cr.Issue, cr.URL, cr.Key, cr.At = "created", n, url, IssueKey(cr.Repo, n), now
 	var px map[string]any
 	_ = json.Unmarshal(cr.Praxis, &px)
 	delete(px, "repo")
@@ -370,6 +452,17 @@ func (c *creator) created(id string, cr *Create, n int, url string) []plugin.For
 	if p, _ := px["parent"].(float64); p != 0 {
 		c.regSet("praxis_children_add", fmt.Sprint(int(p)), n)
 	}
+	if c.st.Entities == nil {
+		c.st.Entities = map[string]*Entity{}
+	}
+	if c.st.Entities[cr.Key] == nil {
+		c.st.Entities[cr.Key] = &Entity{Kind: KindIssue, Repo: cr.Repo, N: n, Tier: "hot", Since: now, Seen: now}
+	}
+	if c.st.OurIssues == nil {
+		c.st.OurIssues = map[string]Ref{}
+	}
+	c.st.OurIssues[cr.Key] = Ref{Repo: cr.Repo, N: n}
+	c.mints++
 	cr.Mint = map[string]json.RawMessage{"gh": mustJSON(gh), "praxis": mustJSON(px)}
 	return []plugin.FormWrite{{Key: cr.Key, Set: cr.Mint, ExpectAbsent: []string{"gh", "praxis"}}}
 }
@@ -397,13 +490,74 @@ func readWant(raw json.RawMessage) *wantView {
 	return w
 }
 
-// CommentsQuery reads a subject's newest comments with their bodies, for
-// the adopt check of a comment create.
-func CommentsQuery(node string) string {
-	return fmt.Sprintf(`{ subj: node(id:%q){ ... on Issue{ comments(last:%d){ nodes{ id url body } } } ... on PullRequest{ comments(last:%d){ nodes{ id url body } } } } }`, node, AdoptFirst, AdoptFirst)
+// CommentsQuery reads a subject's comments with their bodies, newest first
+// (backwards from cursor before; "" = the newest page), for the adopt check
+// of a comment create.
+func CommentsQuery(node, before string) string {
+	cur := ""
+	if before != "" {
+		cur = fmt.Sprintf(",before:%q", before)
+	}
+	sel := fmt.Sprintf(`comments(last:%d%s){ nodes{ id url body createdAt } pageInfo{ hasPreviousPage startCursor } }`, AdoptFirst, cur)
+	return fmt.Sprintf(`{ subj: node(id:%q){ ... on Issue{ %s } ... on PullRequest{ %s } } }`, node, sel, sel)
 }
 
 const addCommentMutation = `mutation($s:ID!,$b:String!){ addComment(input:{subjectId:$s,body:$b}){ commentEdge{ node{ id url } } } }`
+
+// CommentMarker is the hidden first line of a created comment: a hash of the
+// form, the client key and the asked body, so no tool name and no form id
+// reach GitHub, and a client key reused with new text is a new comment.
+func CommentMarker(form, key, body string) string {
+	h := sha256.Sum256([]byte(form + ":" + key + ":" + body))
+	return "<!-- k:" + hex.EncodeToString(h[:])[:16] + " -->"
+}
+
+// postedComment is one comment as the adopt listing reads it.
+type postedComment struct {
+	ID        string    `json:"id"`
+	URL       string    `json:"url"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// findComment looks for the comment whose first line is marker among the
+// subject's comments newer than since. ok false: the listing failed or was
+// inconclusive (no proof it is absent).
+func (s *syncer) findComment(node, marker string, since time.Time) (found *postedComment, ok bool) {
+	before := ""
+	for page := 0; page < AdoptPages; page++ {
+		data, errs, err := s.gh.GraphQLPartial(s.ctx, CommentsQuery(node, before))
+		if err != nil || len(errs) > 0 {
+			return nil, false
+		}
+		var ans struct {
+			Subj *struct {
+				Comments *struct {
+					Nodes    []postedComment `json:"nodes"`
+					PageInfo pageInfo        `json:"pageInfo"`
+				} `json:"comments"`
+			} `json:"subj"`
+		}
+		if json.Unmarshal(data, &ans) != nil || ans.Subj == nil || ans.Subj.Comments == nil {
+			return nil, false
+		}
+		older := false
+		for i := range ans.Subj.Comments.Nodes {
+			c := &ans.Subj.Comments.Nodes[i]
+			if first, _, _ := strings.Cut(c.Body, "\n"); strings.TrimRight(first, "\r") == marker {
+				return c, true
+			}
+			if c.CreatedAt.Before(since) {
+				older = true
+			}
+		}
+		if older || !ans.Subj.Comments.PageInfo.HasPrev {
+			return nil, true
+		}
+		before = ans.Subj.Comments.PageInfo.Start
+	}
+	return nil, false
+}
 
 // comments runs entity k's comment creates (want.comments.new.<key>) against
 // subject node. It returns the want key to write (nil: unchanged) and the
@@ -419,76 +573,68 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	var adopt []struct {
-		ID   string `json:"id"`
-		URL  string `json:"url"`
-		Body string `json:"body"`
+	form := s.children[k]
+	if form == "" {
+		form = k
 	}
-	listed := false
-	list := func() bool {
-		if listed {
-			return true
+	guard := func(body string) string {
+		if why := s.p.Auth(ent, model.FieldCommentCreate); why != "" {
+			return why
 		}
-		data, _, err := s.gh.GraphQLPartial(s.ctx, CommentsQuery(node))
-		if err != nil {
-			return false
+		if strings.TrimSpace(body) == "" {
+			return "empty body"
 		}
-		var ans struct {
-			Subj struct {
-				Comments struct {
-					Nodes []struct {
-						ID   string `json:"id"`
-						URL  string `json:"url"`
-						Body string `json:"body"`
-					} `json:"nodes"`
-				} `json:"comments"`
-			} `json:"subj"`
+		return s.p.discloses(body)
+	}
+	record := func(key, body string) *CommentNew {
+		field := "comments.new." + key
+		cn := &CommentNew{At: s.now, Ask: body}
+		if why := guard(body); why != "" {
+			cn.State, cn.Why = "refused", why
+			s.alarm(k, e, AlarmWriteRefused, field, why, nil, nil, nil)
+		} else {
+			// Recorded: posted the round after this record landed.
+			cn.State, cn.Body = "creating", CommentMarker(form, key, body)+"\n"+body
 		}
-		if json.Unmarshal(data, &ans) != nil {
-			return false
-		}
-		adopt, listed = ans.Subj.Comments.Nodes, true
-		return true
+		e.CommentNew[key] = cn
+		return cn
 	}
 	for _, key := range keys {
 		field := "comments.new." + key
-		cn := e.CommentNew[key]
 		body := w.New[key].Body
+		cn := e.CommentNew[key]
 		switch {
-		case cn == nil || (cn.State == "refused" && cn.Body != body):
-			cn = &CommentNew{At: s.now}
-			e.CommentNew[key] = cn
-			if why := s.p.Auth(ent, model.FieldCommentCreate); why != "" {
-				cn.State, cn.Why, cn.Body = "refused", why, body
-				s.alarm(k, e, AlarmWriteRefused, field, why, nil, nil, nil)
-			} else if strings.TrimSpace(body) == "" {
-				cn.State, cn.Why, cn.Body = "refused", "empty body", body
-				s.alarm(k, e, AlarmWriteRefused, field, "empty body", nil, nil, nil)
-			} else if why := disclose.Disclosure(body); why != "" {
-				cn.State, cn.Why, cn.Body = "refused", why, body
-				s.alarm(k, e, AlarmWriteRefused, field, why, nil, nil, nil)
-			} else {
-				// Recorded: posted the round after this record landed.
-				form := s.children[k]
-				if form == "" {
-					form = k
-				}
-				cn.State, cn.Body = "creating", CommentMarker(form, key)+"\n"+body
-			}
+		case cn == nil:
+			cn = record(key, body)
+		case cn.State == "refused" && cn.Ask != body:
+			cn = record(key, body) // a refused ask, changed: judged again
+		case cn.State == "created" && cn.Ask != body:
+			cn = record(key, body) // the key asked again with new text: a new comment
 		case cn.State == "creating":
-			if !list() {
-				s.logf("%s: %s: reading the subject's comments failed (retried next round)", k, field)
+			marker, _, _ := strings.Cut(cn.Body, "\n")
+			got, ok := s.findComment(node, marker, cn.At.Add(-adoptSlack))
+			if !ok {
+				s.logf("%s: %s: reading the subject's comments failed or was inconclusive (retried next round)", k, field)
 				break
 			}
-			marker, _, _ := strings.Cut(cn.Body, "\n")
-			for _, c := range adopt {
-				if strings.HasPrefix(c.Body, marker) {
-					cn.State, cn.ID, cn.URL = "created", c.ID, c.URL
-					s.logf("%s: %s adopted %s (its create's answer was lost)", k, field, c.ID)
-					break
+			if got != nil {
+				cn.State, cn.ID, cn.URL = "created", got.ID, got.URL
+				s.logf("%s: %s adopted %s (its create's answer was lost)", k, field, got.ID)
+				if cn.Ask != body {
+					cn = record(key, body) // the old text is on GitHub; the new ask is its own comment
 				}
+				break
 			}
-			if cn.State == "created" || s.writes >= MaxWrites {
+			if cn.Ask != body {
+				cn = record(key, body) // never posted: the new text replaces it
+				break
+			}
+			if why := guard(body); why != "" {
+				cn.State, cn.Why = "refused", why
+				s.alarm(k, e, AlarmWriteRefused, field, why, nil, nil, nil)
+				break
+			}
+			if s.writes >= MaxWrites {
 				break
 			}
 			s.cur = k
@@ -523,19 +669,21 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 			rec["why"] = cut(cn.Why, 200)
 		}
 		shown[key] = rec
-		if cn.State == "created" {
-			done[key] = true
+		if cn.State == "created" && cn.Ask == body {
+			done[key] = true // the ask as read is the one posted: it leaves the form
 		}
 	}
-	for key := range e.CommentNew {
-		if _, asked := w.New[key]; !asked && e.CommentNew[key].State != "creating" {
+	for key, cn := range e.CommentNew {
+		if _, asked := w.New[key]; !asked && (cn.State != "creating" || s.now.Sub(cn.At) > CreatedTTL) {
 			delete(e.CommentNew, key) // the seat removed the ask (or it was done and removed)
 		}
 	}
 	if len(done) == 0 {
 		return nil, shown
 	}
-	// Done asks leave the want key; the rest of it is kept as read.
+	// Done asks leave the want key; the rest of it is kept as read. The write
+	// lands only if want is still as read (Expect): an ask edited meanwhile
+	// stays, and its new text is judged next round.
 	var all map[string]any
 	_ = json.Unmarshal(w.raw, &all)
 	if cs, _ := all["comments"].(map[string]any); cs != nil {

@@ -126,3 +126,21 @@ func TestLiveArchivedFormIsNotRead(t *testing.T) {
 		t.Fatalf("the archived form was read (found=%v):\n%s", found, audit)
 	}
 }
+
+// The GitHub cache's register answers in sync (sync.praxis_new.<id>): a save
+// must keep it there, and still retire the legacy sync key elsewhere.
+func TestSyncIsKeptOnlyOnTheGitHubCacheRegister(t *testing.T) {
+	if retiredKey(&model.Critic{Source: model.SourceGHCache}, "sync") {
+		t.Fatal("the GitHub cache's sync key was retired on save")
+	}
+	for _, src := range []string{"", "github-pr", "teams-chat", model.SourceKeelBranches} {
+		if !retiredKey(&model.Critic{Source: src}, "sync") {
+			t.Errorf("source %q: the legacy sync key survived the save", src)
+		}
+	}
+	for _, k := range []string{"delta", "succession", "succession_state"} {
+		if !retiredKey(&model.Critic{Source: model.SourceGHCache}, k) {
+			t.Errorf("%s survived on the GitHub cache", k)
+		}
+	}
+}

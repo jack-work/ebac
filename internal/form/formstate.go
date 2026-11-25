@@ -632,7 +632,7 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 		remove := retireKeys(w, cur, set)
 		for k := range cur {
 			// succession and succession_state were the deleted supervisor's keys (step 4 M3): retired on every save.
-			if k == "delta" || k == "sync" || k == "succession" || k == "succession_state" {
+			if retiredKey(w, k) {
 				remove = append(remove, k)
 			}
 			if strings.HasPrefix(k, brief.ProtocolKeyPrefix) {
@@ -666,6 +666,19 @@ func (s *Store) SaveRound(ctx context.Context, w *model.Critic, snap *model.Snap
 			w.Name, strings.Join(conflicts, ", "))
 	}
 	return nil
+}
+
+// retiredKey: delta, sync, succession and succession_state are keys of deleted features, removed on every save;
+// except sync on the GitHub cache's register, where it is the cache's answer key (sync.praxis_new.<id>,
+// model.GHCacheSyncKey).
+func retiredKey(w *model.Critic, k string) bool {
+	switch k {
+	case "delta", "succession", "succession_state":
+		return true
+	case "sync":
+		return w.SourceName() != model.SourceGHCache
+	}
+	return false
 }
 
 // retireKeys renames an archived critic's form out of enumeration; kind

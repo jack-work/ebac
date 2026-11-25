@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -38,6 +39,12 @@ type State struct {
 	Wrote []string `json:"wrote,omitempty"`
 	// Creates are the issues asked on the register (create.go), by praxis id.
 	Creates map[string]*Create `json:"creates,omitempty"`
+	// OurIssues are the issues the cache created (child key -> ref): tracked
+	// like an explicit rule's, for as long as they live.
+	OurIssues map[string]Ref `json:"our_issues,omitempty"`
+	// RegHash is the hash of the register's sync key as last written: it is
+	// written again only when it changes.
+	RegHash string `json:"reg_hash,omitempty"`
 }
 
 // Entity is one tracked PR's or issue's bookkeeping.
@@ -123,6 +130,8 @@ type Pass struct {
 	Ours string
 	// PraxisNew are the register's ours.praxis_new requests (create.go).
 	PraxisNew map[string]json.RawMessage
+	// Disclose replaces the disclose list's verdict (tests); nil is the list.
+	Disclose func(string) string
 }
 
 // Result is what a round produces.
@@ -198,11 +207,19 @@ func aliasErrs(errs []forge.GQLError, aliases map[string]string) (missing map[st
 
 // Run is one round.
 func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
-	r := Result{State: State{Entities: map[string]*Entity{}, SearchAt: prev.SearchAt}}
+	r := Result{State: State{Entities: map[string]*Entity{}, SearchAt: prev.SearchAt, Creates: map[string]*Create{}, OurIssues: map[string]Ref{},
+		RegHash: prev.RegHash}}
 	for k, e := range prev.Entities {
 		c := *e
 		r.State.Entities[k] = &c
 	}
+	// Creations carry over every round (create.go): their record-first rule
+	// rests on this state, and so does the tracking of the issues they made.
+	for id, c := range prev.Creates {
+		cc := *c
+		r.State.Creates[id] = &cc
+	}
+	maps.Copy(r.State.OurIssues, prev.OurIssues)
 	ents := r.State.Entities
 	now := p.Now.UTC()
 	logf := func(f string, a ...any) { r.Log = append(r.Log, fmt.Sprintf(f, a...)) }
@@ -324,6 +341,11 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			}
 		}
 	}
+	for k, ref := range r.State.OurIssues {
+		if ents[k] == nil {
+			ents[k] = &Entity{Kind: KindIssue, Repo: ref.Repo, N: ref.N, Tier: "hot", Since: now, Seen: now}
+		}
+	}
 	var due []Ref
 	for k, e := range ents {
 		every, _ := Every(e.Tier)
@@ -426,6 +448,11 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	for k, rule := range matched {
 		e := ents[k]
 		e.Seen, e.Rule, e.Tier = now, rule, tierOr(p.Config.Rules[rule].Tier)
+	}
+	for k := range r.State.OurIssues {
+		if _, ok := matched[k]; !ok && ents[k] != nil {
+			ents[k].Seen = now // ours: tracked without a rule
+		}
 	}
 
 	// 3. Lifetimes: a PR that does not resolve (deleted, an issue number) is
@@ -696,8 +723,33 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	}
 	// 6. Creations asked on the register (create.go).
 	cr := &creator{s: sy, st: &r.State, p: p, reg: map[string]any{}}
-	r.Forms = append(r.Forms, cr.issues(p.PraxisNew)...)
-	r.Register = cr.reg
+	for _, fw := range cr.issues(p.PraxisNew) {
+		// A mint of a form this round writes anyway is folded into that write
+		// (two writes of one new child would set praxis twice).
+		merged := false
+		for i := range r.Forms {
+			if r.Forms[i].Key == fw.Key && !r.Forms[i].Retire {
+				for k, v := range fw.Set {
+					if _, has := r.Forms[i].Set[k]; !has || k == "praxis" {
+						r.Forms[i].Set[k] = v
+					}
+				}
+				r.Forms[i].ExpectAbsent = append(r.Forms[i].ExpectAbsent, "praxis")
+				merged = true
+			}
+		}
+		if !merged {
+			r.Forms = append(r.Forms, fw)
+		}
+	}
+	if h := hash12(string(mustJSON(cr.reg))); h != r.State.RegHash {
+		r.Register, r.State.RegHash = cr.reg, h
+	}
+	for k := range r.State.OurIssues {
+		if ents[k] == nil {
+			delete(r.State.OurIssues, k)
+		}
+	}
 	for k := range retire {
 		if _, held := p.Children[k]; held { // never minted: nothing to retire
 			r.Forms = append(r.Forms, plugin.FormWrite{Key: k, Retire: true})

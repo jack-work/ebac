@@ -141,3 +141,31 @@ func TestANewIssueIsAuthorizedByRepoAndOursOnly(t *testing.T) {
 		}
 	}
 }
+
+// A comment may be created on an issue the ours login authored (in a scope
+// repo), and on no other issue unless issues_fixed_by_scope admits it.
+func TestACommentOnOurOwnIssueIsInScopeAndOnlyThat(t *testing.T) {
+	w := &Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Ours: "ours", Fields: []string{FieldCommentCreate, FieldLabels}}}
+	ours := GHEntity{Repo: "example/repo", Kind: "issue", N: 5, Author: "Ours"}
+	if why := AuthorizeGHWrite(w, ours, FieldCommentCreate); why != "" {
+		t.Fatalf("a comment on our own issue: %s", why)
+	}
+	for name, c := range map[string]struct {
+		e     GHEntity
+		field string
+		want  string
+	}{
+		"another author":    {GHEntity{Repo: "example/repo", Kind: "issue", N: 5, Author: "someone"}, FieldCommentCreate, "issues_fixed_by_scope is off"},
+		"other repo":        {GHEntity{Repo: "example/other", Kind: "issue", N: 5, Author: "ours"}, FieldCommentCreate, "outside the trusted scope"},
+		"labels on ours":    {ours, FieldLabels, "issues_fixed_by_scope is off"},
+		"no author on file": {GHEntity{Repo: "example/repo", Kind: "issue", N: 5}, FieldCommentCreate, "issues_fixed_by_scope is off"},
+	} {
+		if why := AuthorizeGHWrite(w, c.e, c.field); !strings.Contains(why, c.want) {
+			t.Errorf("%s: %q, want %q", name, why, c.want)
+		}
+	}
+	noOurs := &Critic{Write: true, GHWrite: &GHWrite{Scope: GHScope{Repos: []string{"example/repo"}}, Fields: []string{FieldCommentCreate}}}
+	if why := AuthorizeGHWrite(noOurs, GHEntity{Repo: "example/repo", Kind: "issue", N: 5, Author: ""}, FieldCommentCreate); why == "" {
+		t.Fatal("an empty ours login matched an empty author")
+	}
+}

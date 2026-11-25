@@ -97,6 +97,11 @@ func AuthorizeGHWrite(w *Critic, e GHEntity, field string) string {
 		if !slices.Contains(g.Scope.Repos, e.Repo) {
 			return fmt.Sprintf("repo %s is outside the trusted scope", e.Repo)
 		}
+		// A comment on an issue we authored (as the ours login) is in scope: no
+		// wider than issue_create, which may create any issue in a scope repo.
+		if field == FieldCommentCreate && g.Ours != "" && strings.EqualFold(e.Author, g.Ours) {
+			return ""
+		}
 		if !g.Scope.IssuesFixedByScope {
 			return fmt.Sprintf("issue %s#%d: issues are outside the trusted scope (issues_fixed_by_scope is off)", e.Repo, e.N)
 		}

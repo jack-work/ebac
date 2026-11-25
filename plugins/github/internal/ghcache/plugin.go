@@ -100,6 +100,8 @@ func (pl Plugin) Handle(ctx context.Context, req plugin.Request) (*plugin.Reply,
 	rep.Forms = r.Forms
 	rep.Pings = r.Pings
 	rep.SetKey("track", r.Track)
-	rep.SetKey(model.GHCacheSyncKey, r.Register)
+	if r.Register != nil {
+		rep.SetKey(model.GHCacheSyncKey, r.Register) // only when it changed (State.RegHash)
+	}
 	return rep, nil
 }
