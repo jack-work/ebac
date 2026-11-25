@@ -126,8 +126,8 @@ func TestAnIssueAskIsRecordedOneRoundThenCreatedOnceWithItsMarker(t *testing.T) 
 		t.Fatalf("register after the create: %v", p.reg)
 	}
 	q := &creator{s: c.s, st: st, p: c.p, reg: map[string]any{}}
-	if fws := q.issues(ask(nil)); len(fws) != 0 || len(gh.mutations) != 1 {
-		t.Fatalf("a created ask was created again: %v", gh.mutations)
+	if fws := q.issues(ask(nil)); len(fws) != 0 || len(gh.mutations) != 1 || regState(q, askID)["state"] != "created" {
+		t.Fatalf("a created ask was asked again: mutations %v register %v", gh.mutations, q.reg)
 	}
 }
 
