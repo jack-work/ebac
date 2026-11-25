@@ -24,7 +24,7 @@ type createGH struct {
 	mutations []string // mutation name + vars
 	reads     int
 	failMut   error
-	partial   bool      // listings answer with a GraphQL error beside the data
+	partial   bool      // listings answer with a GraphQL error beside (otherwise whole-looking) data
 	now       time.Time // createdAt of what it creates
 	nextN     int
 }
@@ -50,9 +50,6 @@ func (f *createGH) GraphQLPartial(_ context.Context, q string) (json.RawMessage,
 		page := f.issues[from:to]
 		issues := map[string]any{"nodes": page, "pageInfo": map[string]any{"hasNextPage": to < len(f.issues), "endCursor": strconv.Itoa(to)}}
 		out := map[string]any{"repo": map[string]any{"id": "R_00000001", "issues": issues}}
-		if f.partial {
-			out["repo"].(map[string]any)["issues"] = nil
-		}
 		if strings.Contains(q, "assignee: user(") {
 			out["assignee"] = map[string]any{"id": "U_00000001"}
 		}
