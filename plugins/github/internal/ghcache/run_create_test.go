@@ -178,7 +178,10 @@ func TestRunTheChildBudgetHoldsWithFreshMintsAndCreates(t *testing.T) {
 	cg := &createGH{now: t0}
 	gh := comboGH{fakeGH: fg, c: cg}
 	c, _ := cfg(t, `{"repos":["acme/widget"],"max":90,"rules":[{"repo":"acme/widget","prs":[`+strings.Join(nums, ",")+`]}]}`)
-	st := State{Creates: map[string]*Create{}}
+	st := State{Creates: map[string]*Create{}, Entities: map[string]*Entity{}}
+	for n := 1; n <= 70; n++ { // the held forms are the cache's own tracked PRs
+		st.Entities[ChildKey("acme/widget", n)] = &Entity{Repo: "acme/widget", N: n, Tier: "hot", Since: t0, Seen: t0, Digest: "d"}
+	}
 	asks := map[string]json.RawMessage{}
 	for i := 1; i <= 11; i++ {
 		id := fmt.Sprintf("%012d", i)
@@ -194,7 +197,20 @@ func TestRunTheChildBudgetHoldsWithFreshMintsAndCreates(t *testing.T) {
 		t.Fatalf("the core refuses the round's reply: %v (creates posted: %d)", err, len(cg.mutations))
 	}
 	if len(cg.mutations) != 0 {
-		t.Fatalf("%d creates posted with no form slot left (70 held + 20 fresh of max 90; %d form writes)", len(cg.mutations), len(r.Forms))
+		held, unheld, retires, keysSeen := 0, 0, 0, map[string]int{}
+		for _, f := range r.Forms {
+			keysSeen[f.Key]++
+			switch _, h := kids[f.Key]; {
+			case f.Retire:
+				retires++
+			case h:
+				held++
+			default:
+				unheld++
+			}
+		}
+		t.Fatalf("%d creates posted with no form slot left (70 held + 20 fresh of max 90): %d form writes (%d held, %d new, %d retires, %d distinct keys), max %d, log %v",
+			len(cg.mutations), len(r.Forms), held, unheld, retires, len(keysSeen), c.Max, r.Log)
 	}
 	set := copyKids(kids)
 	for _, f := range r.Forms {

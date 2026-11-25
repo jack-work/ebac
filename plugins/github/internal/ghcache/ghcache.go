@@ -731,9 +731,13 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			planned++
 		}
 	}
+	written := map[string]bool{}
+	for _, f := range r.Forms {
+		written[f.Key] = true
+	}
 	for k := range retire {
-		if _, held := p.Children[k]; held {
-			planned--
+		if _, held := p.Children[k]; held && !written[k] {
+			planned-- // a slot freed, unless the same round writes the form again
 		}
 	}
 	cr := &creator{s: sy, st: &r.State, p: p, reg: map[string]any{}, planned: planned}
