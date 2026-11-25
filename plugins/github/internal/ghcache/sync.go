@@ -196,53 +196,61 @@ func readForm(owned map[string]json.RawMessage) *formView {
 	return fv
 }
 
-// MaxBaseComments bounds the comment hashes one entity's base keeps (#71s,
-// live 11-25: a hash for every comment of 44 open PRs, kept twice once a
-// write lands (base and pend), grew the critic form past figaro's state
-// budget and every write was refused). Ours go first, since only ours are
-// ever edited; then the newest of the others, whose hash only lets a seat's
-// edit of another author's text be named as such (past the bound that edit
-// is reverted to GitHub's text without the alarm).
-const MaxBaseComments = 20
+// MaxBaseOthers and MaxBaseOurs bound the comment hashes one entity's base
+// keeps (#71s, live 11-25: a hash for every comment of 44 open PRs, kept
+// twice once a write lands (base and pend), grew the critic form past
+// figaro's state budget and every write was refused). Ours are the only ones
+// ever edited; another author's hash only lets a seat's edit of that text be
+// named as such (past the bound the edit is reverted to GitHub's text
+// without the alarm). The newest of each are kept.
+const (
+	MaxBaseOthers = 20
+	MaxBaseOurs   = 50
+)
 
-// AlarmOverBound: more of our comments than MaxBaseComments on one entity;
-// the ones past the bound have no base, so an edit of them is not written.
+// AlarmOverBound: more of our comments than MaxBaseOurs on one entity; the
+// ones past the bound have no base, so an edit of them is not written.
 const AlarmOverBound = "over-bound"
 
-// boundBase cuts b's comment hashes to MaxBaseComments (authors from g) and
+// boundBase cuts b's comment hashes to the bounds (authors from g) and
 // raises, or clears, the over-bound alarm for our comments left out.
 func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 	key := AlarmOverBound + ".comments"
-	if len(b.Comments) <= MaxBaseComments {
+	if len(b.Comments) <= MaxBaseOthers {
 		delete(e.Alarms, key) // under the bound
 		return
 	}
-	ours := strings.ToLower(s.p.Ours)
 	all := allComments(g)
-	mine := func(id string) bool { return ours != "" && strings.EqualFold(all[id].Author, ours) }
-	ids := slices.Collect(maps.Keys(b.Comments))
-	sort.Slice(ids, func(i, j int) bool {
-		a, c := ids[i], ids[j]
-		if mine(a) != mine(c) {
-			return mine(a)
+	var mine, others []string
+	for id := range b.Comments {
+		if s.p.Ours != "" && strings.EqualFold(all[id].Author, s.p.Ours) {
+			mine = append(mine, id)
+		} else {
+			others = append(others, id)
 		}
-		if ta, tc := all[a].CreatedAt, all[c].CreatedAt; ta != tc {
-			return ta > tc // newest first
-		}
-		return a < c
-	})
-	lost := 0
-	for _, id := range ids[MaxBaseComments:] {
-		if mine(id) {
-			lost++
-		}
+	}
+	newest := func(ids []string) {
+		sort.Slice(ids, func(i, j int) bool {
+			if ta, tc := all[ids[i]].CreatedAt, all[ids[j]].CreatedAt; ta != tc {
+				return ta > tc // newest first
+			}
+			return ids[i] < ids[j]
+		})
+	}
+	newest(mine)
+	newest(others)
+	for _, id := range others[min(len(others), MaxBaseOthers):] {
 		delete(b.Comments, id)
 	}
-	if lost == 0 {
+	lost := mine[min(len(mine), MaxBaseOurs):]
+	for _, id := range lost {
+		delete(b.Comments, id)
+	}
+	if len(lost) == 0 {
 		delete(e.Alarms, key) // none of ours left out
 		return
 	}
-	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (%d hashes kept per entity, the newest): an edit of those is not written", lost, MaxBaseComments), nil, nil, nil)
+	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (the newest %d of ours are kept): an edit of those is not written", len(lost), MaxBaseOurs), nil, nil, nil)
 }
 
 func baseOf(g *GH) Base {

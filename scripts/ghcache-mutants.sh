@@ -144,15 +144,17 @@ MUTANTS=(
   "X1|$G/ghcache.go|			e.shed()|			_ = e|./$G/"
   "X2|$G/ghcache.go|e.Base, e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = nil, \"\", nil, nil, nil, nil|e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = \"\", nil, nil, nil, nil|./$G/"
   "X3|$G/ghcache.go|case fv.gh != nil && e.Base == nil && e.EndedAt.IsZero():|case fv.gh != nil && e.Base == nil:|./$G/"
-  "X4|$G/sync.go|if len(b.Comments) <= MaxBaseComments {|if true {|./$G/"
-  "X5|$G/sync.go|			return mine(a)|			return !mine(a)|./$G/"
-  "X6|$G/sync.go|		if mine(id) {|		if true {|./$G/"
+  "X4|$G/sync.go|if len(b.Comments) <= MaxBaseOthers {|if true {|./$G/"
+  "X5|$G/sync.go|if s.p.Ours != \"\" && strings.EqualFold(all[id].Author, s.p.Ours) {|if false {|./$G/"
+  "X6|$G/sync.go|lost := mine[min(len(mine), MaxBaseOurs):]|lost := mine[:0]|./$G/"
   "X7|$G/sync.go|return ta > tc // newest first|return ta < tc // newest first|./$G/"
   "X8|$G/sync.go|delete(e.Alarms, key) // under the bound|_ = key // under the bound|./$G/"
   "X9|$G/sync.go|delete(e.Alarms, key) // none of ours left out|_ = key // none of ours left out|./$G/"
-  "X10|$G/sync.go|const MaxBaseComments = 20|const MaxBaseComments = 21|./$G/"
+  "X10|$G/sync.go|MaxBaseOthers = 20|MaxBaseOthers = 21|./$G/"
   "X11|$G/sync.go|	s.boundBase(k, e, &next, &G)|	_ = next|./$G/"
   "X12|$G/sync.go|		s.boundBase(k, e, &b, &out)|		_ = b|./$G/"
+  "X13|$G/sync.go|MaxBaseOurs   = 50|MaxBaseOurs   = 51|./$G/"
+  "X14|$G/sync.go|for _, id := range others[min(len(others), MaxBaseOthers):] {|for _, id := range others[:0] {|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).

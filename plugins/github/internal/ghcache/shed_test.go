@@ -156,25 +156,25 @@ func TestAReopenedEntityAgreesABaseAgain(t *testing.T) {
 	}
 	pr.State, pr.Mergeable, pr.MergeSt = "OPEN", "MERGEABLE", "BLOCKED"
 	bump(pr)
-	w.round() // the mark moves: read deep, the end clears, a pend is agreed
-	w.round() // the pend lands: the base
+	w.now = w.now.Add(ColdEvery) // an ended entity's marks are read every ColdEvery
+	w.round()                    // the mark moves: read deep, the end clears, a pend is agreed
+	w.round()                    // the pend lands: the base
 	e := w.st.Entities[k]
 	if e == nil || !e.EndedAt.IsZero() || e.Base == nil {
 		t.Fatalf("reopened 1044: %+v", e)
 	}
 }
 
-// The per-entity bound: an entity with more comments than MaxBaseComments keeps exactly MaxBaseComments hashes,
-// ours first; when ours alone pass the bound, the ones left out raise one over-bound alarm (and its wake) instead
-// of growing the base.
-func TestABaseKeepsTwentyCommentHashesOursFirst(t *testing.T) {
+// The per-entity bound: past 20 comments a base keeps every one of ours (up to 50) and the 20 newest of the others;
+// someone's past the bound raise no alarm.
+func TestABaseKeepsOursAndTwentyOfTheOthers(t *testing.T) {
 	r := newCommentRig(t)
 	for i := 10; i < 40; i++ { // 30 of someone's
 		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "noted", author: "someone", number: 7}
 	}
 	r.round(func(*GH) {})
-	if n := len(r.e.Base.Comments); n != 20 {
-		t.Fatalf("base keeps %d comment hashes, want 20", n)
+	if n := len(r.e.Base.Comments); n != 22 {
+		t.Fatalf("base keeps %d comment hashes, want 22 (our 2 and 20 of someone's)", n)
 	}
 	for _, id := range []string{"IC_00000001", "PRRC_00000003"} {
 		if _, ok := r.e.Base.Comments[id]; !ok {
@@ -186,20 +186,21 @@ func TestABaseKeepsTwentyCommentHashesOursFirst(t *testing.T) {
 	}
 }
 
+// Ours past 50 raise one over-bound alarm (and its wake) instead of growing the base; back under, it clears.
 func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 	r := newCommentRig(t)
-	for i := 10; i < 33; i++ { // 23 more of ours: 25 in all
+	for i := 10; i < 63; i++ { // 53 more of ours: 55 in all
 		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "mine", author: "ours", number: 7}
 	}
 	r.round(func(*GH) {})
-	if n := len(r.e.Base.Comments); n != 20 {
-		t.Fatalf("base keeps %d comment hashes, want 20", n)
+	if n := len(r.e.Base.Comments); n != 51 {
+		t.Fatalf("base keeps %d comment hashes, want 51 (50 of ours and someone's one)", n)
 	}
 	a := r.e.Alarms["over-bound.comments"]
-	if a.Detail != "5 of our comments are past the base bound (20 hashes kept per entity, the newest): an edit of those is not written" {
+	if a.Detail != "5 of our comments are past the base bound (the newest 50 of ours are kept): an edit of those is not written" {
 		t.Fatalf("over-bound alarm = %+v (alarms %v)", a, r.e.Alarms)
 	}
-	for i := 10; i < 33; i++ {
+	for i := 10; i < 63; i++ {
 		delete(r.gh.comments, fmt.Sprintf("IC_000000%02d", i))
 	}
 	r.round(func(*GH) {})
@@ -208,7 +209,7 @@ func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 	}
 }
 
-// boundBase alone: past the bound the newest of the others stay (by created_at), ours first whatever their age; a
+// boundBase alone: past the bound the newest 20 of the others stay (by created_at), ours whatever their age; a
 // standing over-bound alarm clears once none of ours is left out.
 func TestTheBoundKeepsTheNewestOfTheOthersAndClearsItsAlarm(t *testing.T) {
 	g := GH{Comments: map[string]CachedComment{}}
@@ -228,7 +229,7 @@ func TestTheBoundKeepsTheNewestOfTheOthersAndClearsItsAlarm(t *testing.T) {
 		kept = append(kept, id)
 	}
 	slices.Sort(kept)
-	want := []string{"IC_00000005", "IC_00000006", "IC_00000007", "IC_00000008", "IC_00000009", "IC_00000010", "IC_00000011",
+	want := []string{"IC_00000004", "IC_00000005", "IC_00000006", "IC_00000007", "IC_00000008", "IC_00000009", "IC_00000010", "IC_00000011",
 		"IC_00000012", "IC_00000013", "IC_00000014", "IC_00000015", "IC_00000016", "IC_00000017", "IC_00000018", "IC_00000019",
 		"IC_00000020", "IC_00000021", "IC_00000022", "IC_00000023", "IC_OURS0001"}
 	if !slices.Equal(kept, want) {
@@ -247,7 +248,7 @@ func TestAFirstBaseIsBoundedToo(t *testing.T) {
 	}
 	r.e.Base = nil
 	r.round(func(*GH) {})
-	if r.e.Base == nil || len(r.e.Base.Comments) != 20 {
-		t.Fatalf("first base: %+v, want 20 comment hashes", r.e.Base)
+	if r.e.Base == nil || len(r.e.Base.Comments) != 22 {
+		t.Fatalf("first base: %+v, want 22 comment hashes (our 2 and 20 of someone's)", r.e.Base)
 	}
 }
