@@ -6,7 +6,7 @@ W4-wake-is-full-round	internal/sched/sched.go	173	cadence := !e.Next.After(now)	
 W5-wake-waits-for-cadence	internal/sched/sched.go	336	if !e.WakeAt.IsZero() && e.WakeAt.Before(e.Next) {	if false {	./internal/sched	TestAWakeWritesOnlyDueKeysAndLeavesTheCadence
 W6-pending-deadline-reset	internal/sched/sched.go	359	\tif _, ok := e.pend[key]; ok {\n\t\treturn\n\t}		./internal/sched	TestAPendingKeyKeepsItsDeadline
 W7-no-gap	internal/sched/sched.go	364	if g := e.wrote[key].Add(s.WakeGap);	if g := e.wrote[key].Add(0);	./internal/sched	TestAnEntityIsWrittenAtMostOncePerGap
-W8-any-path-wakes	internal/wake/wake.go	219	if model.GHCacheWakes(p) {	if model.GHCacheWakes(p) || true {	./internal/wake	TestAReadOnlyChangeIsNotReported
+W8-any-path-wakes	internal/wake/wake.go	222	if model.GHCacheWakes(p) {	if model.GHCacheWakes(p) || true {	./internal/wake	TestAReadOnlyChangeIsNotReported
 W9-dropped-follow-kept	internal/wake/wake.go	118	if t, ok := want[id]; !ok || dropped || t.critic != f.critic	if t, ok := want[id]; !ok || t.critic != f.critic	./internal/wake	TestADroppedOrRefusedFollowIsFollowedAgain
 W10-watch-not-told	internal/sched/sched.go	157	\t\t\tif s.Watch != nil {	\t\t\tif false {	./internal/sched	TestWatchIsToldEveryListing
 W11-path-wildcard-any	sdk/model/ghwake.go	34	if want[i] != "*" && want[i] != got[i] {	if false {	./sdk/model	TestGHCacheWakesOnWriteFieldsAndTheirAncestorsOnly

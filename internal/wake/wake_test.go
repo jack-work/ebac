@@ -147,8 +147,8 @@ func TestSyncFollowsOnlyGitHubCacheEntityForms(t *testing.T) {
 	stopped := cacheCritic("old", map[string]string{"y": "@00000000000000000000000000000008"})
 	stopped.Runtime.Stopped = true
 	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB}), other, stopped})
-	waitFor(t, "two follows up", func() bool { return w.Following() == 2 })
-	if !ff.has(formA) || !ff.has(formB) || ff.has("@00000000000000000000000000000009") || ff.has("@00000000000000000000000000000008") {
+	w.Wait() // every dial settled
+	if w.Following() != 2 || ff.tries() != 2 || !ff.has(formA) || !ff.has(formB) || ff.has("@00000000000000000000000000000009") || ff.has("@00000000000000000000000000000008") {
 		t.Fatalf("followed %v", ff.on)
 	}
 	// a retired child is dropped and its follow stopped
@@ -221,6 +221,9 @@ func TestAStuckFollowBlocksNeitherSyncNorOthers(t *testing.T) {
 	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB})})
 	waitFor(t, "B up beside the stuck A", func() bool { return w.Following() == 1 && ff.has(formB) })
 	w.Sync(context.Background(), []*model.Critic{cacheCritic("cache", map[string]string{"a": formA, "b": formB})}) // returns: A is still dialling, not dialled twice
+	for i := 0; i < 1000; i++ {
+		runtime.Gosched() // let any dial this Sync started reach the fake
+	}
 	if n := ff.tries(); n != 2 {
 		t.Fatalf("%d dial(s), want 2 (A not dialled twice while stuck)", n)
 	}

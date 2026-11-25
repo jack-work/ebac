@@ -192,6 +192,9 @@ func (w *Watcher) Following() int {
 	return n
 }
 
+// Wait blocks until every dial started so far has settled (tests; a stuck dial ends only with Close).
+func (w *Watcher) Wait() { w.wg.Wait() }
+
 // Close cancels the dials in flight, waits for them, and stops every follow.
 func (w *Watcher) Close() {
 	w.mu.Lock()
