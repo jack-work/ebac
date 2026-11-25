@@ -196,6 +196,55 @@ func readForm(owned map[string]json.RawMessage) *formView {
 	return fv
 }
 
+// MaxBaseComments bounds the comment hashes one entity's base keeps (#71s,
+// live 11-25: a hash for every comment of 44 open PRs, kept twice once a
+// write lands (base and pend), grew the critic form past figaro's state
+// budget and every write was refused). Ours go first, since only ours are
+// ever edited; then the newest of the others, whose hash only lets a seat's
+// edit of another author's text be named as such (past the bound that edit
+// is reverted to GitHub's text without the alarm).
+const MaxBaseComments = 20
+
+// AlarmOverBound: more of our comments than MaxBaseComments on one entity;
+// the ones past the bound have no base, so an edit of them is not written.
+const AlarmOverBound = "over-bound"
+
+// boundBase cuts b's comment hashes to MaxBaseComments (authors from g) and
+// raises, or clears, the over-bound alarm for our comments left out.
+func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
+	key := AlarmOverBound + ".comments"
+	if len(b.Comments) <= MaxBaseComments {
+		delete(e.Alarms, key)
+		return
+	}
+	ours := strings.ToLower(s.p.Ours)
+	all := allComments(g)
+	mine := func(id string) bool { return ours != "" && strings.EqualFold(all[id].Author, ours) }
+	ids := slices.Collect(maps.Keys(b.Comments))
+	sort.Slice(ids, func(i, j int) bool {
+		a, c := ids[i], ids[j]
+		if mine(a) != mine(c) {
+			return mine(a)
+		}
+		if ta, tc := all[a].CreatedAt, all[c].CreatedAt; ta != tc {
+			return ta > tc // newest first
+		}
+		return a < c
+	})
+	lost := 0
+	for _, id := range ids[MaxBaseComments:] {
+		if mine(id) {
+			lost++
+		}
+		delete(b.Comments, id)
+	}
+	if lost == 0 {
+		delete(e.Alarms, key)
+		return
+	}
+	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (%d hashes kept per entity, the newest): an edit of those is not written", lost, MaxBaseComments), nil, nil, nil)
+}
+
 func baseOf(g *GH) Base {
 	b := Base{Labels: sortedSet(g.Labels), Draft: g.Draft}
 	for id, t := range g.Threads {
@@ -496,7 +545,9 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 		if fv != nil && fv.bad != nil {
 			s.alarm(k, e, AlarmUnparseable, "gh", "gh on the form is not a GitHub cache object ("+fv.bad.Error()+"): rewritten from GitHub", nil, string(fv.ghRaw), nil)
 		}
-		e.Pend = &Agreed{Base: baseOf(&out)}
+		b := baseOf(&out)
+		s.boundBase(k, e, &b, &out)
+		e.Pend = &Agreed{Base: b}
 		return out, notes
 	}
 	F, B := fv.gh, *e.Base
@@ -705,6 +756,7 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 		}
 	}
 	s.commentEdits(k, e, G, F, B, &out, &next, auth)
+	s.boundBase(k, e, &next, &G)
 	e.Pend = &Agreed{Base: next, Pushed: e.pushing} // RO: the caller's, from the gh as written
 	e.pushing = nil
 	return out, notes

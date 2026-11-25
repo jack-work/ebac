@@ -92,6 +92,13 @@ type Entity struct {
 	CommentNew map[string]*CommentNew `json:"comment_new,omitempty"`
 }
 
+// shed drops the write path's bookkeeping (base, read-only hash, pending
+// agreement, retry counts, the long threads' ours cache); alarms, conflicts,
+// the reply hashes posted and the comment creates asked stay.
+func (e *Entity) shed() {
+	e.Base, e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = nil, "", nil, nil, nil, nil
+}
+
 // OursThread is our comments in one long review thread, read whole at N.
 type OursThread struct {
 	N        int                      `json:"n"`
@@ -569,11 +576,12 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		switch {
 		case fv.bad != nil:
 			redoBecause(k, e, "unparseable")
-		case fv.gh != nil && e.Base == nil:
-			// No base yet (a form written before the write path): read it
-			// deep now, so a base is agreed within one round of the rollout.
+		case fv.gh != nil && e.Base == nil && e.EndedAt.IsZero():
+			// No base yet (a form written before the write path, or an
+			// entity back from its end): read it deep now, so a base is
+			// agreed within one round. An ended one has none (shed).
 			redoBecause(k, e, "no-base")
-		case fv.gh != nil && pending(fv.gh, e.Base), len(fv.want.New) > 0:
+		case fv.gh != nil && e.Base != nil && pending(fv.gh, e.Base), len(fv.want.New) > 0:
 			redoBecause(k, e, "pending-write")
 		case fv.gh != nil && ((e.RO != "" && roHash(fv.gh) != e.RO) || len(fv.unknown) > 0):
 			redoBecause(k, e, "form-edit")
@@ -790,6 +798,16 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	for k := range retire {
 		if _, held := p.Children[k]; held { // never minted: nothing to retire
 			r.Forms = append(r.Forms, plugin.FormWrite{Key: k, Retire: true})
+		}
+	}
+
+	// An ended entity (closed, merged or no longer matching) keeps its form
+	// for ClosedTTL as a read-only mirror: its write path is shed, so the
+	// runtime holds only what its lifetime needs (#71s). Back from its end,
+	// it is read deep for a new base (no-base above).
+	for _, e := range ents {
+		if !e.EndedAt.IsZero() {
+			e.shed()
 		}
 	}
 
