@@ -91,6 +91,12 @@ type Entity struct {
 	// CommentNew are the comment creates asked on the form (create.go), by
 	// client key.
 	CommentNew map[string]*CommentNew `json:"comment_new,omitempty"`
+	// Ended is, while the entity is ended, its form's write fields as last
+	// written or read (labels, draft, resolved; no comments): a form that
+	// moves off them was edited by a seat, and that edit is reverted with an
+	// ended-edit alarm (#71s). shown is this round's gh written, as such.
+	Ended *Base `json:"ended,omitempty"`
+	shown *Base
 }
 
 // MaxState bounds the plugin's part of the critic form, runtime.gh_cache and
@@ -319,6 +325,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 			if e := ents[k]; e != nil {
 				redoBecause(k, e, "unlanded")
 				e.Digest = "" // what was sent never landed: the rewrite must not be skipped as unchanged
+				e.Ended = nil // what the form shows is unknown: taken again from the form
 			}
 		}
 	}
@@ -859,7 +866,16 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// for ClosedTTL as a read-only mirror: its write path is shed, so the
 	// runtime holds only what its lifetime needs (#71s). Back from its end,
 	// it is read deep for a new base (no-base above).
-	for _, e := range ents {
+	for k, e := range ents {
+		switch {
+		case e.EndedAt.IsZero():
+			e.Ended = nil
+		case e.shown != nil:
+			e.Ended = e.shown
+		case e.Ended == nil && forms[k] != nil && forms[k].gh != nil:
+			e.Ended = mirrorOf(forms[k].gh)
+		}
+		e.shown = nil
 		if !e.EndedAt.IsZero() {
 			e.shed()
 		}

@@ -253,6 +253,55 @@ func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (the newest %d of ours are kept): an edit of those is not written", len(lost), MaxBaseOurs), nil, nil, nil)
 }
 
+// AlarmEndedEdit: a seat edited a write field on an ended entity's form (a
+// read-only mirror, #71s); the edit is reverted by the write that raises it.
+const AlarmEndedEdit = "ended-edit"
+
+// mirrorOf is g's write fields without comment hashes (Entity.Ended).
+func mirrorOf(g *GH) *Base {
+	b := baseOf(g)
+	b.Comments = nil
+	return &b
+}
+
+// endedEdits raises one ended-edit alarm per write field a seat moved on an
+// ended entity's form F (G is GitHub's, which this write puts back): labels,
+// draft and a thread's resolved against the form as last written
+// (Entity.Ended; none known, none judged), every reply asked, and a comment
+// body that differs from GitHub's while GitHub's updated_at is the one the
+// form shows (GitHub did not move it; a cut body is never an edit).
+func (s *syncer) endedEdits(k string, e *Entity, F, G *GH) {
+	const why = "the entity ended (closed, merged or no longer tracked): its form is a read-only mirror, the edit is reverted and not written"
+	if m := e.Ended; m != nil {
+		if F.Draft != m.Draft {
+			s.alarm(k, e, AlarmEndedEdit, "draft", why, m.Draft, F.Draft, G.Draft)
+		}
+		if fl := sortedSet(F.Labels); !slices.Equal(fl, m.Labels) {
+			s.alarm(k, e, AlarmEndedEdit, "labels", why, m.Labels, fl, G.Labels)
+		}
+	}
+	ids := slices.Sorted(maps.Keys(F.Threads))
+	for _, id := range ids {
+		t := F.Threads[id]
+		if m := e.Ended; m != nil && t.Resolved != slices.Contains(m.Resolved, id) {
+			s.alarm(k, e, AlarmEndedEdit, "thread-"+id+"-resolved", why, !t.Resolved, t.Resolved, nil)
+		}
+		if len(t.Replies) > 0 {
+			s.alarm(k, e, AlarmEndedEdit, "thread-"+id+"-replies", why, nil, t.Replies, nil)
+		}
+	}
+	gc := allComments(G)
+	fc := allComments(F)
+	for _, id := range slices.Sorted(maps.Keys(fc)) {
+		f := fc[id]
+		g, ok := gc[id]
+		if !ok || f.Cut || g.Cut || f.UpdatedAt != g.UpdatedAt || f.Body == g.Body {
+			continue
+		}
+		s.alarm(k, e, AlarmEndedEdit, commentField(id), why, nil, f.Body, g.Body)
+	}
+}
+
 func baseOf(g *GH) Base {
 	b := Base{Labels: sortedSet(g.Labels), Draft: g.Draft}
 	for id, t := range g.Threads {
@@ -553,9 +602,13 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 		if fv != nil && fv.bad != nil {
 			s.alarm(k, e, AlarmUnparseable, "gh", "gh on the form is not a GitHub cache object ("+fv.bad.Error()+"): rewritten from GitHub", nil, string(fv.ghRaw), nil)
 		}
+		if fv != nil && fv.gh != nil && e.Base == nil && !e.EndedAt.IsZero() {
+			s.endedEdits(k, e, fv.gh, &g)
+		}
 		b := baseOf(&out)
 		s.boundBase(k, e, &b, &out)
 		e.Pend = &Agreed{Base: b}
+		e.shown = mirrorOf(&out)
 		return out, notes
 	}
 	F, B := fv.gh, *e.Base
@@ -767,6 +820,7 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 	s.boundBase(k, e, &next, &G)
 	e.Pend = &Agreed{Base: next, Pushed: e.pushing} // RO: the caller's, from the gh as written
 	e.pushing = nil
+	e.shown = mirrorOf(&out)
 	return out, notes
 }
 
