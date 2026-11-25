@@ -103,7 +103,9 @@ func AuthorizeGHWrite(w *Critic, e GHEntity, field string) string {
 		}
 		// A comment on an issue we authored (as the ours login) is in scope: no
 		// wider than issue_create, which may create any issue in a scope repo.
-		if field == FieldCommentCreate && g.Ours != "" && strings.EqualFold(e.Author, g.Ours) {
+		// So is an edit of one (comment_edit edits only comments the account
+		// wrote: viewerDidAuthor, checked by every caller).
+		if (field == FieldCommentCreate || field == FieldCommentEdit) && g.Ours != "" && strings.EqualFold(e.Author, g.Ours) {
 			return ""
 		}
 		if !g.Scope.IssuesFixedByScope {
