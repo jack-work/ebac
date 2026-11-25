@@ -83,6 +83,7 @@ type commentRig struct {
 	e      *Entity
 	fields []string
 	logs   []string
+	kinds  []string // the entity kinds the trusted check was asked about
 }
 
 func newCommentRig(t *testing.T) *commentRig {
@@ -128,6 +129,7 @@ func (r *commentRig) round(edit func(f *GH)) GH {
 	}
 	s := &syncer{ctx: context.Background(), gh: r.gh, now: time.Unix(1794000000, 0), logf: func(f string, a ...any) { r.logs = append(r.logs, fmt.Sprintf(f, a...)) },
 		p: Pass{Config: &Config{}, Ours: "ours", Auth: func(e model.GHEntity, field string) string {
+			r.kinds = append(r.kinds, e.Kind)
 			w := &model.Critic{Write: true, GHWrite: &model.GHWrite{Scope: model.GHScope{Repos: []string{"example/repo"}, Authors: []string{"ours"}}, Fields: r.fields}}
 			return model.AuthorizeGHWrite(w, e, field)
 		}}}
@@ -330,5 +332,14 @@ func TestEditsPastTheRoundCapDrainOverTwoRounds(t *testing.T) {
 		if strings.HasPrefix(id, "IC_000000") && c.author == "ours" && c.body == "old" {
 			t.Fatalf("%s never drained", id)
 		}
+	}
+}
+
+func TestAnIssueCommentEditIsAuthorizedAsAnIssue(t *testing.T) {
+	r := newCommentRig(t)
+	r.e.Kind = KindIssue
+	r.round(func(f *GH) { setBody(f, "IC_00000001", "second take") })
+	if len(r.kinds) == 0 || r.kinds[0] != KindIssue {
+		t.Fatalf("the trusted check saw kinds %v, want the issue's", r.kinds)
 	}
 }

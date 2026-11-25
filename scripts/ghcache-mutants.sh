@@ -109,7 +109,7 @@ MUTANTS=(
   "I1|$G/ghcache.go|for _, n := range rl.Issues {|for _, n := range []int{} {|./$G/"
   "I2|$G/gh.go|if g.Kind != KindIssue {|if true {|./$G/"
   "I3|$G/query.go|return Mark{UpdatedAt: m.UpdatedAt, State: m.State, Comments: m.Comments.TotalCount}|return Mark{UpdatedAt: m.UpdatedAt, State: m.State}|./$G/"
-  "I4|$G/sync.go|if e.Kind == KindIssue {|if false {|./$G/"
+  "I4|$G/sync.go|if e.Kind == KindIssue && field != model.FieldCommentEdit {|if false {|./$G/"
   "I5|$G/ghcache.go|if !e.ended() && e.Kind != KindIssue {|if !e.ended() {|./$G/"
   "I6|$G/ghcache.go|g.Comments = cutAll(g.Comments, func(c CachedComment) bool { return !isOurs(c) })|g.Comments = cutAll(g.Comments, func(CachedComment) bool { return true })|./$G/"
   "I7|$G/ghcache.go|if size() < before {|if true {|./$G/"
@@ -139,6 +139,7 @@ MUTANTS=(
   "E9|$G/sync.go|	c.Comments = noBodies(g.Comments)|	_ = noBodies|./$G/"
   "E10|$G/comment_edit.go|	next.Comments[id] = hash12(body)|	_ = body|./$G/"
   "E11|$G/comment_edit.go|		if wants = wants[:room]; len(wants) == 0 {|		if wants = wants[:0]; len(wants) == 0 {|./$G/"
+  "E12|$G/sync.go|			ie.Kind = KindIssue|			ie.Kind = KindPR|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
@@ -171,5 +172,5 @@ EOF
   elif [ $st -eq 0 ]; then echo "$id NOT-CAUGHT"; bad=1
   else echo "$id KILLED $(grep -o -- '--- FAIL: [A-Za-z0-9_]*' <<<"$out" | head -3 | sed 's/--- FAIL: //' | paste -sd,)"; fi
 done
-n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 125 ] || { echo "only $n mutants" >&2; exit 2; }
+n=$(echo "${#MUTANTS[@]}"); [ "$n" -ge 126 ] || { echo "only $n mutants" >&2; exit 2; }
 exit $bad
