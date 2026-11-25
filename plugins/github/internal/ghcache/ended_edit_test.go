@@ -113,3 +113,46 @@ func TestGitHubMovingUnderAnEndedFormRaisesNoAlarm(t *testing.T) {
 		t.Fatalf("the next round raised %v", got)
 	}
 }
+
+// A write of an ended form that does not land leaves the form as it was: what it shows is unknown, so the next
+// round judges no mirror field against the write that never landed (GitHub's upstream label is no seat's edit).
+func TestAnUnlandedEndedWriteJudgesNoMirror(t *testing.T) {
+	w, k, pr := endedWorld(t)
+	pr.Labels.Nodes = append(pr.Labels.Nodes, struct {
+		Name string `json:"name"`
+	}{Name: "needs-review"})
+	pr.Labels.TotalCount++
+	w.moveAt, w.moveKey = k, "sync" // a seat writes sync between the core's read and its write: the write does not land
+	deepAgain(w, pr)
+	if f := w.formGH(k); slices.Contains(f.Labels, "needs-review") {
+		t.Fatalf("the write landed: %v", f.Labels)
+	}
+	w.round() // redone
+	if got := endedAlarms(w, k); len(got) != 0 {
+		t.Fatalf("an unlanded write read as a seat's edit: %v", got)
+	}
+}
+
+// An entity that ends without a deep read (it left its search, still open) takes its mirror from the form as read
+// that round: a later edit of its labels is reverted with the alarm.
+func TestAnEntityEndedByItsSearchMirrorsItsForm(t *testing.T) {
+	const q = "repo:acme/widget is:pr is:open author:our-author"
+	w := newWriteWorld(t, `{"repos":["acme/widget"],"rules":[{"author":["our-author"]}]}`)
+	w.gh.search[q] = []int{7}
+	w.round()
+	w.round()
+	k := keyOf(KindPR, "acme/widget", 7)
+	if e := w.st.Entities[k]; e == nil || e.Base == nil {
+		t.Fatalf("#7 not tracked with a base: %+v", e)
+	}
+	w.gh.search[q] = nil // it leaves the search, open: untracked
+	w.round()
+	if e := w.st.Entities[k]; e == nil || e.EndedAt.IsZero() || e.Ended == nil || len(w.r.Telemetry.Deep) != 0 {
+		t.Fatalf("#7 should end unread with a mirror: %+v, deep %v", e, w.r.Telemetry.Deep)
+	}
+	w.edit(k, addLabel("blocked"))
+	deepAgain(w, w.gh.prs["acme/widget"][7])
+	if got := endedAlarms(w, k); !slices.Equal(got, []string{"ended-edit.labels"}) {
+		t.Fatalf("ended-edit alarms = %v, want [ended-edit.labels]", got)
+	}
+}

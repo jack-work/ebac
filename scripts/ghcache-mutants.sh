@@ -159,6 +159,15 @@ MUTANTS=(
   "X16|$G/ghcache.go|const MaxState = 128 * 1024|const MaxState = 192 * 1024|./$G/"
   "X17|$G/ghcache.go|			delete(e.Alarms, AlarmOverBound+\".state\") // the state fits|			_ = e.Alarms // the state fits|./$G/"
   "X18|$G/ghcache.go|			e.Pend.Base.Comments = nil|			_ = e|./$G/"
+  "Y1|$G/sync.go|			s.endedEdits(k, e, fv.gh, &g)|			_ = fv|./$G/"
+  "Y2|$G/sync.go|		if F.Draft != m.Draft {|		if false {|./$G/"
+  "Y3|$G/sync.go|!slices.Equal(fl, m.Labels) {|false {|./$G/"
+  "Y4|$G/sync.go|m != nil && t.Resolved != slices.Contains(m.Resolved, id) {|m != nil && false {|./$G/"
+  "Y5|$G/sync.go|		if len(t.Replies) > 0 {|		if false {|./$G/"
+  "Y6|$G/sync.go|f.UpdatedAt != g.UpdatedAt \|\| f.Body == g.Body|f.Body == g.Body|./$G/"
+  "Y7|$G/ghcache.go|			e.Ended = e.shown|			_ = e|./$G/"
+  "Y8|$G/ghcache.go|				e.Ended = nil // what the form shows is unknown|				_ = e // what the form shows is unknown|./$G/"
+  "Y9|$G/ghcache.go|			e.Ended = mirrorOf(forms[k].gh)|			_ = e|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
 # two red tests "killed" every mutant).
