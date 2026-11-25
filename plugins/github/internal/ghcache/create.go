@@ -36,6 +36,18 @@ import (
 // Every created text passes the disclose list first; a refusal is an alarm
 // and nothing is written to GitHub.
 
+// MaxBodyBytes is GitHub's limit on an issue or comment body: a longer ask
+// is refused at its record (it never enters the cache's state).
+const MaxBodyBytes = 65536
+
+// MaxInFlightBytes bounds the text of the creates recorded and not yet done
+// (the cache's state lives on the register under its size budget): past
+// it, a new ask waits for the next round.
+const MaxInFlightBytes = 96 << 10
+
+// askHash is what a record keeps of an ask's text: enough to tell it changed.
+func askHash(body string) string { return hash12(body) }
+
 // CreatedTTL is how long a created issue's sync.praxis_new record stays.
 const CreatedTTL = 24 * time.Hour
 
@@ -45,20 +57,21 @@ const AdoptFirst = 50
 
 // Create is one asked-for issue's bookkeeping (State.Creates, by praxis id).
 type Create struct {
-	Repo   string                     `json:"repo"`
-	State  string                     `json:"state"` // creating | created | refused
-	At     time.Time                  `json:"at"`
-	Req    string                     `json:"req"`              // hash of the request it was recorded for
-	Title  string                     `json:"title,omitempty"`  // as rendered when recorded: what is created
-	Body   string                     `json:"body,omitempty"`   // ends with the praxis-id marker
-	Praxis json.RawMessage            `json:"praxis,omitempty"` // the request, minted on the form
-	Issue  int                        `json:"issue,omitempty"`
-	URL    string                     `json:"url,omitempty"`
-	Key    string                     `json:"key,omitempty"` // the minted child key
-	Tries  int                        `json:"tries,omitempty"`
-	Mint   map[string]json.RawMessage `json:"mint,omitempty"` // the minting write's keys, written again until the form is held
-	Rule   string                     `json:"rule,omitempty"` // refused: the praxis rule or write-refused
-	Detail string                     `json:"detail,omitempty"`
+	Repo   string          `json:"repo"`
+	State  string          `json:"state"` // creating | created | refused
+	At     time.Time       `json:"at"`
+	Req    string          `json:"req"`              // hash of the request it was recorded for
+	Title  string          `json:"title,omitempty"`  // as rendered when recorded: what is created
+	Body   string          `json:"body,omitempty"`   // ends with the praxis-id marker
+	Praxis json.RawMessage `json:"praxis,omitempty"` // the request, minted on the form
+	ID     string          `json:"id,omitempty"`     // the praxis id (the register key)
+	ID     string          `json:"id,omitempty"`     // the praxis id (the register key)
+	Issue  int             `json:"issue,omitempty"`
+	URL    string          `json:"url,omitempty"`
+	Key    string          `json:"key,omitempty"` // the minted child key
+	Tries  int             `json:"tries,omitempty"`
+	Rule   string          `json:"rule,omitempty"` // refused: the praxis rule or write-refused
+	Detail string          `json:"detail,omitempty"`
 }
 
 // CommentNew is one asked-for comment's bookkeeping (State.Comments, by
@@ -66,7 +79,7 @@ type Create struct {
 type CommentNew struct {
 	State string    `json:"state"` // creating | created | refused
 	At    time.Time `json:"at"`
-	Ask   string    `json:"ask,omitempty"`  // the body as asked (compared with the form's ask)
+	Ask   string    `json:"ask,omitempty"`  // hash of the body as asked (compared with the form's ask)
 	Body  string    `json:"body,omitempty"` // as posted: the marker line, then the asked body
 	ID    string    `json:"id,omitempty"`
 	URL   string    `json:"url,omitempty"`
@@ -82,7 +95,11 @@ type creator struct {
 	st    *State
 	p     Pass
 	reg   map[string]any // the register's sync key, rebuilt every round
-	mints int            // forms this round mints (they count against the form cap)
+	mints int            // forms this round's creations mint (they count against the form cap)
+	// planned is the forms this round mints besides creations, less its
+	// retires (Run's entity writes): with the held ones and mints, the
+	// round's whole child set, which must stay within maxForms.
+	planned int
 }
 
 // regAlarm sets sync.alarm.<kind>.<field> on the register.
@@ -188,10 +205,13 @@ func (c *creator) issues(asks map[string]json.RawMessage) []plugin.FormWrite {
 				delete(c.st.Creates, id)
 				continue
 			}
-			if _, held := c.p.Children[cr.Key]; !held && c.p.Children != nil && len(cr.Mint) > 0 {
+			_, held := c.p.Children[cr.Key]
+			_, ours := c.st.OurIssues[cr.Key]
+			if !held && ours && c.p.Children != nil && c.room() > 0 {
 				// The minting write did not land: write it again (it lands
-				// only on a form still without gh and praxis).
-				out = append(out, plugin.FormWrite{Key: cr.Key, Set: cr.Mint, ExpectAbsent: []string{"gh", "praxis"}})
+				// only on a form still without gh and praxis). Only while the
+				// issue is ours and tracked: one that left tracking stays gone.
+				out = append(out, c.mint(cr))
 			}
 			c.regSet("praxis_new", id, map[string]any{"state": "created", "issue": cr.Issue, "form": c.p.Children[cr.Key], "at": cr.At.Format(time.RFC3339)})
 			continue
@@ -210,8 +230,15 @@ func (c *creator) issues(asks map[string]json.RawMessage) []plugin.FormWrite {
 			c.regAlarm(alarmKindOf(cr.Rule), alarmFieldOf(cr.Rule, id), map[string]any{"rule": strings.TrimPrefix(cr.Rule, "praxis:"), "detail": cr.Detail, "at": cr.At.Format(time.RFC3339)})
 			continue
 		}
+		if c.s.inflight+len(raw) > MaxInFlightBytes {
+			c.s.logf("praxis_new %s: %d bytes of creates in flight (max %d): recorded next round", id, c.s.inflight, MaxInFlightBytes)
+			continue
+		}
 		cr = c.record(id, raw)
 		c.st.Creates[id] = cr
+		if cr.State == "creating" {
+			c.s.inflight += len(cr.Body) + len(cr.Praxis)
+		}
 		if cr.State == "refused" {
 			c.regAlarm(alarmKindOf(cr.Rule), alarmFieldOf(cr.Rule, id), map[string]any{"rule": strings.TrimPrefix(cr.Rule, "praxis:"), "detail": cr.Detail, "at": cr.At.Format(time.RFC3339)})
 			c.s.logf("praxis_new %s refused: %s: %s", id, cr.Rule, cr.Detail)
@@ -268,6 +295,10 @@ func (c *creator) record(id string, raw json.RawMessage) *Create {
 		} else {
 			cr.Rule, cr.Detail = AlarmUnparseable, err.Error()
 		}
+		return cr
+	}
+	if len(r.Body) > MaxBodyBytes {
+		cr.Rule, cr.Detail = "too-long", fmt.Sprintf("body of %d bytes: GitHub takes at most %d", len(r.Body), MaxBodyBytes)
 		return cr
 	}
 	for _, t := range []string{r.Title, r.Body} {
@@ -385,8 +416,8 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 			return nil, false
 		}
 	}
-	if max := maxForms(c.p.Config); len(c.p.Children)+c.mints >= max {
-		c.s.logf("praxis_new %s: the cache holds %d forms (max %d): created when one is free", id, len(c.p.Children)+c.mints, max)
+	if c.room() <= 0 {
+		c.s.logf("praxis_new %s: no form slot this round (max %d): created when one is free", id, maxForms(c.p.Config))
 		keep()
 		return nil, false
 	}
@@ -421,6 +452,24 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 	return c.created(id, cr, made.CreateIssue.Issue.Number, made.CreateIssue.Issue.URL), true
 }
 
+// inFlight is the bytes of the creates recorded and not done in st.
+func inFlight(st *State) int {
+	n := 0
+	for _, c := range st.Creates {
+		if c.State == "creating" {
+			n += len(c.Body) + len(c.Praxis)
+		}
+	}
+	for _, e := range st.Entities {
+		for _, cn := range e.CommentNew {
+			if cn.State == "creating" {
+				n += len(cn.Body)
+			}
+		}
+	}
+	return n
+}
+
 // discloses is the disclose list's verdict on a text GitHub would show
 // (Pass.Disclose in tests, else the sdk's list).
 func (p Pass) discloses(t string) string {
@@ -428,6 +477,22 @@ func (p Pass) discloses(t string) string {
 		return p.Disclose(t)
 	}
 	return disclose.Disclosure(t)
+}
+
+// room is how many more forms this round may mint.
+func (c *creator) room() int {
+	return maxForms(c.p.Config) - len(c.p.Children) - c.planned - c.mints
+}
+
+// mint is the write that mints cr's issue form (its praxis keys, once).
+func (c *creator) mint(cr *Create) plugin.FormWrite {
+	var px map[string]any
+	_ = json.Unmarshal(cr.Praxis, &px)
+	delete(px, "repo")
+	px["number"], px["id"] = cr.Issue, cr.ID
+	gh := map[string]any{"kind": "issue", "number": cr.Issue, "url": cr.URL, "state": "OPEN", "title": cr.Title, "author": c.p.Ours}
+	c.mints++
+	return plugin.FormWrite{Key: cr.Key, Set: map[string]json.RawMessage{"gh": mustJSON(gh), "praxis": mustJSON(px)}, ExpectAbsent: []string{"gh", "praxis"}}
 }
 
 // maxForms is the forms the cache may hold (Config.Max, else DefaultMax).
@@ -439,15 +504,14 @@ func maxForms(cfg *Config) int {
 }
 
 // created records issue n as id's, enrols it as a tracked entity (ours:
-// kept without a rule) and mints its entity form.
+// kept without a rule) and mints its entity form: not when the form is
+// already held (it was minted before; praxis is set only once), and not when
+// the round has no slot left (the next round with one mints it).
 func (c *creator) created(id string, cr *Create, n int, url string) []plugin.FormWrite {
 	now := c.p.Now.UTC()
-	cr.State, cr.Issue, cr.URL, cr.Key, cr.At = "created", n, url, IssueKey(cr.Repo, n), now
+	cr.State, cr.Issue, cr.URL, cr.Key, cr.At, cr.ID = "created", n, url, IssueKey(cr.Repo, n), now, id
 	var px map[string]any
 	_ = json.Unmarshal(cr.Praxis, &px)
-	delete(px, "repo")
-	px["number"], px["id"] = n, id
-	gh := map[string]any{"kind": "issue", "number": n, "url": url, "state": "OPEN", "title": cr.Title, "author": c.p.Ours}
 	c.regSet("praxis_new", id, map[string]any{"state": "created", "issue": n, "form": c.p.Children[cr.Key], "at": cr.At.Format(time.RFC3339)})
 	if p, _ := px["parent"].(float64); p != 0 {
 		c.regSet("praxis_children_add", fmt.Sprint(int(p)), n)
@@ -461,10 +525,11 @@ func (c *creator) created(id string, cr *Create, n int, url string) []plugin.For
 	if c.st.OurIssues == nil {
 		c.st.OurIssues = map[string]Ref{}
 	}
-	c.st.OurIssues[cr.Key] = Ref{Repo: cr.Repo, N: n}
-	c.mints++
-	cr.Mint = map[string]json.RawMessage{"gh": mustJSON(gh), "praxis": mustJSON(px)}
-	return []plugin.FormWrite{{Key: cr.Key, Set: cr.Mint, ExpectAbsent: []string{"gh", "praxis"}}}
+	c.st.OurIssues[cr.Key] = Ref{Repo: cr.Repo, N: n, Issue: true}
+	if _, held := c.p.Children[cr.Key]; held || c.room() <= 0 {
+		return nil
+	}
+	return []plugin.FormWrite{c.mint(cr)}
 }
 
 // wantView is an entity form's want key as the core read it.
@@ -584,17 +649,26 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 		if strings.TrimSpace(body) == "" {
 			return "empty body"
 		}
+		if len(body)+len(CommentMarker("", "", ""))+1 > MaxBodyBytes {
+			return fmt.Sprintf("body of %d bytes: GitHub takes at most %d", len(body), MaxBodyBytes)
+		}
 		return s.p.discloses(body)
 	}
 	record := func(key, body string) *CommentNew {
 		field := "comments.new." + key
-		cn := &CommentNew{At: s.now, Ask: body}
+		cn := &CommentNew{At: s.now, Ask: askHash(body)}
 		if why := guard(body); why != "" {
 			cn.State, cn.Why = "refused", why
 			s.alarm(k, e, AlarmWriteRefused, field, why, nil, nil, nil)
+		} else if s.inflight+len(body) > MaxInFlightBytes {
+			// No room in the state this round: not recorded, asked again next round.
+			s.logf("%s: %s: %d bytes of creates in flight (max %d): recorded next round", k, field, s.inflight, MaxInFlightBytes)
+			delete(e.CommentNew, key)
+			return nil
 		} else {
 			// Recorded: posted the round after this record landed.
 			cn.State, cn.Body = "creating", CommentMarker(form, key, body)+"\n"+body
+			s.inflight += len(cn.Body)
 		}
 		e.CommentNew[key] = cn
 		return cn
@@ -606,9 +680,9 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 		switch {
 		case cn == nil:
 			cn = record(key, body)
-		case cn.State == "refused" && cn.Ask != body:
+		case cn.State == "refused" && cn.Ask != askHash(body):
 			cn = record(key, body) // a refused ask, changed: judged again
-		case cn.State == "created" && cn.Ask != body:
+		case cn.State == "created" && cn.Ask != askHash(body):
 			cn = record(key, body) // the key asked again with new text: a new comment
 		case cn.State == "creating":
 			marker, _, _ := strings.Cut(cn.Body, "\n")
@@ -620,12 +694,12 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 			if got != nil {
 				cn.State, cn.ID, cn.URL = "created", got.ID, got.URL
 				s.logf("%s: %s adopted %s (its create's answer was lost)", k, field, got.ID)
-				if cn.Ask != body {
+				if cn.Ask != askHash(body) {
 					cn = record(key, body) // the old text is on GitHub; the new ask is its own comment
 				}
 				break
 			}
-			if cn.Ask != body {
+			if cn.Ask != askHash(body) {
 				cn = record(key, body) // never posted: the new text replaces it
 				break
 			}
@@ -661,6 +735,9 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 				cn.State, cn.ID, cn.URL = "created", made.AddComment.CommentEdge.Node.ID, made.AddComment.CommentEdge.Node.URL
 			} // else: posted, answer unreadable: the next round's listing adopts it
 		}
+		if cn == nil {
+			continue // not recorded this round (no room in flight)
+		}
 		rec := map[string]any{"state": cn.State, "at": cn.At.Format(time.RFC3339)}
 		if cn.ID != "" {
 			rec["id"], rec["url"] = cn.ID, cn.URL
@@ -669,7 +746,7 @@ func (s *syncer) comments(k string, e *Entity, ent model.GHEntity, node string, 
 			rec["why"] = cut(cn.Why, 200)
 		}
 		shown[key] = rec
-		if cn.State == "created" && cn.Ask == body {
+		if cn.State == "created" && cn.Ask == askHash(body) {
 			done[key] = true // the ask as read is the one posted: it leaves the form
 		}
 	}

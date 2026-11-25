@@ -470,7 +470,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		delete(ents, k)
 	}
 	for k, e := range ents {
-		_, isExplicit := explicit[k]
+		isExplicit := trackedExplicitly(k, explicit, r.State.OurIssues)
 		gone := e.ended() || (doSearch && complete && !inSearch[k] && !isExplicit)
 		switch {
 		case !gone:
@@ -532,7 +532,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	// 4b. The entity forms as the core read them: acked alarms clear; a form
 	// asking for a write, edited outside its write fields or unparseable is
 	// read deep this round (the three-way runs on a fresh GitHub read).
-	sy := &syncer{ctx: ctx, gh: gh, p: p, now: now, logf: logf, children: p.Children}
+	sy := &syncer{ctx: ctx, gh: gh, p: p, now: now, logf: logf, children: p.Children, inflight: inFlight(&r.State)}
 	forms := map[string]*formView{}
 	forced := map[string]bool{}
 	for k, e := range ents {
@@ -722,7 +722,21 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 	// 6. Creations asked on the register (create.go).
-	cr := &creator{s: sy, st: &r.State, p: p, reg: map[string]any{}}
+	// The round's whole child set must stay within the cap: creations get
+	// the slots the held forms and this round's entity mints leave (less
+	// its retires).
+	planned := 0
+	for _, f := range r.Forms {
+		if _, held := p.Children[f.Key]; !held && !f.Retire {
+			planned++
+		}
+	}
+	for k := range retire {
+		if _, held := p.Children[k]; held {
+			planned--
+		}
+	}
+	cr := &creator{s: sy, st: &r.State, p: p, reg: map[string]any{}, planned: planned}
 	for _, fw := range cr.issues(p.PraxisNew) {
 		// A mint of a form this round writes anyway is folded into that write
 		// (two writes of one new child would set praxis twice).
@@ -749,6 +763,9 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		if ents[k] == nil {
 			delete(r.State.OurIssues, k)
 		}
+	}
+	for k := range r.State.OurIssues {
+		delete(retire, k) // ours: enrolled (an adopt may have found a form minted in a round whose state was lost)
 	}
 	for k := range retire {
 		if _, held := p.Children[k]; held { // never minted: nothing to retire
@@ -779,6 +796,17 @@ func tierOr(t string) string {
 		return "hot"
 	}
 	return t
+}
+
+// trackedExplicitly: k is named by a rule (explicit) or is an issue the
+// cache created (ours, tracked for as long as it lives): a search that does
+// not return it does not end it.
+func trackedExplicitly(k string, explicit map[string]int, ours map[string]Ref) bool {
+	if _, ok := explicit[k]; ok {
+		return true
+	}
+	_, ok := ours[k]
+	return ok
 }
 
 // entityWrite builds one entity form write of g (GHOf(pr) after the sync),

@@ -273,6 +273,7 @@ type syncer struct {
 	cur       string     // the entity being synced (telemetry)
 	log       []WriteRec // this round's GitHub writes (telemetry)
 	wholeRead int        // long threads read whole this round (MaxFullThreads)
+	inflight  int        // bytes of creates recorded and not done (create.go: MaxInFlightBytes)
 }
 
 func (s *syncer) alarm(k string, e *Entity, kind, field, detail string, base, form, gh any) {

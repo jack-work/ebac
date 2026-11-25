@@ -505,3 +505,78 @@ func TestTheCacheAtItsFormCapCreatesNothing(t *testing.T) {
 		t.Fatalf("a create past the form cap: %v %+v", gh.mutations, st.Creates[askID])
 	}
 }
+
+// Review r2: the child cap covers every mint, a held form is never minted
+// again, our issues stay tracked, and asks are bounded in size.
+
+func TestAnAdoptOnAHeldFormWritesNoMint(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	gh, st := &createGH{}, &State{}
+	createRound(t, gh, st, ask(nil), t0, nil)
+	gh.issues = []ourIssue{{Number: 1001, URL: "u", Body: "b\n" + praxisstd.Marker(askID), CreatedAt: t0.Add(time.Second)}}
+	c, n := createRound(t, gh, st, ask(nil), t0.Add(time.Minute), map[string]string{"repo-issue-1001": "@000000f1"})
+	if n != 0 || len(gh.mutations) != 0 || regState(c, askID)["issue"] != 1001 || st.OurIssues["repo-issue-1001"].N != 1001 {
+		t.Fatalf("an adopt minted a held form: %d writes, mutations %v, register %v", n, gh.mutations, c.reg)
+	}
+}
+
+func TestCreationsGetOnlyTheSlotsTheRoundLeaves(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	gh, st := &createGH{}, &State{}
+	p := Pass{Config: &Config{Max: 5}, Now: t0, Auth: scopeAuth("example/repo"), Ours: "ours", Children: map[string]string{"repo-pr-1": "@x"}}
+	for _, at := range []time.Time{t0, t0.Add(time.Minute)} {
+		p.Now = at
+		sy := &syncer{ctx: context.Background(), gh: gh, p: p, now: at, logf: func(string, ...any) {}}
+		(&creator{s: sy, st: st, p: p, reg: map[string]any{}, planned: 4}).issues(ask(nil)) // 1 held + 4 entity mints = 5
+	}
+	if len(gh.mutations) != 0 {
+		t.Fatalf("a create took a slot this round's entity mints use: %v", gh.mutations)
+	}
+}
+
+func TestAnIssueThatLeftTrackingIsNotMintedAgain(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	gh, st := &createGH{}, &State{}
+	createRound(t, gh, st, ask(nil), t0, map[string]string{})
+	createRound(t, gh, st, ask(nil), t0.Add(time.Minute), map[string]string{})
+	delete(st.OurIssues, "repo-issue-1001") // closed and past its TTL: no longer ours to track
+	if _, n := createRound(t, gh, st, ask(nil), t0.Add(2*time.Minute), map[string]string{}); n != 0 {
+		t.Fatalf("an untracked issue's form was minted again: %d writes", n)
+	}
+}
+
+func TestOurIssueIsTrackedLikeAnExplicitOne(t *testing.T) {
+	ours := map[string]Ref{"repo-issue-1001": {Repo: "example/repo", N: 1001, Issue: true}}
+	if !trackedExplicitly("repo-issue-1001", map[string]int{}, ours) {
+		t.Fatal("our created issue ends at the next complete search")
+	}
+	if trackedExplicitly("repo-issue-1002", map[string]int{}, ours) {
+		t.Fatal("an issue we did not create is kept past its search")
+	}
+	if !trackedExplicitly("repo-pr-7", map[string]int{"repo-pr-7": 0}, nil) {
+		t.Fatal("an explicit rule's entity ends at a search")
+	}
+}
+
+func TestATooLongCommentIsRefusedAtItsRecord(t *testing.T) {
+	gh, e := &createGH{}, &Entity{}
+	big := `{"comments":{"new":{"c1":{"body":"` + strings.Repeat("a", MaxBodyBytes) + `"}}}}`
+	commentRound(gh, e, big, time.Unix(1795000000, 0))
+	if cn := e.CommentNew["c1"]; cn == nil || cn.State != "refused" || cn.Body != "" || len(cn.Ask) > 32 || gh.reads+len(gh.mutations) != 0 {
+		t.Fatalf("a body past GitHub's limit entered the state: %+v", cn)
+	}
+}
+
+func TestCreatesInFlightAreBoundedInBytes(t *testing.T) {
+	gh, e := &createGH{}, &Entity{}
+	p := Pass{Now: time.Unix(1795000000, 0), Auth: scopeAuth("example/repo")}
+	sy := &syncer{ctx: context.Background(), gh: gh, p: p, now: p.Now, logf: func(string, ...any) {}, children: map[string]string{"repo-pr-7": "@000000e1"},
+		inflight: MaxInFlightBytes - 10}
+	_, shown := sy.comments("repo-pr-7", e, model.GHEntity{Repo: "example/repo", Kind: "pr", N: 7, Author: "ours"}, "PR_00000007", readWant(json.RawMessage(wantOne)))
+	if e.CommentNew["c1"] != nil || shown["c1"] != nil {
+		t.Fatalf("an ask past the in-flight budget was recorded: %+v", e.CommentNew["c1"])
+	}
+	if inFlight(&State{Creates: map[string]*Create{"x": {State: "creating", Body: "12345", Praxis: json.RawMessage(`{}`)}}}) != 7 {
+		t.Fatal("inFlight miscounts a creating record")
+	}
+}
