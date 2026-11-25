@@ -1,0 +1,26 @@
+# #76 call cost + call pace mutants: id file line old new package test-regex
+Q1-run-not-on-process-total	sdk/forge/gh.go	140	chargeProcess(1, 0, 0, -1)	chargeProcess(0, 0, 0, -1)	./sdk/forge	TestEveryClientsSpendIsBookedOnTheProcessTotal
+Q2-mutate-unpaced	sdk/forge/gh.go	385	if err := paceCall(ctx); err != nil {	if err := error(nil); err != nil {	./sdk/forge	TestThePacerHearsEveryGraphQLCall|TestACallWhosePacerWaitEndsIsNotMade
+Q3-mutate-not-charged	sdk/forge/gh.go	398	g.chargeGraphQL()	_ = 0	./sdk/forge	TestEveryClientsSpendIsBookedOnTheProcessTotal
+Q4-read-unpaced	sdk/forge/gql.go	82	if err := paceCall(ctx); err != nil {	if err := error(nil); err != nil {	./sdk/forge	TestThePacerHearsEveryGraphQLCall|TestACallWhosePacerWaitEndsIsNotMade
+Q5-read-not-charged-at-dispatch	sdk/forge/gql.go	88	g.chargeGraphQL()	_ = 0	./sdk/forge	TestAReadThatFailsOrIsUnreadableIsStillChargedAsGraphQL|TestEveryClientsSpendIsBookedOnTheProcessTotal
+Q6-read-cost-not-booked	sdk/forge/gql.go	113	chargeProcess(0, 0, extra, rl.Remaining)	chargeProcess(0, 0, 0, rl.Remaining)	./sdk/forge	TestEveryClientsSpendIsBookedOnTheProcessTotal
+Q7-read-cost-not-settled	sdk/forge/gql.go	114	settleCall(rl.Cost)	settleCall(1)	./sdk/forge	TestThePacerHearsEveryGraphQLCall
+Q8-remaining-overwritten-unknown	sdk/forge/process.go	85	if remaining >= 0 {	if true {	./sdk/forge	TestEveryClientsSpendIsBookedOnTheProcessTotal
+Q9-outbox-write-unpaced	sdk/forge/process.go	103	if err := paceCall(ctx); err != nil {	if err := error(nil); err != nil {	./sdk/forge	TestOutboxGraphQLWritesArePacedAndChargedAsGraphQL
+Q10-outbox-write-not-charged	sdk/forge/process.go	107	g.chargeGraphQL()	_ = 0	./sdk/forge	TestOutboxGraphQLWritesArePacedAndChargedAsGraphQL
+Q11-settle-books-nothing	internal/callpace/callpace.go	129	b.Calls[i].Pts += extra	b.Calls[i].Pts += 0	./internal/callpace	TestSettleBooksWhatACallCostBeyondItsPoint
+Q12-limit-off-by-one	internal/callpace/callpace.go	146	if used+1 <= l.Limit {	if used <= l.Limit {	./internal/callpace	TestTheIncidentBatchNeverSpendsMoreThanThirtyPointsInFiveMinutes
+Q13-wait-counts-calls	internal/callpace/callpace.go	163	over -= e.Pts	over -= 1	./internal/callpace	TestSettleBooksWhatACallCostBeyondItsPoint
+Q14-wait-a-whole-window	internal/callpace/callpace.go	165	wait = e.At.Add(l.Window).Sub(now)	wait = l.Window	./internal/callpace	TestSettleBooksWhatACallCostBeyondItsPoint
+Q15-no-lock	internal/callpace/callpace.go	188	if err := syscall.Flock(int(fh.Fd()), syscall.LOCK_EX); err != nil {	if err := error(nil); err != nil {	./internal/callpace	TestTwoProcessesShareOneBudget
+Q16-window-edge-kept	internal/callpace/callpace.go	206	if now.Sub(e.At) < l.Window {	if now.Sub(e.At) <= l.Window {	./internal/callpace	TestTheIncidentBatchNeverSpendsMoreThanThirtyPointsInFiveMinutes
+Q17-empty-line-printed	cmd/ebac/callcost.go	26	if s.All == 0 {	if false {	./cmd/ebac	TestAVerbThatCalledNothingHasNoCostLine
+Q18-journal-stream-dev-or-ino	cmd/ebac/callcost.go	59	== dev && strconv	== dev || strconv	./cmd/ebac	TestStderrIsJournalOnlyWhenTheStreamIsStderr
+Q19-daemon-prints	cmd/ebac/callcost.go	65	if cmd == "daemon" {	if false {	./cmd/ebac	TestReportVerbCostPrintsAndJournals
+Q20-unit-journals-twice	cmd/ebac/callcost.go	73	if toJournal {	if true {	./cmd/ebac	TestReportVerbCostPrintsAndJournals
+Q21-units-paced	cmd/ebac/callcost.go	83	return caller != "" && cmd != "daemon"	return cmd != "daemon"	./cmd/ebac	TestOnlyASeatsOneShotCallIsPaced
+Q22-daemon-paced	cmd/ebac/callcost.go	83	return caller != "" && cmd != "daemon"	return caller != ""	./cmd/ebac	TestOnlyASeatsOneShotCallIsPaced
+Q23-tee-journals-every-line	cmd/ebac/callcost.go	121	if roundCostLine.MatchString(line) {	if true {	./cmd/ebac	TestASeatsRoundCostLinesReachTheJournal
+Q24-tee-journals-nothing	cmd/ebac/callcost.go	121	if roundCostLine.MatchString(line) {	if false {	./cmd/ebac	TestASeatsRoundCostLinesReachTheJournal
+Q25-units-tee	cmd/ebac/callcost.go	133	if !journalSeat {	if false {	./cmd/ebac	TestRoundOutTeesOnlyASeatsCall

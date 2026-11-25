@@ -161,6 +161,10 @@ func main() {
 	// Strip global flags wherever they appear.
 	args = extractGlobals(args, &g)
 
+	journalSeat = !stderrIsJournal(os.Getenv("JOURNAL_STREAM"), os.Stderr)
+	if pacesCalls(cmd, g.caller) {
+		installPacer(os.Stderr)
+	}
 	ctx := context.Background()
 	var err error
 	switch cmd {
@@ -243,6 +247,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ebac: unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
 	}
+	reportVerbCost(cmd, forge.ProcessSpent(), os.Stderr, journalSeat, journalSend)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ebac: %v\n", err)
 		os.Exit(1)

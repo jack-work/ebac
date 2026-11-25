@@ -73,6 +73,12 @@ func TestHelperProcess(t *testing.T) {
 	q := fakegql.Query(rest)
 
 	switch scenario {
+	case "nonjson":
+		// An answer that is not JSON (a proxy's error page).
+		os.Stdout.WriteString("<html>502 Bad Gateway</html>\n")
+	case "cost3":
+		// A read GitHub prices at 3 points (#76's process total and pacer settle).
+		os.Stdout.WriteString(`{"data":{"rateLimit":{"cost":3,"remaining":4700,"resetAt":"2026-11-25T17:00:00Z"},"viewer":{"login":"ours"}}}`)
 	case "mutate":
 		// Echo the argv (after the binary) as the mutation's data, so a test sees exactly what gh was given.
 		b, _ := json.Marshal(map[string]any{"data": map[string]any{"argv": rest}})

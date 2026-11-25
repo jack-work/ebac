@@ -137,6 +137,7 @@ func (g *GH) run(ctx context.Context, args []string, stdin []byte) ([]byte, erro
 	g.spendMu.Lock()
 	g.spend.All++
 	g.spendMu.Unlock()
+	chargeProcess(1, 0, 0, -1)
 	cmd := ExecCommandContext(ctx, g.Bin, args...)
 	cmd.Env = env
 	if stdin != nil {
@@ -381,6 +382,9 @@ func (g *GH) GraphQL(ctx context.Context, query string) (json.RawMessage, error)
 // as one call of one point.
 func (g *GH) Mutate(ctx context.Context, mutation string, vars map[string]string) (json.RawMessage, error) {
 	g.pace()
+	if err := paceCall(ctx); err != nil {
+		return nil, err
+	}
 	args := []string{"api", "graphql", "-f", "query=" + mutation}
 	names := make([]string, 0, len(vars))
 	for k := range vars {
@@ -391,10 +395,7 @@ func (g *GH) Mutate(ctx context.Context, mutation string, vars map[string]string
 		args = append(args, "-f", k+"="+vars[k])
 	}
 	out, err := g.run(ctx, args, nil)
-	g.spendMu.Lock()
-	g.spend.Calls++
-	g.spend.Points++
-	g.spendMu.Unlock()
+	g.chargeGraphQL()
 	if err != nil {
 		return nil, err
 	}

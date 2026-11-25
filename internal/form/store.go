@@ -30,18 +30,27 @@ type Store struct {
 	Warn io.Writer
 }
 
-func NewStore(fig *figaro.Figaro) (*Store, error) {
-	root := os.Getenv("EBAC_STATE")
-	if root == "" {
-		base := os.Getenv("XDG_STATE_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return nil, err
-			}
-			base = filepath.Join(home, ".local", "state")
+// StateRoot is ebac's state directory: $EBAC_STATE, else
+// $XDG_STATE_HOME/ebac, else ~/.local/state/ebac.
+func StateRoot() (string, error) {
+	if root := os.Getenv("EBAC_STATE"); root != "" {
+		return root, nil
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
 		}
-		root = filepath.Join(base, "ebac")
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(base, "ebac"), nil
+}
+
+func NewStore(fig *figaro.Figaro) (*Store, error) {
+	root, err := StateRoot()
+	if err != nil {
+		return nil, err
 	}
 	for _, d := range []string{"archive", "reports"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {

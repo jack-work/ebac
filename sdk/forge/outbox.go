@@ -16,8 +16,8 @@ func (g *GH) Post(ctx context.Context, pr *model.PRState, p *model.Post, body st
 	switch {
 	case p.ReplyTo != "":
 		q := `mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url state pullRequestReview{databaseId}}}}`
-		out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + p.ReplyTo, "-f", "b=" + body,
-			"-q", ".data.addPullRequestReviewThreadReply.comment"}, nil)
+		out, err := g.gqlWrite(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + p.ReplyTo, "-f", "b=" + body,
+			"-q", ".data.addPullRequestReviewThreadReply.comment"})
 		if err != nil {
 			return "", err
 		}
@@ -61,8 +61,8 @@ func (g *GH) Post(ctx context.Context, pr *model.PRState, p *model.Post, body st
 func (g *GH) React(ctx context.Context, subject, content string) error {
 	g.pace()
 	q := `mutation($s:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$s,content:$c}){reaction{content}}}`
-	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "s=" + subject, "-f", "c=" + content,
-		"-q", ".data.addReaction.reaction.content"}, nil)
+	out, err := g.gqlWrite(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "s=" + subject, "-f", "c=" + content,
+		"-q", ".data.addReaction.reaction.content"})
 	if err != nil {
 		return err
 	}
@@ -77,8 +77,8 @@ func (g *GH) React(ctx context.Context, subject, content string) error {
 func (g *GH) ResolveThread(ctx context.Context, thread string) error {
 	g.pace()
 	q := `mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}`
-	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + thread,
-		"-q", ".data.resolveReviewThread.thread.isResolved"}, nil)
+	out, err := g.gqlWrite(ctx, []string{"api", "graphql", "-f", "query=" + q, "-f", "t=" + thread,
+		"-q", ".data.resolveReviewThread.thread.isResolved"})
 	if err != nil {
 		return err
 	}

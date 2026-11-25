@@ -66,7 +66,7 @@ func cmdVerdict(ctx context.Context, g globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &poll.Poller{Store: st, Fig: st.Fig, Out: io.Discard, Plugins: runner}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Out: roundOut(io.Discard), Plugins: runner}
 	current, err := p.DocRev(ctx, w, cfg.Doc)
 	if err != nil {
 		return fmt.Errorf("refused: the revision of %s could not be read from keel: %w", cfg.Doc, err)

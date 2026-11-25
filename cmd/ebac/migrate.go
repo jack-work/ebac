@@ -149,7 +149,7 @@ func compactAuthor(ctx context.Context, g globals, st *ebacform.Store, f *ebacfo
 	if err != nil {
 		return err
 	}
-	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: os.Stdout, GH: g.gh, Host: g.host}
+	p := &poll.Poller{Store: st, Fig: st.Fig, Plugins: pl, Out: roundOut(os.Stdout), GH: g.gh, Host: g.host}
 	if err := p.Poll(ctx, w.Name); err != nil {
 		return err
 	}

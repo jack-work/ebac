@@ -79,7 +79,13 @@ func withRateLimit(q string) string {
 // the rateLimit key, and the errors GitHub returned beside it (an aliased
 // query answers the aliases it could and names the others in errors).
 func (g *GH) query(ctx context.Context, q string) (json.RawMessage, []gqlError, error) {
+	if err := paceCall(ctx); err != nil {
+		return nil, nil, err
+	}
 	out, err := g.run(ctx, []string{"api", "graphql", "-f", "query=" + withRateLimit(q)}, nil)
+	// The call is charged once dispatched, whatever comes back: a timeout,
+	// a gh failure or an unreadable answer may still have cost a point.
+	g.chargeGraphQL()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,21 +96,23 @@ func (g *GH) query(ctx context.Context, q string) (json.RawMessage, []gqlError, 
 	if err := json.Unmarshal(out, &r); err != nil {
 		return nil, nil, fmt.Errorf("decode graphql: %w", err)
 	}
-	g.spendMu.Lock()
-	g.spend.Calls++
 	var rl struct {
 		Cost      int       `json:"cost"`
 		Remaining int       `json:"remaining"`
 		ResetAt   time.Time `json:"resetAt"`
 	}
 	if raw, ok := r.Data["rateLimit"]; ok && json.Unmarshal(raw, &rl) == nil {
-		g.spend.Points += rl.Cost
+		// GitHub said what the call cost: book the rest beyond the point
+		// charged at dispatch.
+		extra := max(rl.Cost-1, 0)
+		g.spendMu.Lock()
+		g.spend.Points += extra
 		g.spend.Remaining = rl.Remaining
 		g.spend.ResetAt = rl.ResetAt
-	} else {
-		g.spend.Points++ // the minimum a call costs
+		g.spendMu.Unlock()
+		chargeProcess(0, 0, extra, rl.Remaining)
+		settleCall(rl.Cost)
 	}
-	g.spendMu.Unlock()
 	delete(r.Data, "rateLimit")
 	if r.Data == nil {
 		return nil, r.Errors, nil
