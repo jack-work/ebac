@@ -114,10 +114,9 @@ func boundState(r *Result, sy *syncer) {
 		}
 		return n
 	}
-	key := AlarmOverBound + ".state"
 	if size() <= MaxState {
 		for _, e := range r.State.Entities {
-			delete(e.Alarms, key) // the state fits
+			delete(e.Alarms, AlarmOverBound+".state") // the state fits
 		}
 		return
 	}

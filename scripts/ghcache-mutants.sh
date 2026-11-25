@@ -51,7 +51,7 @@ MUTANTS=(
   "S11|$G/ghcache.go|fw.Expect[\"gh\"] = fv.ghRaw|_ = fv.ghRaw|./$G/"
   "S12|$G/ghcache.go|fw.Expect[\"sync\"] = fv.syncRaw|_ = fv.syncRaw|./$G/"
   "S13|$G/sync.go|const MaxTries = 2|const MaxTries = 3|./$G/"
-  "S14|$G/ghcache.go|case fv.gh != nil && e.Base == nil:|case false:|./$G/"
+  "S14|$G/ghcache.go|case fv.gh != nil && e.Base == nil && e.EndedAt.IsZero():|case false:|./$G/"
   "S15|$G/sync.go|case pr.Labels.TotalCount > len(pr.Labels.Nodes):|case false:|./$G/"
   "S16|$G/sync.go|if s.writes+nWrites > MaxWrites \|\| !nodeIDRe.MatchString(pr.ID) {|if !nodeIDRe.MatchString(pr.ID) {|./$G/"
   "S17|$G/sync.go|case gt.Resolved && !bt:|case false:|./$G/"
@@ -143,7 +143,7 @@ MUTANTS=(
   "E13|$G/sync.go|		if h, ok := b.Comments[id]; ok && !c.Cut && h != hash12(c.Body) {|		if h, ok := b.Comments[id]; ok && h != hash12(c.Body) {|./$G/"
   "X1|$G/ghcache.go|			e.shed()|			_ = e|./$G/"
   "X2|$G/ghcache.go|e.Base, e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = nil, \"\", nil, nil, nil, nil|e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = \"\", nil, nil, nil, nil|./$G/"
-  "X3|$G/ghcache.go|case fv.gh != nil && e.Base == nil && e.EndedAt.IsZero():|case fv.gh != nil && e.Base == nil:|./$G/"
+  "X3|$G/ghcache.go|e.Base == nil && e.EndedAt.IsZero():|e.Base == nil:|./$G/"
   "X4|$G/sync.go|if len(b.Comments) <= MaxBaseOthers {|if true {|./$G/"
   "X5|$G/sync.go|if s.p.Ours != \"\" && strings.EqualFold(all[id].Author, s.p.Ours) {|if false {|./$G/"
   "X6|$G/sync.go|lost := mine[min(len(mine), MaxBaseOurs):]|lost := mine[:0]|./$G/"
@@ -157,7 +157,7 @@ MUTANTS=(
   "X14|$G/sync.go|for _, id := range others[min(len(others), MaxBaseOthers):] {|for _, id := range others[:0] {|./$G/"
   "X15|$G/ghcache.go|		if hashes(e) == 0 \|\| size() <= MaxState {|		if true {|./$G/"
   "X16|$G/ghcache.go|const MaxState = 128 * 1024|const MaxState = 192 * 1024|./$G/"
-  "X17|$G/ghcache.go|			delete(e.Alarms, key) // the state fits|			_ = e // the state fits|./$G/"
+  "X17|$G/ghcache.go|			delete(e.Alarms, AlarmOverBound+\".state\") // the state fits|			_ = e.Alarms // the state fits|./$G/"
   "X18|$G/ghcache.go|			e.Pend.Base.Comments = nil|			_ = e|./$G/"
 )
 # Baseline: every package a mutant is judged by must be green unmutated, or a KILLED proves nothing (job 20999:
