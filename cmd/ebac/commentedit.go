@@ -49,7 +49,6 @@ type liveComment struct {
 	Body       string
 	Mine       bool // viewerDidAuthor
 	Author     string
-	Repo       string
 	Kind       string // pr | issue: what the comment is on
 	N          int
 	OnAuthor   string // that PR's or issue's author
@@ -59,8 +58,8 @@ type liveComment struct {
 func commentQuery(id string) string {
 	const parent = `number author{login} repository{nameWithOwner}`
 	return fmt.Sprintf(`{node(id:%q){__typename `+
-		`... on IssueComment{body viewerDidAuthor author{login} repository{nameWithOwner} issue{%s} pullRequest{%s}} `+
-		`... on PullRequestReviewComment{body viewerDidAuthor author{login} repository{nameWithOwner} pullRequest{%s}}}}`,
+		`... on IssueComment{body viewerDidAuthor author{login} issue{%s} pullRequest{%s}} `+
+		`... on PullRequestReviewComment{body viewerDidAuthor author{login} pullRequest{%s}}}}`,
 		id, parent, parent, parent)
 }
 
@@ -82,11 +81,8 @@ func readComment(ctx context.Context, gh commentGH, id string) (*liveComment, er
 			Body   string `json:"body"`
 			Mine   bool   `json:"viewerDidAuthor"`
 			Author *struct{ Login string }
-			Repo   struct {
-				NameWithOwner string `json:"nameWithOwner"`
-			} `json:"repository"`
-			Issue *parent `json:"issue"`
-			PR    *parent `json:"pullRequest"`
+			Issue  *parent `json:"issue"`
+			PR     *parent `json:"pullRequest"`
 		} `json:"node"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -96,7 +92,7 @@ func readComment(ctx context.Context, gh commentGH, id string) (*liveComment, er
 	if n == nil || (n.Type != "IssueComment" && n.Type != "PullRequestReviewComment") {
 		return nil, fmt.Errorf("%s is not a comment GitHub has (deleted, or another kind of node)", id)
 	}
-	c := &liveComment{Review: n.Type == "PullRequestReviewComment", Body: n.Body, Mine: n.Mine, Repo: n.Repo.NameWithOwner}
+	c := &liveComment{Review: n.Type == "PullRequestReviewComment", Body: n.Body, Mine: n.Mine}
 	if n.Author != nil {
 		c.Author = n.Author.Login
 	}
@@ -125,10 +121,60 @@ type commentEditReq struct {
 // print; an error is a refusal or a failure (nothing written, or a read-back
 // that does not hold the body).
 func commentEdit(ctx context.Context, gh commentGH, w *model.Critic, r commentEditReq) (string, error) {
-	return "", fmt.Errorf("comment-edit: not built (red)")
+	if !commentNodeID.MatchString(r.ID) {
+		return "", fmt.Errorf("refused: --comment %q is not a comment node id (IC_... or PRRC_...)", r.ID)
+	}
+	if strings.TrimSpace(r.Body) == "" && !r.DryRun {
+		return "", fmt.Errorf("refused: an empty body")
+	}
+	ours := ""
+	if w.GHWrite != nil {
+		ours = w.GHWrite.Ours
+	}
+	if ours == "" {
+		return "", fmt.Errorf("refused: critic %s's trusted scope names no ours login: no comment is ours", w.Name)
+	}
+	c, err := readComment(ctx, gh, r.ID)
+	if err != nil {
+		return "", err
+	}
+	ref := fmt.Sprintf("%s#%d", c.EntityRepo, c.N)
+	switch {
+	case !strings.EqualFold(c.EntityRepo, r.Repo):
+		return "", fmt.Errorf("refused: %s is in %s, not %s", r.ID, c.EntityRepo, r.Repo)
+	case !strings.EqualFold(c.Author, ours):
+		return "", fmt.Errorf("refused: %s on %s is %s's, not ours (%s): another author's text is never edited", r.ID, ref, model.FirstNonEmpty(c.Author, "an unknown author"), ours)
+	case !c.Mine:
+		return "", fmt.Errorf("refused: GitHub says this account did not write %s (viewerDidAuthor false)", r.ID)
+	}
+	if why := model.AuthorizeGHWrite(w, model.GHEntity{Repo: c.EntityRepo, Kind: c.Kind, N: c.N, Author: c.OnAuthor}, model.FieldCommentEdit); why != "" {
+		return "", fmt.Errorf("refused: %s", why)
+	}
+	cur := bodyHash(c.Body)
+	if r.DryRun {
+		return fmt.Sprintf("%s on %s: current body --expect %s (%d B); nothing written", r.ID, ref, cur, len(c.Body)), nil
+	}
+	if why := disclose.Disclosure(r.Body); why != "" {
+		return "", fmt.Errorf("refused: the new %s", why)
+	}
+	if r.Expect == "" || r.Expect != cur {
+		return "", fmt.Errorf("refused: %s moved: GitHub's body is %s, --expect %q (read it again with --dry-run)", r.ID, cur, r.Expect)
+	}
+	if c.Body == r.Body {
+		return fmt.Sprintf("%s on %s: GitHub already holds the body; nothing written", r.ID, ref), nil
+	}
+	if _, err := gh.Mutate(ctx, forge.EditCommentMutation(c.Review), map[string]string{"c": r.ID, "b": r.Body}); err != nil {
+		return "", fmt.Errorf("the edit of %s failed: %w", r.ID, err)
+	}
+	back, err := readComment(ctx, gh, r.ID)
+	if err != nil {
+		return "", fmt.Errorf("edited %s, but the read-back failed: %w", r.ID, err)
+	}
+	if back.Body != r.Body {
+		return "", fmt.Errorf("edited %s, but the read-back holds %s, not the body sent (%s)", r.ID, bodyHash(back.Body), bodyHash(r.Body))
+	}
+	return fmt.Sprintf("%s on %s: edited %s -> %s, read back", r.ID, ref, cur, bodyHash(back.Body)), nil
 }
-
-var _, _ = disclose.Disclosure, strings.TrimSpace
 
 func cmdCommentEdit(ctx context.Context, g globals, args []string) error {
 	fs := flag.NewFlagSet("comment-edit", flag.ExitOnError)
