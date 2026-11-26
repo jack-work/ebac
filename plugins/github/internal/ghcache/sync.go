@@ -215,7 +215,6 @@ const AlarmOverBound = "over-bound"
 // boundBase cuts b's comment hashes to the bounds (authors from g) and
 // raises, or clears, the over-bound alarm for our comments left out.
 func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
-	key := AlarmOverBound + ".comments"
 	if len(b.Comments) <= MaxBaseOthers {
 		s.overLeave(k, e, "comments", OverLeaveReads) // under the bound
 		return
