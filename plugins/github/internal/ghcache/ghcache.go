@@ -109,6 +109,7 @@ type Entity struct {
 // a row since (comments leave after OverLeaveReads of them).
 type OverEpisode struct {
 	Since time.Time `json:"since"`
+	Last  time.Time `json:"last"` // the last read found over (a state episode ends only on a deep read after it)
 	Clean int       `json:"clean,omitempty"`
 }
 
@@ -140,10 +141,10 @@ func boundState(r *Result, sy *syncer) {
 	}
 	if size() <= MaxState {
 		// The state fits: an episode ends only for an entity read deep since
-		// it began (its hashes agreed again and kept); one whose hashes are
-		// still dropped stays over (#71u item 6).
+		// it was last cut (its hashes agreed again and kept); one whose
+		// hashes are still dropped stays over (#71u item 6).
 		for k, e := range r.State.Entities {
-			if o := e.Over["state"]; o == nil || e.DeepAt.After(o.Since) {
+			if o := e.Over["state"]; o == nil || e.DeepAt.After(o.Last) {
 				sy.overLeave(k, e, "state", 1)
 			}
 		}

@@ -258,13 +258,13 @@ func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 // and nothing is raised, also after a seat's ack (#71v).
 func (s *syncer) overEnter(k string, e *Entity, field, detail string) {
 	if o := e.Over[field]; o != nil {
-		o.Clean = 0
+		o.Clean, o.Last = 0, s.now
 		return
 	}
 	if e.Over == nil {
 		e.Over = map[string]*OverEpisode{}
 	}
-	e.Over[field] = &OverEpisode{Since: s.now}
+	e.Over[field] = &OverEpisode{Since: s.now, Last: s.now}
 	s.alarm(k, e, AlarmOverBound, field, detail, nil, nil, nil) // an alarm standing from before episodes were kept is not raised twice
 }
 

@@ -149,3 +149,25 @@ func TestAFittingRoundKeepsOverBoundStateUntilTheHashesReturn(t *testing.T) {
 		t.Fatalf("%d cleared ping(s), want one per cut entity (%d)", cleared, len(cut))
 	}
 }
+
+// Review r1 B1: cut at N, read deep and cut again at N+1, then a fitting round N+2 that does not read it: its
+// hashes are still dropped, so the episode must stand (it ends only on a deep read after the LAST cut).
+func TestAStateEpisodeEndsOnlyAfterADeepReadPastItsLastCut(t *testing.T) {
+	sy := &syncer{now: t0, logf: func(string, ...any) {}, p: Pass{Maintainer: "@maint"}}
+	e := &Entity{DeepAt: t0}
+	sy.overEnter("k", e, "state", "cut") // N
+	t1 := t0.Add(HotEvery)
+	sy.now, e.DeepAt = t1, t1
+	sy.overEnter("k", e, "state", "cut") // N+1: read deep and cut again
+	sy.now = t1.Add(HotEvery)            // N+2: fits, k not read
+	r := &Result{State: State{Entities: map[string]*Entity{"k": e}}}
+	boundState(r, sy)
+	if _, ok := e.Alarms["over-bound.state"]; !ok || e.Over["state"] == nil {
+		t.Fatalf("cut again at N+1 and unread since, yet the episode ended (alarms %v)", e.Alarms)
+	}
+	e.DeepAt = sy.now // read deep after the last cut, and it fits
+	boundState(r, sy)
+	if _, ok := e.Alarms["over-bound.state"]; ok || e.Over != nil {
+		t.Fatalf("read deep after its last cut and fitting, yet still over (alarms %v)", e.Alarms)
+	}
+}
