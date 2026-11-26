@@ -217,7 +217,7 @@ const AlarmOverBound = "over-bound"
 func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 	key := AlarmOverBound + ".comments"
 	if len(b.Comments) <= MaxBaseOthers {
-		delete(e.Alarms, key) // under the bound
+		s.overLeave(k, e, "comments", OverLeaveReads) // under the bound
 		return
 	}
 	all := allComments(g)
@@ -247,10 +247,48 @@ func (s *syncer) boundBase(k string, e *Entity, b *Base, g *GH) {
 		delete(b.Comments, id)
 	}
 	if len(lost) == 0 {
-		delete(e.Alarms, key) // none of ours left out
+		s.overLeave(k, e, "comments", OverLeaveReads) // none of ours left out
 		return
 	}
-	s.alarm(k, e, AlarmOverBound, "comments", fmt.Sprintf("%d of our comments are past the base bound (the newest %d of ours are kept): an edit of those is not written", len(lost), MaxBaseOurs), nil, nil, nil)
+	s.overEnter(k, e, "comments", fmt.Sprintf("%d of our comments are past the base bound (the newest %d of ours are kept): an edit of those is not written", len(lost), MaxBaseOurs))
+}
+
+// overEnter: k is over the bound for field this read. The alarm is raised
+// (one wake) only on entering an episode; within one, a clean count restarts
+// and nothing is raised, also after a seat's ack (#71v).
+func (s *syncer) overEnter(k string, e *Entity, field, detail string) {
+	if o := e.Over[field]; o != nil {
+		o.Clean = 0
+		return
+	}
+	if e.Over == nil {
+		e.Over = map[string]*OverEpisode{}
+	}
+	e.Over[field] = &OverEpisode{Since: s.now}
+	s.alarm(k, e, AlarmOverBound, field, detail, nil, nil, nil) // an alarm standing from before episodes were kept is not raised twice
+}
+
+// overLeave: k is within the bound for field this read. An episode ends
+// after need clean reads in a row: its alarm clears and the maintainer is
+// pinged once. An alarm with no episode (raised before they were kept)
+// clears quietly.
+func (s *syncer) overLeave(k string, e *Entity, field string, need int) {
+	key := AlarmOverBound + "." + field
+	o := e.Over[field]
+	if o == nil {
+		delete(e.Alarms, key)
+		return
+	}
+	o.Clean++
+	if o.Clean < need {
+		return
+	}
+	delete(e.Over, field)
+	if len(e.Over) == 0 {
+		e.Over = nil
+	}
+	delete(e.Alarms, key)
+	s.cleared = append(s.cleared, fmt.Sprintf("%s %s: cleared: back within the bound (over since %s)", k, key, o.Since.UTC().Format(time.RFC3339)))
 }
 
 // AlarmEndedEdit: a seat edited a write field on an ended entity's form (a
@@ -399,6 +437,7 @@ type syncer struct {
 	now       time.Time
 	writes    int
 	raised    []string // this round's new alarms: "<key> <kind>.<field>: detail"
+	cleared   []string // this round's ended over-bound episodes, the same shape (#71v)
 	logf      func(string, ...any)
 	children  map[string]string
 	cur       string     // the entity being synced (telemetry)
@@ -1010,11 +1049,12 @@ func appendSent(s []string, h string) []string {
 // pings are the round's wakes of the trusted maintainer: one per new alarm,
 // or one collect ping past MaxAlarmPings.
 func (s *syncer) pings(critic string) []plugin.Ping {
-	if len(s.raised) == 0 {
+	if len(s.raised)+len(s.cleared) == 0 {
 		return nil
 	}
 	if s.p.Maintainer == "" {
-		s.logf("%d new sync alarm(s), no trusted maintainer to wake: %s", len(s.raised), cut(strings.Join(s.raised, "; "), 300))
+		all := append(slices.Clone(s.raised), s.cleared...)
+		s.logf("%d new sync alarm(s) or clearing(s), no trusted maintainer to wake: %s", len(all), cut(strings.Join(all, "; "), 300))
 		return nil
 	}
 	line := func(t string) string {
@@ -1027,19 +1067,28 @@ func (s *syncer) pings(critic string) []plugin.Ping {
 		}
 		return name
 	}
-	if len(s.raised) > MaxAlarmPings {
+	if n := len(s.raised) + len(s.cleared); n > MaxAlarmPings {
 		var ks []string
 		for _, r := range s.raised {
 			k, alarm, _ := strings.Cut(r, " ")
 			alarm, _, _ = strings.Cut(alarm, ":")
 			ks = append(ks, form(k)+" "+alarm)
 		}
-		return []plugin.Ping{{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache: %d new sync alarms this round (collect mode): %s", len(s.raised), strings.Join(ks, "; ")))}}
+		for _, r := range s.cleared {
+			k, alarm, _ := strings.Cut(r, " ")
+			alarm, _, _ = strings.Cut(alarm, ":")
+			ks = append(ks, form(k)+" "+alarm+" cleared")
+		}
+		return []plugin.Ping{{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache: %d sync alarm change(s) this round (collect mode): %s", n, strings.Join(ks, "; ")))}}
 	}
 	var out []plugin.Ping
 	for _, r := range s.raised {
 		k, rest, _ := strings.Cut(r, " ")
 		out = append(out, plugin.Ping{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache alarm on %s: sync.alarm.%s", form(k), rest))})
+	}
+	for _, r := range s.cleared {
+		k, rest, _ := strings.Cut(r, " ")
+		out = append(out, plugin.Ping{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache alarm cleared on %s: sync.alarm.%s", form(k), rest))})
 	}
 	return out
 }

@@ -119,4 +119,33 @@ func TestAFittingRoundKeepsOverBoundStateUntilTheHashesReturn(t *testing.T) {
 			t.Fatalf("a fitting round with nothing read pinged: %q", p.Text)
 		}
 	}
+	// The others close (shed), the cut ones are read deep again: their hashes return and fit; each episode ends
+	// with one cleared ping.
+	isCut := map[string]bool{}
+	for _, k := range cut {
+		isCut[k] = true
+	}
+	for n, pr := range prs {
+		if !isCut[keyOf(KindPR, "acme/widget", n)] {
+			pr.State = "CLOSED"
+		}
+		bump(pr)
+	}
+	cleared := 0
+	for i := 0; i < 3; i++ {
+		for _, p := range w.round().Pings {
+			if strings.Contains(p.Text, "cleared") { // one ping each, or one collect ping naming each
+				cleared += strings.Count(p.Text, "over-bound.state")
+			}
+		}
+	}
+	for _, k := range cut {
+		e := w.st.Entities[k]
+		if _, ok := e.Alarms["over-bound.state"]; ok || e.Over != nil {
+			t.Fatalf("%s: read deep again and fitting, yet still over (alarms %v)", k, e.Alarms)
+		}
+	}
+	if cleared != len(cut) {
+		t.Fatalf("%d cleared ping(s), want one per cut entity (%d)", cleared, len(cut))
+	}
 }

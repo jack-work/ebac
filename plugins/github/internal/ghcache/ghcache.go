@@ -96,8 +96,26 @@ type Entity struct {
 	// moves off them was edited by a seat, and that edit is reverted with an
 	// ended-edit alarm (#71s). shown is this round's gh written, as such.
 	Ended *Base `json:"ended,omitempty"`
+	// Over are the over-bound episodes the entity is in, by field (comments,
+	// state; #71v): the alarm is raised, and the maintainer woken, once on
+	// entering; a seat's ack clears the alarm but not the episode, so it is
+	// not raised again while the entity stays over; leaving clears both and
+	// pings once.
+	Over  map[string]*OverEpisode `json:"over,omitempty"`
 	shown *Base
 }
+
+// OverEpisode is one over-bound episode: since when, and the clean reads in
+// a row since (comments leave after OverLeaveReads of them).
+type OverEpisode struct {
+	Since time.Time `json:"since"`
+	Clean int       `json:"clean,omitempty"`
+}
+
+// OverLeaveReads is how many deep reads in a row must leave none of ours out
+// before an over-bound.comments episode ends: a long thread read whole one
+// round and only its newest the next must not end and restart it (#71v).
+const OverLeaveReads = 2
 
 // MaxState bounds the plugin's part of the critic form, runtime.gh_cache and
 // track together (#71s): figaro refuses a form state past 196,608 B and the
@@ -121,8 +139,13 @@ func boundState(r *Result, sy *syncer) {
 		return n
 	}
 	if size() <= MaxState {
-		for _, e := range r.State.Entities {
-			delete(e.Alarms, AlarmOverBound+".state") // the state fits
+		// The state fits: an episode ends only for an entity read deep since
+		// it began (its hashes agreed again and kept); one whose hashes are
+		// still dropped stays over (#71u item 6).
+		for k, e := range r.State.Entities {
+			if o := e.Over["state"]; o == nil || e.DeepAt.After(o.Since) {
+				sy.overLeave(k, e, "state", 1)
+			}
 		}
 		return
 	}
@@ -145,7 +168,7 @@ func boundState(r *Result, sy *syncer) {
 		if e.Pend != nil {
 			e.Pend.Base.Comments = nil
 		}
-		sy.alarm(k, e, AlarmOverBound, "state", fmt.Sprintf("the cache's state passed its bound (%d B): this entity's comment hashes were dropped, so an edit of a comment is not written until they are agreed again", MaxState), nil, nil, nil)
+		sy.overEnter(k, e, "state", fmt.Sprintf("the cache's state passed its bound (%d B): this entity's comment hashes were dropped, so an edit of a comment is not written until they are agreed again", MaxState))
 	}
 	if n := size(); n > MaxState {
 		sy.logf("state %d B is past its bound %d B with every comment hash dropped", n, MaxState)
@@ -157,6 +180,11 @@ func boundState(r *Result, sy *syncer) {
 // the reply hashes posted and the comment creates asked stay.
 func (e *Entity) shed() {
 	e.Base, e.RO, e.Pend, e.Tries, e.OursThreads, e.pushing = nil, "", nil, nil, nil, nil
+	// Nothing of it is written any more: its over-bound episodes end, quietly.
+	for field := range e.Over {
+		delete(e.Alarms, AlarmOverBound+"."+field)
+	}
+	e.Over = nil
 }
 
 // OursThread is our comments in one long review thread, read whole at N.
