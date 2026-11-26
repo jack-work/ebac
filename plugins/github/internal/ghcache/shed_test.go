@@ -191,7 +191,8 @@ func TestABaseKeepsOursAndTwentyOfTheOthers(t *testing.T) {
 	}
 }
 
-// Ours past 50 raise one over-bound alarm (and its wake) instead of growing the base; back under, it clears.
+// Ours past 50 raise one over-bound alarm (and its wake) instead of growing the base; back under for two reads, it
+// clears.
 func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 	r := newCommentRig(t)
 	for i := 10; i < 63; i++ { // 53 more of ours: 55 in all
@@ -209,6 +210,7 @@ func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 		delete(r.gh.comments, fmt.Sprintf("IC_000000%02d", i))
 	}
 	r.round(func(*GH) {})
+	r.round(func(*GH) {}) // two clean reads in a row leave the bound (#71v)
 	if _, ok := r.e.Alarms["over-bound.comments"]; ok {
 		t.Fatalf("back under the bound, the alarm stands: %v", r.e.Alarms)
 	}
@@ -263,18 +265,7 @@ func TestAFirstBaseIsBoundedToo(t *testing.T) {
 // drops the comment hashes of the entities holding the most, with an over-bound.state alarm on each, until the
 // plugin's part of the form is at most MaxState (131,072 B); a round that fits clears those alarms.
 func TestTheWorstCaseThePerEntityBoundsAdmitIsCutToTheStateBound(t *testing.T) {
-	prs := map[int]*PR{}
-	var nums []string
-	for i := 0; i < 44; i++ {
-		prs[2000+i] = busyPRBy(t, 2000+i, 70, func(j int) bool { return j < 50 })
-		nums = append(nums, fmt.Sprint(2000+i))
-	}
-	gh := &fakeGH{t: t, failLand: -1, children: map[string]string{}, search: map[string][]int{},
-		prs: map[string]map[int]*PR{"acme/widget": prs}, wr: &fakeWrites{repoLabels: map[string]bool{"area:core": true}}}
-	c, ttl := cfg(t, `{"repos":["acme/widget"],"max":80,"rules":[{"repo":"acme/widget","prs":[`+strings.Join(nums, ",")+`]}]}`)
-	w := &writeWorld{t: t, gh: gh, c: c, ttl: ttl, forms: map[string]map[string]json.RawMessage{}, now: t0, ours: "our-author",
-		critic: &model.Critic{Name: "ghc", Source: model.SourceGHCache, Write: true, GHWrite: &model.GHWrite{
-			Scope: model.GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}}, Fields: model.GHWriteFields}, Maintainer: trustedMaint}}
+	w, prs := worstCaseWorld(t)
 	w.round()
 	w.round()
 	for _, pr := range prs {
@@ -304,9 +295,31 @@ func TestTheWorstCaseThePerEntityBoundsAdmitIsCutToTheStateBound(t *testing.T) {
 	}
 	w.round()
 	w.round()
+	for n := 2034; n < 2044; n++ { // the rest are read deep again: their hashes return, and fit
+		bump(prs[n])
+	}
+	w.round()
+	w.round()
 	for k, e := range w.st.Entities {
 		if _, ok := e.Alarms["over-bound.state"]; ok {
 			t.Fatalf("%s: the state fits, yet over-bound.state stands (%d B)", k, stateBytes(w))
 		}
 	}
+}
+
+// worstCaseWorld: 44 open PRs each with exactly 50 of ours and 20 others' comments (GPT review r1, #71s).
+func worstCaseWorld(t *testing.T) (*writeWorld, map[int]*PR) {
+	prs := map[int]*PR{}
+	var nums []string
+	for i := 0; i < 44; i++ {
+		prs[2000+i] = busyPRBy(t, 2000+i, 70, func(j int) bool { return j < 50 })
+		nums = append(nums, fmt.Sprint(2000+i))
+	}
+	gh := &fakeGH{t: t, failLand: -1, children: map[string]string{}, search: map[string][]int{},
+		prs: map[string]map[int]*PR{"acme/widget": prs}, wr: &fakeWrites{repoLabels: map[string]bool{"area:core": true}}}
+	c, ttl := cfg(t, `{"repos":["acme/widget"],"max":80,"rules":[{"repo":"acme/widget","prs":[`+strings.Join(nums, ",")+`]}]}`)
+	w := &writeWorld{t: t, gh: gh, c: c, ttl: ttl, forms: map[string]map[string]json.RawMessage{}, now: t0, ours: "our-author",
+		critic: &model.Critic{Name: "ghc", Source: model.SourceGHCache, Write: true, GHWrite: &model.GHWrite{
+			Scope: model.GHScope{Repos: []string{"acme/widget"}, Authors: []string{"our-author"}}, Fields: model.GHWriteFields}, Maintainer: trustedMaint}}
+	return w, prs
 }

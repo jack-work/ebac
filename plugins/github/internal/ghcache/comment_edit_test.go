@@ -84,6 +84,7 @@ type commentRig struct {
 	fields []string
 	logs   []string
 	kinds  []string // the entity kinds the trusted check was asked about
+	pings  []string // every round's maintainer pings (#71v)
 }
 
 func newCommentRig(t *testing.T) *commentRig {
@@ -128,12 +129,15 @@ func (r *commentRig) round(edit func(f *GH)) GH {
 		r.t.Fatalf("the form did not parse: %v", fv.bad)
 	}
 	s := &syncer{ctx: context.Background(), gh: r.gh, now: time.Unix(1794000000, 0), logf: func(f string, a ...any) { r.logs = append(r.logs, fmt.Sprintf(f, a...)) },
-		p: Pass{Config: &Config{}, Ours: "ours", Auth: func(e model.GHEntity, field string) string {
+		p: Pass{Config: &Config{}, Ours: "ours", Maintainer: "@maint", Auth: func(e model.GHEntity, field string) string {
 			r.kinds = append(r.kinds, e.Kind)
 			w := &model.Critic{Write: true, GHWrite: &model.GHWrite{Scope: model.GHScope{Repos: []string{"example/repo"}, Authors: []string{"ours"}}, Fields: r.fields}}
 			return model.AuthorizeGHWrite(w, e, field)
 		}}}
 	out, _ := s.entity("k", r.e, &PR{ID: "PR_00000007", Number: 7}, r.github(), fv)
+	for _, p := range s.pings("ghc") {
+		r.pings = append(r.pings, p.Text)
+	}
 	if r.e.Pend != nil {
 		b := r.e.Pend.Base
 		r.e.Base = &b
