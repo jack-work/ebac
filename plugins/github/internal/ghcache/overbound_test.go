@@ -191,3 +191,26 @@ func TestASheddedEntityEndsItsEpisodesQuietly(t *testing.T) {
 		t.Fatalf("shed: alarms %v, episodes %v, pings %v", e.Alarms, e.Over, sy.pings("ghc"))
 	}
 }
+
+// An over round ends the episode of an entity read deep since its last cut and not cut again (its hashes are back
+// and kept): the round is over the bound only for others (review r3; mutant V11).
+func TestAnOverRoundEndsTheEpisodeOfAnEntityReadAndNotCut(t *testing.T) {
+	sy := &syncer{now: t0, logf: func(string, ...any) {}, p: Pass{Maintainer: "@maint"}}
+	a := &Entity{DeepAt: t0, Base: &Base{Comments: map[string]string{"IC_A": "h"}}}
+	sy.overEnter("a", a, "state", "cut") // cut at t0
+	big := &Base{Comments: map[string]string{}}
+	for i := 0; i < MaxState/30; i++ {
+		big.Comments[fmt.Sprintf("IC_%08d", i)] = "0123456789ab"
+	}
+	b := &Entity{Base: big}
+	t1 := t0.Add(HotEvery)
+	sy.now, a.DeepAt, b.DeepAt = t1, t1, t1 // both read deep this round; b alone is over
+	r := &Result{State: State{Entities: map[string]*Entity{"a": a, "b": b}}}
+	boundState(r, sy)
+	if _, ok := b.Alarms["over-bound.state"]; !ok {
+		t.Fatalf("b holds past MaxState alone, yet not cut")
+	}
+	if _, ok := a.Alarms["over-bound.state"]; ok || a.Over != nil {
+		t.Fatalf("a was read deep since its cut and not cut again, yet still over (alarms %v)", a.Alarms)
+	}
+}
