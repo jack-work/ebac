@@ -21,11 +21,11 @@ func overPings(r *commentRig, key string) (raised, cleared int) {
 	return raised, cleared
 }
 
-// setOurs makes n of the rig's extra comments ours (IC_00000010 on), the rest gone.
+// setOurs makes n of the rig's extra comments ours, the rest gone.
 func setOurs(r *commentRig, n int) {
-	for i := 10; i < 70; i++ {
-		id := fmt.Sprintf("IC_000000%02d", i)
-		if i-10 < n {
+	for i := 0; i < MaxBaseOurs+20; i++ {
+		id := fmt.Sprintf("IC_8%07d", i)
+		if i < n {
 			r.gh.comments[id] = &fakeComment{body: "mine", author: "ours", number: 7}
 		} else {
 			delete(r.gh.comments, id)
@@ -41,9 +41,9 @@ func TestOverBoundCommentsRaisesOnceWhileItFlaps(t *testing.T) {
 	r := newCommentRig(t)
 	for i := 0; i < 10; i++ {
 		if i%2 == 0 {
-			setOurs(r, 53) // 55 of ours: past 50
+			setOurs(r, MaxBaseOurs+3) // past the bound
 		} else {
-			setOurs(r, 43) // 45: under
+			setOurs(r, MaxBaseOurs-7) // under
 		}
 		r.round(func(*GH) {})
 	}
@@ -53,7 +53,7 @@ func TestOverBoundCommentsRaisesOnceWhileItFlaps(t *testing.T) {
 	if r.e.Alarms["over-bound.comments"].Detail == "" {
 		t.Fatalf("still flapping, the alarm should stand: %v", r.e.Alarms)
 	}
-	setOurs(r, 43)
+	setOurs(r, MaxBaseOurs-7)
 	r.round(func(*GH) {}) // the flap's last read was under: this is the second clean read in a row
 	r.round(func(*GH) {})
 	if raised, cleared := overPings(r, "over-bound.comments"); raised != 1 || cleared != 1 {
@@ -62,7 +62,7 @@ func TestOverBoundCommentsRaisesOnceWhileItFlaps(t *testing.T) {
 	if _, ok := r.e.Alarms["over-bound.comments"]; ok {
 		t.Fatalf("left the bound, the alarm stands: %v", r.e.Alarms)
 	}
-	setOurs(r, 53)
+	setOurs(r, MaxBaseOurs+3)
 	r.round(func(*GH) {})
 	if raised, _ := overPings(r, "over-bound.comments"); raised != 2 {
 		t.Fatalf("a new episode: %d raise(s), want 2 (pings %v)", raised, r.pings)
@@ -73,7 +73,7 @@ func TestOverBoundCommentsRaisesOnceWhileItFlaps(t *testing.T) {
 // no alarm back on the form). RED on 723de8f4: the next over read raises it again.
 func TestAnAckedOverBoundIsNotRaisedAgainWhileStillOver(t *testing.T) {
 	r := newCommentRig(t)
-	setOurs(r, 53)
+	setOurs(r, MaxBaseOurs+3)
 	r.round(func(*GH) {})
 	delete(r.e.Alarms, "over-bound.comments") // the ack (ghcache.go 4b)
 	for i := 0; i < 3; i++ {

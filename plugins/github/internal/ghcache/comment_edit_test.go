@@ -139,7 +139,7 @@ func (r *commentRig) round(edit func(f *GH)) GH {
 		r.pings = append(r.pings, p.Text)
 	}
 	if r.e.Pend != nil {
-		b := r.e.Pend.Base
+		b := r.e.Pend.landed(r.e.Base)
 		r.e.Base = &b
 	}
 	return out

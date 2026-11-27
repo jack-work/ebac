@@ -195,19 +195,20 @@ func TestABaseKeepsOursAndTwentyOfTheOthers(t *testing.T) {
 // clears.
 func TestOursPastTheBoundRaiseOneOverBoundAlarm(t *testing.T) {
 	r := newCommentRig(t)
-	for i := 10; i < 63; i++ { // 53 more of ours: 55 in all
-		r.gh.comments[fmt.Sprintf("IC_000000%02d", i)] = &fakeComment{body: "mine", author: "ours", number: 7}
+	extra := MaxBaseOurs + 3 // with the rig's two: MaxBaseOurs+5 of ours
+	for i := 0; i < extra; i++ {
+		r.gh.comments[fmt.Sprintf("IC_9%07d", i)] = &fakeComment{body: "mine", author: "ours", number: 7}
 	}
 	r.round(func(*GH) {})
-	if n := len(r.e.Base.Comments); n != 51 {
-		t.Fatalf("base keeps %d comment hashes, want 51 (50 of ours and someone's one)", n)
+	if n := len(r.e.Base.Comments); n != MaxBaseOurs+1 {
+		t.Fatalf("base keeps %d comment hashes, want %d (%d of ours and someone's one)", n, MaxBaseOurs+1, MaxBaseOurs)
 	}
 	a := r.e.Alarms["over-bound.comments"]
-	if a.Detail != "5 of our comments are past the base bound (the newest 50 of ours are kept): an edit of those is not written" {
+	if want := fmt.Sprintf("5 of our comments are past the base bound (the newest %d of ours are kept): an edit of those is not written", MaxBaseOurs); a.Detail != want {
 		t.Fatalf("over-bound alarm = %+v (alarms %v)", a, r.e.Alarms)
 	}
-	for i := 10; i < 63; i++ {
-		delete(r.gh.comments, fmt.Sprintf("IC_000000%02d", i))
+	for i := 0; i < extra; i++ {
+		delete(r.gh.comments, fmt.Sprintf("IC_9%07d", i))
 	}
 	r.round(func(*GH) {})
 	r.round(func(*GH) {}) // two clean reads in a row leave the bound (#71v)
@@ -307,12 +308,12 @@ func TestTheWorstCaseThePerEntityBoundsAdmitIsCutToTheStateBound(t *testing.T) {
 	}
 }
 
-// worstCaseWorld: 44 open PRs each with exactly 50 of ours and 20 others' comments (GPT review r1, #71s).
+// worstCaseWorld: 44 open PRs each with exactly MaxBaseOurs of ours and MaxBaseOthers others' comments (GPT review r1, #71s).
 func worstCaseWorld(t *testing.T) (*writeWorld, map[int]*PR) {
 	prs := map[int]*PR{}
 	var nums []string
 	for i := 0; i < 44; i++ {
-		prs[2000+i] = busyPRBy(t, 2000+i, 70, func(j int) bool { return j < 50 })
+		prs[2000+i] = busyPRBy(t, 2000+i, MaxBaseOurs+MaxBaseOthers, func(j int) bool { return j < MaxBaseOurs })
 		nums = append(nums, fmt.Sprint(2000+i))
 	}
 	gh := &fakeGH{t: t, failLand: -1, children: map[string]string{}, search: map[string][]int{},

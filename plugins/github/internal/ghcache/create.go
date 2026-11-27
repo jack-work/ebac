@@ -206,7 +206,10 @@ func (c *creator) issues(asks map[string]json.RawMessage) []plugin.FormWrite {
 			}
 			_, held := c.p.Children[cr.Key]
 			_, ours := c.st.OurIssues[cr.Key]
-			if !held && ours && c.p.Children != nil && c.room() > 0 {
+			if held {
+				cr.Body, cr.Praxis = "", nil // minted: what was asked lives on its form (#71v)
+			}
+			if !held && ours && c.p.Children != nil && c.room() > 0 && len(cr.Praxis) > 0 {
 				// The minting write did not land: write it again (it lands
 				// only on a form still without gh and praxis). Only while the
 				// issue is ours and tracked: one that left tracking stays gone.

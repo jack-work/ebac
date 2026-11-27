@@ -83,6 +83,19 @@ type Agreed struct {
 	Base   Base    `json:"base"`
 	RO     string  `json:"ro"`
 	Pushed *Pushed `json:"pushed,omitempty"`
+	// SameComments: the comment hashes are the base's, unchanged, and not
+	// stored twice (#71v: a deep round of every entity doubled them past
+	// MaxState); landing keeps the base's.
+	SameComments bool `json:"same_comments,omitempty"`
+}
+
+// landed is the base a landed pend makes, old the base it was agreed on.
+func (a *Agreed) landed(old *Base) Base {
+	b := a.Base
+	if a.SameComments && old != nil {
+		b.Comments = old.Comments
+	}
+	return b
 }
 
 // Pushed are the write fields a round's GitHub writes set.
@@ -205,7 +218,7 @@ func readForm(owned map[string]json.RawMessage) *formView {
 // without the alarm). The newest of each are kept.
 const (
 	MaxBaseOthers = 20
-	MaxBaseOurs   = 50
+	MaxBaseOurs   = 100 // #71v: 62 of ours on one live PR (11-26); 38 B a hash
 )
 
 // AlarmOverBound: more of our comments than MaxBaseOurs on one entity; the
@@ -857,6 +870,9 @@ func (s *syncer) entity(k string, e *Entity, pr *PR, g GH, fv *formView) (GH, []
 	s.commentEdits(k, e, G, F, B, &out, &next, auth)
 	s.boundBase(k, e, &next, &G)
 	e.Pend = &Agreed{Base: next, Pushed: e.pushing} // RO: the caller's, from the gh as written
+	if e.Base != nil && len(next.Comments) > 0 && maps.Equal(next.Comments, e.Base.Comments) {
+		e.Pend.Base.Comments, e.Pend.SameComments = nil, true // stored once, in the base
+	}
 	e.pushing = nil
 	e.shown = mirrorOf(&out)
 	return out, notes

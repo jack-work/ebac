@@ -373,7 +373,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 	for k, e := range ents {
 		switch {
 		case e.Pend != nil && !unlanded[k]:
-			b := e.Pend.Base
+			b := e.Pend.landed(e.Base)
 			e.Base, e.RO = &b, e.Pend.RO
 		case e.Pend != nil && e.Pend.Pushed != nil && e.Base != nil:
 			// The form write did not land, but our GitHub writes did: GitHub
