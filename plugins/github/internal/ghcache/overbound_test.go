@@ -174,3 +174,17 @@ func TestAStateEpisodeEndsOnlyAfterADeepReadPastItsLastCut(t *testing.T) {
 		t.Fatalf("read deep after its last cut and fitting, yet still over (alarms %v)", e.Alarms)
 	}
 }
+
+// An ended entity is shed: nothing of it is written any more, so its over-bound episodes end quietly (no alarm
+// left standing on a read-only form, no ping).
+func TestASheddedEntityEndsItsEpisodesQuietly(t *testing.T) {
+	sy := &syncer{now: t0, logf: func(string, ...any) {}, p: Pass{Maintainer: "@maint"}}
+	e := &Entity{}
+	sy.overEnter("k", e, "state", "cut")
+	sy.overEnter("k", e, "comments", "over")
+	sy.raised = nil
+	e.shed()
+	if len(e.Alarms) != 0 || e.Over != nil || len(sy.pings("ghc")) != 0 {
+		t.Fatalf("shed: alarms %v, episodes %v, pings %v", e.Alarms, e.Over, sy.pings("ghc"))
+	}
+}
