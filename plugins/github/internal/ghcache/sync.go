@@ -1053,7 +1053,7 @@ func (s *syncer) pings(critic string) []plugin.Ping {
 	}
 	if s.p.Maintainer == "" {
 		all := append(slices.Clone(s.raised), s.cleared...)
-		s.logf("%d new sync alarm(s) or clearing(s), no trusted maintainer to wake: %s", len(all), cut(strings.Join(all, "; "), 300))
+		s.logf("%d new sync alarm(s), no trusted maintainer to wake: %s", len(all), cut(strings.Join(all, "; "), 300))
 		return nil
 	}
 	line := func(t string) string {

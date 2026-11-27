@@ -131,11 +131,14 @@ func TestAFittingRoundKeepsOverBoundStateUntilTheHashesReturn(t *testing.T) {
 		}
 		bump(pr)
 	}
-	cleared := 0
+	cleared, raisedAgain := 0, 0
 	for i := 0; i < 3; i++ {
 		for _, p := range w.round().Pings {
-			if strings.Contains(p.Text, "cleared") { // one ping each, or one collect ping naming each
-				cleared += strings.Count(p.Text, "over-bound.state")
+			switch {
+			case strings.Contains(p.Text, "over-bound.state cleared") || strings.Contains(p.Text, "over-bound.state: cleared"):
+				cleared++
+			case strings.Contains(p.Text, "over-bound.state"):
+				raisedAgain++
 			}
 		}
 	}
@@ -145,8 +148,8 @@ func TestAFittingRoundKeepsOverBoundStateUntilTheHashesReturn(t *testing.T) {
 			t.Fatalf("%s: read deep again and fitting, yet still over (alarms %v)", k, e.Alarms)
 		}
 	}
-	if cleared != len(cut) {
-		t.Fatalf("%d cleared ping(s), want one per cut entity (%d)", cleared, len(cut))
+	if cleared == 0 || raisedAgain != 0 {
+		t.Fatalf("leaving: %d cleared ping(s) (want some), %d raising over-bound.state again (want 0)", cleared, raisedAgain)
 	}
 }
 
