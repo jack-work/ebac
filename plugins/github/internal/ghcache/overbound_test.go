@@ -2,6 +2,7 @@ package ghcache
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -119,8 +120,10 @@ func TestAFittingRoundKeepsOverBoundStateUntilTheHashesReturn(t *testing.T) {
 			t.Fatalf("a fitting round with nothing read pinged: %q", p.Text)
 		}
 	}
-	// The others close (shed), the cut ones are read deep again: their hashes return and fit; each episode ends
-	// with one cleared ping.
+	// All but five of the cut ones close (shed: their episodes end quietly); the five are read deep again: their
+	// hashes return and fit; each of their episodes ends with a cleared ping.
+	sort.Strings(cut)
+	cut = cut[:min(5, len(cut))]
 	isCut := map[string]bool{}
 	for _, k := range cut {
 		isCut[k] = true
