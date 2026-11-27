@@ -199,7 +199,7 @@ func TestAnOverRoundEndsTheEpisodeOfAnEntityReadAndNotCut(t *testing.T) {
 	a := &Entity{DeepAt: t0, Base: &Base{Comments: map[string]string{"IC_A": "h"}}}
 	sy.overEnter("a", a, "state", "cut") // cut at t0
 	big := &Base{Comments: map[string]string{}}
-	for i := 0; i < MaxState/30; i++ {
+	for i := 0; i < MaxState/20; i++ { // ~32 B a hash: well past MaxState
 		big.Comments[fmt.Sprintf("IC_%08d", i)] = "0123456789ab"
 	}
 	b := &Entity{Base: big}
