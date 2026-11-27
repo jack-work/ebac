@@ -1078,7 +1078,7 @@ func (s *syncer) pings(critic string) []plugin.Ping {
 			alarm, _, _ = strings.Cut(alarm, ":")
 			ks = append(ks, form(k)+" "+alarm+" cleared")
 		}
-		return []plugin.Ping{{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache: %d sync alarm change(s) this round (collect mode): %s", n, strings.Join(ks, "; ")))}}
+		return []plugin.Ping{{To: s.p.Maintainer, Text: line(fmt.Sprintf("ghcache: %d new sync alarms this round (collect mode): %s", n, strings.Join(ks, "; ")))}}
 	}
 	var out []plugin.Ping
 	for _, r := range s.raised {

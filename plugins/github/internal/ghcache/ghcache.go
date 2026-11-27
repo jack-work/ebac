@@ -171,6 +171,14 @@ func boundState(r *Result, sy *syncer) {
 		}
 		sy.overEnter(k, e, "state", fmt.Sprintf("the cache's state passed its bound (%d B): this entity's comment hashes were dropped, so an edit of a comment is not written until they are agreed again", MaxState))
 	}
+	// Read deep since its last cut and not cut this round: its hashes are
+	// back and kept, so its episode ends (the round is over the bound only
+	// for others).
+	for k, e := range r.State.Entities {
+		if o := e.Over["state"]; o != nil && e.DeepAt.After(o.Last) {
+			sy.overLeave(k, e, "state", 1)
+		}
+	}
 	if n := size(); n > MaxState {
 		sy.logf("state %d B is past its bound %d B with every comment hash dropped", n, MaxState)
 	}
