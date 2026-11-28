@@ -157,7 +157,7 @@ MUTANTS=(
   "X14|$G/sync.go|for _, id := range others[min(len(others), MaxBaseOthers):] {|for _, id := range others[:0] {|./$G/"
   "X15|$G/ghcache.go|		if hashes(e) == 0 \|\| size() <= MaxState {|		if true {|./$G/"
   "X16|$G/ghcache.go|const MaxState = 128 * 1024|const MaxState = 192 * 1024|./$G/"
-  "X17|$G/ghcache.go|				sy.overLeave(k, e, \"state\", 1)|				_ = e|./$G/"
+  "X17|$G/ghcache.go|				sy.overLeave(k, e, \"state\", 1)|				_, _ = k, e|./$G/"
   "X18|$G/ghcache.go|			e.Pend.Base.Comments = nil|			_ = e|./$G/"
   "Y1|$G/sync.go|			s.endedEdits(k, e, fv.gh, &g)|			_ = fv|./$G/"
   "Y2|$G/sync.go|		if F.Draft != m.Draft {|		if false {|./$G/"

@@ -1,5 +1,5 @@
 # #71w cap mutants: id file line old new package test-regex
-W1-no-evict-for-creates	plugins/github/internal/ghcache/ghcache.go	669	evict(len(withForm)+len(freshOurs)+waiting+admit-limit, false)	evict(0, false)	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm
+W1-no-evict-for-creates	plugins/github/internal/ghcache/ghcache.go	669	evict(len(withForm)+len(freshOurs)+waiting+admit-limit, false)	evict(0*admit, false)	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm
 W2-creates-not-demand	plugins/github/internal/ghcache/ghcache.go	634	waiting := waitingCreates(r.State.Creates)	waiting := 0	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm|TestCapACreateOutranksANewPR
 W3-new-pr-outranks-create	plugins/github/internal/ghcache/ghcache.go	670	room := min(limit-len(withForm)-len(freshOurs)-waiting, prLimit-prsHeld)	room := min(limit-len(withForm)-len(freshOurs), prLimit-prsHeld)	./plugins/github/internal/ghcache	TestCapACreateOutranksANewPR
 W4-no-reserve	plugins/github/internal/ghcache/ghcache.go	662	prLimit -= reserveOurs(p.Config)	prLimit -= 0	./plugins/github/internal/ghcache	TestCapPRTrackingLeavesTheReserve
