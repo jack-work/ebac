@@ -39,7 +39,20 @@ const DefaultClosedTTL = 24 * time.Hour
 const (
 	DefaultMax = 80
 	MaxMax     = 90
+	// DefaultReserveOurs is config.reserve_ours unset (#71w): our created
+	// issues (~400 B each) grew ~11 a day and stalled creates at the cap.
+	DefaultReserveOurs = 30
 )
+
+// reserveOurs is config.reserve_ours, else DefaultReserveOurs, never past
+// the cap.
+func reserveOurs(c *Config) int {
+	r := DefaultReserveOurs
+	if c != nil && c.ReserveOurs != nil {
+		r = *c.ReserveOurs
+	}
+	return min(r, maxForms(c))
+}
 
 // MaxRules bounds config.rules: each rule is at least one search alias.
 const MaxRules = 10
@@ -49,7 +62,12 @@ type Config struct {
 	Repos []string `json:"repos"`
 	Rules []Rule   `json:"rules"`
 	Max   int      `json:"max,omitempty"` // forms kept at most; 0 is DefaultMax
-	TTL   struct {
+	// ReserveOurs is the part of Max that tracked PRs may not take (#71w):
+	// PR tracking uses at most Max - ReserveOurs forms; the issues the cache
+	// created and the creates waiting for a slot use the reserve and any free
+	// slot. nil is DefaultReserveOurs.
+	ReserveOurs *int `json:"reserve_ours,omitempty"`
+	TTL         struct {
 		Closed string `json:"closed,omitempty"` // a Go duration; "" is DefaultClosedTTL
 	} `json:"ttl,omitzero"`
 	// Maintainer, Scope, WriteFields and ApprovePRs are accepted and never
@@ -173,6 +191,9 @@ func ParseConfig(raw json.RawMessage) (*Config, time.Duration, error) {
 	}
 	if c.Max < 1 || c.Max > MaxMax {
 		return nil, 0, fmt.Errorf("config: max %d (want 1-%d)", c.Max, MaxMax)
+	}
+	if c.ReserveOurs != nil && (*c.ReserveOurs < 0 || *c.ReserveOurs > c.Max) {
+		return nil, 0, fmt.Errorf("config: reserve_ours %d (want 0-%d, at most max)", *c.ReserveOurs, c.Max)
 	}
 	ttl := DefaultClosedTTL
 	if c.TTL.Closed != "" {
