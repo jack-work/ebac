@@ -658,7 +658,7 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		ended = kept
 	}
 	limit, prLimit := maxForms(p.Config), maxForms(p.Config)
-	if p.Ours != "" {
+	if creates := p.Ours != ""; creates {
 		prLimit -= reserveOurs(p.Config) // the reserve is for a critic that creates issues
 	}
 	// PR room: past the PR limit an ended PR yields to a new one.
