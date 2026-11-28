@@ -37,7 +37,9 @@ type capWorld struct {
 	asks  map[string]json.RawMessage
 	cfg   *Config
 	ttl   time.Duration
-	order []string // the ended keys, longest-ended first
+	order []string       // the ended keys, longest-ended first
+	reg   map[string]any // the register's sync key as last written (a round writes it only when it changes)
+	regW  int            // rounds that wrote the register
 }
 
 func newCapWorld(t *testing.T, cc capCase, now time.Time) *capWorld {
@@ -118,6 +120,9 @@ func (w *capWorld) run(t *testing.T, now time.Time, wake bool) Result {
 		t.Fatalf("the child set is %d forms, past max %d", len(w.kids), maxForms(w.cfg))
 	}
 	w.st = r.State
+	if r.Register != nil {
+		w.reg, w.regW = r.Register, w.regW+1
+	}
 	return r
 }
 
@@ -131,8 +136,8 @@ func retires(r Result) []string {
 	return out
 }
 
-func waitingAlarm(r Result, id string) any {
-	al, _ := r.Register["alarm"].(map[string]any)
+func waitingAlarm(reg map[string]any, id string) any {
+	al, _ := reg["alarm"].(map[string]any)
 	cw, _ := al["create-waiting"].(map[string]any)
 	return cw[id]
 }
@@ -171,9 +176,11 @@ func TestCapAFullCapOfLiveFormsAlarmsOnceAndSpendsNothing(t *testing.T) {
 	now := time.Date(2026, 11, 28, 2, 0, 0, 0, time.UTC)
 	w := newCapWorld(t, capCase{live: seq(1, 60), ours: seq(500, 30), creates: 1, max: 90, reserve: 30, ttl: 6 * time.Hour}, now)
 	var alarms []string
+	var wrote []int
 	for i := range 3 {
 		r := w.run(t, now.Add(time.Duration(i)*10*time.Second), true)
-		alarms = append(alarms, fmt.Sprint(waitingAlarm(r, "000000000001")))
+		alarms = append(alarms, fmt.Sprint(waitingAlarm(w.reg, "000000000001")))
+		wrote = append(wrote, w.regW)
 		if len(retires(r)) != 0 {
 			t.Fatalf("round %d retired %v: no live form yields to a create", i+1, retires(r))
 		}
@@ -181,8 +188,8 @@ func TestCapAFullCapOfLiveFormsAlarmsOnceAndSpendsNothing(t *testing.T) {
 	if len(w.cg.mutations) != 0 || w.cg.reads != 0 {
 		t.Fatalf("with no slot the create posted %d and listed %d time(s) (want 0 and 0)", len(w.cg.mutations), w.cg.reads)
 	}
-	if alarms[0] != "<nil>" || alarms[1] == "<nil>" || alarms[2] != alarms[1] {
-		t.Fatalf("create-waiting alarm by round: %q (want none, then one value, unchanged)", alarms)
+	if alarms[0] != "<nil>" || alarms[1] == "<nil>" || alarms[2] != alarms[1] || wrote[2] != wrote[1] {
+		t.Fatalf("create-waiting alarm by round: %q, register writes %v (want none, then one value, not written again)", alarms, wrote)
 	}
 	if !strings.Contains(alarms[1], "90") {
 		t.Fatalf("the alarm does not name the cap: %s", alarms[1])
