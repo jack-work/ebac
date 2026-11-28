@@ -603,48 +603,85 @@ func Run(ctx context.Context, gh GitHub, prev State, p Pass) (Result, error) {
 		}
 	}
 
-	// 4. The cap: at most Config.Max forms. Over it, the longest-ended forms
-	// retire first; new PRs past what is left are not admitted (logged).
-	var withForm, fresh, ended []string
+	// 4. The cap: at most Config.Max forms (#71w). The creates waiting for a
+	// slot are demand like new PRs and outrank them: over the cap, the
+	// longest-ended forms retire first (in any round: it needs no read), then
+	// new PRs past what is left are not admitted (logged). For a critic that
+	// creates issues (Ours), PR tracking uses at most Max - reserve_ours
+	// forms; our issues and the creates use the reserve and any free slot.
+	var withForm, freshOurs, freshPRs, ended []string
+	prsHeld := 0
 	for k, e := range ents {
+		_, ours := r.State.OurIssues[k]
 		switch {
 		case hasForm(p, k, e):
 			withForm = append(withForm, k)
+			if !ours {
+				prsHeld++
+			}
 			if !e.EndedAt.IsZero() {
 				ended = append(ended, k)
 			}
+		case ours:
+			freshOurs = append(freshOurs, k)
 		default:
-			fresh = append(fresh, k)
+			freshPRs = append(freshPRs, k)
 		}
 	}
-	if over := len(withForm) + len(fresh) - p.Config.Max; over > 0 && !wakeOnly {
-		sort.Slice(ended, func(i, j int) bool {
-			a, b := ents[ended[i]], ents[ended[j]]
-			if !a.EndedAt.Equal(b.EndedAt) {
-				return a.EndedAt.Before(b.EndedAt)
-			}
-			return ended[i] < ended[j]
-		})
-		for _, k := range ended[:min(over, len(ended))] {
-			retire[k] = true
-			delete(ents, k)
-			over--
+	if wakeOnly {
+		freshPRs = nil // a write-only round admits nothing (it searched nothing)
+	}
+	waiting := waitingCreates(r.State.Creates)
+	sort.Slice(ended, func(i, j int) bool {
+		a, b := ents[ended[i]], ents[ended[j]]
+		if !a.EndedAt.Equal(b.EndedAt) {
+			return a.EndedAt.Before(b.EndedAt)
 		}
-		if over > 0 {
-			// Admit the first rules first, then the newest numbers.
-			sort.Slice(fresh, func(i, j int) bool {
-				a, b := ents[fresh[i]], ents[fresh[j]]
-				if a.Rule != b.Rule {
-					return a.Rule < b.Rule
-				}
-				return a.N > b.N
-			})
-			cutAt := max(len(fresh)-over, 0)
-			for _, k := range fresh[cutAt:] {
+		return ended[i] < ended[j]
+	})
+	evict := func(over int, prsOnly bool) {
+		kept := ended[:0]
+		for _, k := range ended {
+			_, ours := r.State.OurIssues[k]
+			if over > 0 && !(prsOnly && ours) {
+				retire[k] = true
 				delete(ents, k)
+				withForm = slices.DeleteFunc(withForm, func(x string) bool { return x == k })
+				if !ours {
+					prsHeld--
+				}
+				over--
+				continue
 			}
-			logf("cap %d forms: %d PR(s) not tracked: %s", p.Config.Max, len(fresh)-cutAt, strings.Join(fresh[cutAt:], ","))
+			kept = append(kept, k)
 		}
+		ended = kept
+	}
+	limit, prLimit := maxForms(p.Config), maxForms(p.Config)
+	if p.Ours != "" {
+		prLimit -= reserveOurs(p.Config) // the reserve is for a critic that creates issues
+	}
+	// PR room: past the PR limit an ended PR yields to a new one.
+	evict(min(len(freshPRs), prsHeld+len(freshPRs)-prLimit), true)
+	admit := min(len(freshPRs), max(prLimit-prsHeld, 0))
+	// The cap: the held forms, our issues to enrol, the waiting creates and
+	// the new PRs the PR limit admits.
+	evict(len(withForm)+len(freshOurs)+waiting+admit-limit, false)
+	room := min(limit-len(withForm)-len(freshOurs)-waiting, prLimit-prsHeld)
+	if cutAt := max(min(room, len(freshPRs)), 0); cutAt < len(freshPRs) {
+		// Admit the first rules first, then the newest numbers.
+		sort.Slice(freshPRs, func(i, j int) bool {
+			a, b := ents[freshPRs[i]], ents[freshPRs[j]]
+			if a.Rule != b.Rule {
+				return a.Rule < b.Rule
+			}
+			return a.N > b.N
+		})
+		for _, k := range freshPRs[cutAt:] {
+			delete(ents, k)
+		}
+		logf("cap %d forms: %d PR(s) not tracked: %s (PRs at most %d, %d create(s) waiting)", limit,
+			len(freshPRs)-cutAt, strings.Join(freshPRs[cutAt:], ","), prLimit, waiting)
 	}
 
 	// 4b. The entity forms as the core read them: acked alarms clear; a form

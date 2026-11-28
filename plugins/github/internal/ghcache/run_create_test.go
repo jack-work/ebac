@@ -196,21 +196,10 @@ func TestRunTheChildBudgetHoldsWithFreshMintsAndCreates(t *testing.T) {
 	if err := poll.ValidateForms(ghcCritic(copyKids(kids)), &plugin.Reply{Forms: r.Forms}); err != nil {
 		t.Fatalf("the core refuses the round's reply: %v (creates posted: %d)", err, len(cg.mutations))
 	}
-	if len(cg.mutations) != 0 {
-		held, unheld, retires, keysSeen := 0, 0, 0, map[string]int{}
-		for _, f := range r.Forms {
-			keysSeen[f.Key]++
-			switch _, h := kids[f.Key]; {
-			case f.Retire:
-				retires++
-			case h:
-				held++
-			default:
-				unheld++
-			}
-		}
-		t.Fatalf("%d creates posted with no form slot left (70 held + 20 fresh of max 90): %d form writes (%d held, %d new, %d retires, %d distinct keys), max %d, log %v",
-			len(cg.mutations), len(r.Forms), held, unheld, retires, len(keysSeen), c.Max, r.Log)
+	// #71w: the waiting creates outrank the new PRs (the strategist's ruling): the 11 post, the new PRs take
+	// what is left, and the round's child set still holds max 90.
+	if len(cg.mutations) != 11 {
+		t.Fatalf("%d creates posted (want all 11: creates outrank new PRs): log %v", len(cg.mutations), r.Log)
 	}
 	set := copyKids(kids)
 	for _, f := range r.Forms {

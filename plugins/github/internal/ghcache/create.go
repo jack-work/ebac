@@ -69,7 +69,8 @@ type Create struct {
 	URL    string          `json:"url,omitempty"`
 	Key    string          `json:"key,omitempty"` // the minted child key
 	Tries  int             `json:"tries,omitempty"`
-	Rule   string          `json:"rule,omitempty"` // refused: the praxis rule or write-refused
+	Waits  int             `json:"waits,omitempty"` // rounds it found no form slot (#71w)
+	Rule   string          `json:"rule,omitempty"`  // refused: the praxis rule or write-refused
 	Detail string          `json:"detail,omitempty"`
 }
 
@@ -252,6 +253,22 @@ func (c *creator) issues(asks map[string]json.RawMessage) []plugin.FormWrite {
 	return out
 }
 
+// AlarmCreateWaiting is sync.alarm.create-waiting.<praxis id>: a create
+// found no form slot two rounds running (#71w).
+const AlarmCreateWaiting = "create-waiting"
+
+// waitingCreates counts the creates recorded and not yet posted: each wants
+// a form slot this round (Run step 4 makes room for them first).
+func waitingCreates(cs map[string]*Create) int {
+	n := 0
+	for _, cr := range cs {
+		if cr.State == "creating" {
+			n++
+		}
+	}
+	return n
+}
+
 // alarmKindOf: a praxis rule is sync.alarm.praxis.<id>; a disclose or scope
 // refusal is sync.alarm.write-refused.praxis_new.<id>.
 func alarmKindOf(rule string) string {
@@ -352,6 +369,23 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 		cr.State, cr.Rule, cr.Detail = "refused", rule, detail
 		c.regAlarm(alarmKindOf(rule), alarmFieldOf(rule, id), map[string]any{"rule": strings.TrimPrefix(rule, "praxis:"), "detail": detail, "at": c.p.Now.UTC().Format(time.RFC3339)})
 	}
+	// No slot, no spend (#71w): the adopt listing waits with the create. A
+	// create still waiting at its second round is an alarm on the register,
+	// one value for as long as it waits (the register is not rewritten for
+	// it); the cap's ended forms already yielded to it (Run step 4).
+	if c.room() <= 0 {
+		if cr.Waits < 2 {
+			cr.Waits++ // counted to 2 only: a stable state writes nothing new while it waits
+		}
+		c.s.logf("praxis_new %s: no form slot this round (max %d): created when one is free", id, maxForms(c.p.Config))
+		if cr.Waits >= 2 {
+			c.regAlarm(AlarmCreateWaiting, id, map[string]any{"max": maxForms(c.p.Config), "reserve_ours": reserveOurs(c.p.Config),
+				"since": cr.At.UTC().Format(time.RFC3339), "detail": "every form slot holds a live PR or issue: raise config.max (at most 90) or reserve_ours"})
+		}
+		keep()
+		return nil, false
+	}
+	cr.Waits = 0
 	var px map[string]any
 	_ = json.Unmarshal(cr.Praxis, &px)
 	assignee, _ := px["assignee"].(string)
@@ -421,11 +455,6 @@ func (c *creator) finish(id string, cr *Create) ([]plugin.FormWrite, bool) {
 			refuse("disclose", why)
 			return nil, false
 		}
-	}
-	if c.room() <= 0 {
-		c.s.logf("praxis_new %s: no form slot this round (max %d): created when one is free", id, maxForms(c.p.Config))
-		keep()
-		return nil, false
 	}
 	if c.s.writes >= MaxWrites {
 		keep()

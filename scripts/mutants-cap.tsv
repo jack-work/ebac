@@ -1,0 +1,9 @@
+# #71w cap mutants: id file line old new package test-regex
+W1-no-evict-for-creates	plugins/github/internal/ghcache/ghcache.go	669	evict(len(withForm)+len(freshOurs)+waiting+admit-limit, false)	evict(0, false)	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm
+W2-creates-not-demand	plugins/github/internal/ghcache/ghcache.go	634	waiting := waitingCreates(r.State.Creates)	waiting := 0	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm|TestCapACreateOutranksANewPR
+W3-new-pr-outranks-create	plugins/github/internal/ghcache/ghcache.go	670	room := min(limit-len(withForm)-len(freshOurs)-waiting, prLimit-prsHeld)	room := min(limit-len(withForm)-len(freshOurs), prLimit-prsHeld)	./plugins/github/internal/ghcache	TestCapACreateOutranksANewPR
+W4-no-reserve	plugins/github/internal/ghcache/ghcache.go	662	prLimit -= reserveOurs(p.Config)	prLimit -= 0	./plugins/github/internal/ghcache	TestCapPRTrackingLeavesTheReserve
+W5-longest-ended-last	plugins/github/internal/ghcache/ghcache.go	638	return a.EndedAt.Before(b.EndedAt)	return a.EndedAt.After(b.EndedAt)	./plugins/github/internal/ghcache	TestCapAWaitingCreateEvictsTheLongestEndedForm
+W6-list-before-slot	plugins/github/internal/ghcache/create.go	376	if c.room() <= 0 {	if false {	./plugins/github/internal/ghcache	TestCapAFullCapOfLiveFormsAlarmsOnceAndSpendsNothing
+W7-alarm-first-round	plugins/github/internal/ghcache/create.go	381	if cr.Waits >= 2 {	if cr.Waits >= 1 {	./plugins/github/internal/ghcache	TestCapAFullCapOfLiveFormsAlarmsOnceAndSpendsNothing
+W8-reserve-unbounded	plugins/github/internal/ghcache/config.go	195	*c.ReserveOurs < 0 || 		./plugins/github/internal/ghcache	TestCapReserveOursIsBounded

@@ -29,7 +29,7 @@ MUTANTS=(
   "R7|$G/query.go|const DeepBatch = 10|const DeepBatch = 11|./$G/"
   "R8|$G/config.go|HotEvery  = 5 * time.Minute|HotEvery  = 4 * time.Minute|./$G/"
   "N1|$G/ghcache.go|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" {|if len(e.Path) == 2 && e.Type == \"NOT_FOUND\" && false {|./$G/"
-  "N2|$G/ghcache.go|p.Config.Max; over > 0 && !wakeOnly {|p.Config.Max; over > 1000 && !wakeOnly {|./$G/"
+  "N2|$G/ghcache.go|evict(min(len(freshPRs), prsHeld+len(freshPRs)-prLimit), true)|evict(0, true)|./$G/"
   "N3|$G/ghcache.go|if p.Landed < len(prev.Wrote) {|if p.Landed < len(prev.Wrote) && false {|./$G/"
   "N4|$G/ghcache.go|for k := range p.Children {|for k := range map[string]string{} {|./$G/"
   "N5|$G/ghcache.go|if c.want > c.got {|if c.want > c.got && false {|./$G/"
